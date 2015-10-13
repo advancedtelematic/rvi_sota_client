@@ -35,6 +35,14 @@ Now you can run `make docker` from your normal build environment.
 
 Once the sota-client docker image is built (by either of the two methods above), you can run it with `docker run -it --name sota-client -p 9000:9000 --link rvi-client:rvi-client -e RUST_LOG=info advancedtelematic/sota-client`.
 
+### Packaging the SOTA client
+
+[FPM](https://github.com/jordansissel/fpm) is used to package the SOTA client into DEB or RPM packages.
+
+The easiest way to build a package is by using the Dockerfile which has been set up with the correct libraries. The image can be built from the project root with `docker build -t sota-packager docker/pkg`, then executed with `docker run -it --rm -v $PWD:/build sota-packager make rpm`.
+
+Alternatively, assuming FPM and the correct libraries are installed, packages can be built for the same architecture using `make deb` and `make rpm` in the project root.
+
 ### Run the demo
 
 To watch the client in action, you can run a demo with a dummy server. Clone the [rvi_sota_demo](https://github.com/PDXostc/rvi_sota_demo) project, then run `python sota_server.py http://<docker_ip_address>:8801`.
