@@ -1,0 +1,12 @@
+[Unit]
+Description=Sota Client
+After=network.target
+Requires=dbus.service
+After=dbus.service
+
+[Service]
+Type=simple
+ExecStart=/opt/ats/sota_client/sota_client -c /opt/ats/sota_client/client.toml
+
+[Install]
+WantedBy=multi-user.target
