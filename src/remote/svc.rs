@@ -7,7 +7,7 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::thread::sleep_ms;
+use std::time::Duration;
 
 use rustc_serialize::{json, Decodable};
 use time;
@@ -207,7 +207,7 @@ impl ServiceHandler {
     pub fn start_timer(transfers: &Mutex<Transfers>,
                        timeout: i64) {
         loop {
-            sleep_ms(1000);
+            thread::sleep(Duration::from_secs(1));
             let mut transfers = transfers.lock().unwrap();
             transfers.prune(time::get_time().sec, timeout);
         }

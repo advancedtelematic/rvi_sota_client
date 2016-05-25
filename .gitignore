@@ -1,4 +1,3 @@
 target
-Cargo.lock
 docker/sota_client
 docker/sota-installer
