@@ -8,6 +8,7 @@ use std::env;
 
 use super::common::{ConfTreeParser, format_parser_error, stringify, Result};
 use super::client::ClientConfiguration;
+use super::server::ServerConfiguration;
 use super::dbus::DBusConfiguration;
 
 /// Type to encode the full configuration.
@@ -15,6 +16,8 @@ use super::dbus::DBusConfiguration;
 pub struct Configuration {
     /// The `client` section of the configuration
     pub client: ClientConfiguration,
+    /// The `server` section of the configuration
+    pub server: ServerConfiguration,
     /// The `dbus` section of the configuration
     pub dbus: DBusConfiguration
 }
@@ -44,10 +47,12 @@ impl Configuration {
         let tree = try!(parser.parse().ok_or(format_parser_error(&parser)));
 
         let client = try!(ClientConfiguration::parse(&tree));
+        let server = try!(ServerConfiguration::parse(&tree));
         let dbus   = try!(DBusConfiguration::parse(&tree));
 
         Ok(Configuration {
             client: client,
+            server: server,
             dbus: dbus
         })
     }

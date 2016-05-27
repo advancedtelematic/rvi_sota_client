@@ -123,4 +123,6 @@ impl Receiver {
     }
 }
 
-fn get_sender(msg: &Message) -> Option<String> { msg.sender() }
+fn get_sender(msg: &Message) -> Option<String> {
+    msg.sender().map(|s| s.to_string())
+}

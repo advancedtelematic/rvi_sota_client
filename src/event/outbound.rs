@@ -61,6 +61,12 @@ impl UpdateReport {
     }
 }
 
+#[derive(RustcEncodable, Clone)]
+pub struct UpdateResult {
+    pub vin: String,
+    pub update_report: UpdateReport
+}
+
 pub enum OutBoundEvent {
     InitiateDownload(UpdateId),
     AbortDownload(UpdateId),

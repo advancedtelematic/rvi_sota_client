@@ -16,7 +16,9 @@ pub struct ClientConfiguration {
     /// How long to wait for further server messages before the `Transfer` will be dropped.
     pub timeout: Option<i64>,
     /// Index of the RVI service URL, that holds the VIN for this device.
-    pub vin_match: i32
+    pub vin_match: i32,
+    /// Whether to use the HTTP interface to the Sota server instead of RVI
+    pub http: bool,
 }
 
 impl ConfTreeParser<ClientConfiguration> for ClientConfiguration {
@@ -29,13 +31,15 @@ impl ConfTreeParser<ClientConfiguration> for ClientConfiguration {
         let edge_url = try!(get_optional_key(client_tree, "edge_url", "client"));
         let timeout = try!(get_optional_key(client_tree, "timeout", "client"));
         let vin_match = try!(get_optional_key(client_tree, "vin_match", "client"));
+        let http = try!(get_optional_key(client_tree, "http", "client"));
 
         Ok(ClientConfiguration {
             storage_dir: storage_dir,
             rvi_url: rvi_url,
             edge_url: edge_url,
             timeout: timeout,
-            vin_match: vin_match.unwrap_or(2)
+            vin_match: vin_match.unwrap_or(2),
+            http: http.unwrap_or(false)
         })
     }
 }
@@ -45,6 +49,7 @@ impl ConfTreeParser<ClientConfiguration> for ClientConfiguration {
 #[cfg(test)] static EDGE: &'static str = "localhost:9080";
 #[cfg(test)] static TIMEOUT: i64 = 10;
 #[cfg(test)] static VIN: i32 = 3;
+#[cfg(test)] static HTTP: bool = false;
 
 #[cfg(test)]
 pub fn gen_valid_conf() -> String {
@@ -55,7 +60,8 @@ pub fn gen_valid_conf() -> String {
     edge_url = "{}"
     timeout = {}
     vin_match = {}
-    "#, STORAGE, RVI, EDGE, TIMEOUT, VIN)
+    http = {}
+    "#, STORAGE, RVI, EDGE, TIMEOUT, VIN, HTTP)
 }
 
 #[cfg(test)]

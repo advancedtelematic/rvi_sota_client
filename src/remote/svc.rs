@@ -7,14 +7,15 @@ use std::ops::Deref;
 use std::sync::{Arc, Mutex};
 use std::sync::mpsc::Sender;
 use std::thread;
-use std::thread::sleep_ms;
+use std::time::Duration;
 
 use rustc_serialize::{json, Decodable};
 use time;
 
 use event::{Event, UpdateId};
 use event::inbound::InboundEvent;
-use event::outbound::{UpdateReport, InstalledSoftware};
+use event::outbound::{UpdateReport, InstalledSoftware, UpdateResult};
+use genivi::upstream::Upstream;
 
 use super::parm::{NotifyParams, StartParams, ChunkParams, ChunkReceived, FinishParams};
 use super::parm::{ReportParams, AbortParams, ParamHandler};
@@ -74,12 +75,6 @@ struct StartDownload {
 }
 
 #[derive(RustcEncodable, Clone)]
-struct UpdateResult {
-    vin: String,
-    update_report: UpdateReport
-}
-
-#[derive(RustcEncodable, Clone)]
 struct InstalledSoftwareResult {
     vin: String,
     installed_software: InstalledSoftware
@@ -123,8 +118,10 @@ impl RemoteServices {
             update_id: id
         }
     }
+}
 
-    pub fn send_start_download(&self, id: UpdateId) -> Result<String, String> {
+impl Upstream for RemoteServices {
+    fn send_start_download(&mut self, id: UpdateId) -> Result<String, String> {
         self.svcs.iter().next().ok_or(format!("RemoteServices not set"))
             .and_then(|ref svcs| rvi::send_message(
                     &self.url,
@@ -132,7 +129,7 @@ impl RemoteServices {
                     &svcs.start))
     }
 
-    pub fn send_update_report(&self, m: UpdateReport) -> Result<String, String> {
+    fn send_update_report(&mut self, m: UpdateReport) -> Result<String, String> {
         self.svcs.iter().next().ok_or(format!("RemoteServices not set"))
             .and_then(|ref svcs| rvi::send_message(
                     &self.url,
@@ -142,7 +139,7 @@ impl RemoteServices {
                     &svcs.report))
     }
 
-    pub fn send_installed_software(&self, m: InstalledSoftware) -> Result<String, String> {
+    fn send_installed_software(&mut self, m: InstalledSoftware) -> Result<String, String> {
         self.svcs.iter().next().ok_or(format!("RemoteServices not set"))
             .and_then(|ref svcs| rvi::send_message(
                     &self.url,
@@ -207,7 +204,7 @@ impl ServiceHandler {
     pub fn start_timer(transfers: &Mutex<Transfers>,
                        timeout: i64) {
         loop {
-            sleep_ms(1000);
+            thread::sleep(Duration::from_secs(1));
             let mut transfers = transfers.lock().unwrap();
             transfers.prune(time::get_time().sec, timeout);
         }

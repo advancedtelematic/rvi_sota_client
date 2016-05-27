@@ -3,6 +3,7 @@
 use toml;
 use std::result;
 use std::fmt;
+use http::Url;
 
 /// `Result` type used throughout the configuration parser.
 pub type Result<T> = result::Result<T, String>;
@@ -84,6 +85,25 @@ impl ParseTomlValue for i64 {
         -> Result<i64> {
         val.as_integer()
            .ok_or(format!("Key \"{}\" in \"{}\" is not a integer", key, group))
+    }
+}
+
+impl ParseTomlValue for bool {
+    fn parse(val: &toml::Value, key: &str, group: &str)
+        -> Result<bool> {
+        val.as_str().map(|s| s == "true")
+           .ok_or(format!("Key \"{}\" in \"{}\" is not a string", key, group))
+    }
+}
+
+impl ParseTomlValue for Url {
+    fn parse(val: &toml::Value, key: &str, group: &str)
+        -> Result<Url> {
+        val.as_str()
+            .ok_or(format!("Key \"{}\" in \"{}\" is not a string", key, group))
+            .and_then(|s| Url::parse(s).map_err(|_| {
+                format!("Key \"{}\" in \"{}\" is not a valid URL", key, group)
+            }))
     }
 }
 
