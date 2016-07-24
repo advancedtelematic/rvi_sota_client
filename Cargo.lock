@@ -8,7 +8,7 @@ dependencies = [
  "dbus 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "env_logger 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "getopts 0.2.14 (registry+https://github.com/rust-lang/crates.io-index)",
- "hyper 0.9.4 (git+https://github.com/hyperium/hyper)",
+ "hyper 0.9.4 (git+https://github.com/taheris/hyper?branch=fix/openssl-version)",
  "log 0.3.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "nom 1.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "rust-crypto 0.2.36 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -146,7 +146,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "hyper"
 version = "0.9.4"
-source = "git+https://github.com/hyperium/hyper#45eb4f93125e08d4ebe4b8d39dfd5fa3d5173438"
+source = "git+https://github.com/taheris/hyper?branch=fix/openssl-version#f64d7299fd6edd7a4e977c0af88a9d20eb957bf6"
 dependencies = [
  "cookie 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "httparse 1.1.2 (registry+https://github.com/rust-lang/crates.io-index)",
