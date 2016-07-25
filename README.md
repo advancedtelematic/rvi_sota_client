@@ -47,7 +47,7 @@ Variable             | Default value
 
 ### Provisioning
 
-Setting `PROVISION=true` will output a newly generated `ota.toml` to STDOUT then quit, rather than starting the client.
+Setting `PROVISION=true` will output a newly generated `sota.toml` to STDOUT then quit, rather than starting the client.
 
 ### Example
 
@@ -56,7 +56,7 @@ docker run --rm -it --net=host \
   --env OTA_AUTH_URL="http://auth-plus-staging.gw.prod01.advancedtelematic.com" \
   --env OTA_WEB_URL="http://ota-plus-web-staging.gw.prod01.advancedtelematic.com" \
   --env OTA_CORE_URL="http://ota-plus-core-staging.gw.prod01.advancedtelematic.com" \
-  advancedtelematic/ota-plus-client:latest
+  advancedtelematic/sota-client:latest
 ```
 
 The `--net=host` flag is only required if the Docker container needs to communicate with other containers running on the same host.

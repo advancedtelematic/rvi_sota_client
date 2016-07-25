@@ -9,7 +9,7 @@ RestartSec=5
 Restart=on-failure
 Environment="RUST_LOG=info"
 DefaultTimeoutStopSec=5
-ExecStart=/opt/ats/ota_plus_client --config /opt/ats/ota.toml
+ExecStart=/opt/ats/sota_client --config /opt/ats/sota.toml
 
 [Install]
 WantedBy=multi-user.target

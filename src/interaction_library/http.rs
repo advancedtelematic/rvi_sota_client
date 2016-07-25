@@ -23,7 +23,7 @@ impl<C, E> Gateway<C, E> for Http
 {
     fn new(itx: Sender<Interpret<C, E>>) -> Result<Self, String> {
         let itx    = Arc::new(Mutex::new(itx));
-        let addr   = env::var("OTA_PLUS_CLIENT_HTTP_ADDR").unwrap_or("127.0.0.1:8888".to_string());
+        let addr   = env::var("SOTA_HTTP_ADDR").unwrap_or("127.0.0.1:8888".to_string());
 
         let server = match Server::http(&addr.parse().unwrap()) {
             Ok(server) => server,

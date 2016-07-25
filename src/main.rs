@@ -106,7 +106,7 @@ fn main() {
 }
 
 fn setup_logging() {
-    let name    = option_env!("SERVICE_NAME").unwrap_or("ota-plus-client");
+    let name    = option_env!("SERVICE_NAME").unwrap_or("sota_client");
     let version = option_env!("SERVICE_VERSION").unwrap_or("?");
 
     let mut builder = LogBuilder::new();
@@ -148,7 +148,7 @@ fn build_config() -> Config {
     }
 
     let config_file = matches.opt_str("config").unwrap_or_else(|| {
-        env::var("OTA_PLUS_CLIENT_CFG").unwrap_or("/opt/ats/ota/etc/ota.toml".to_string())
+        env::var("SOTA_CONFIG").unwrap_or("/opt/ats/ota/etc/sota.toml".to_string())
     });
     let mut config  = config::load_config(&config_file).unwrap_or_else(|err| exit!("{}", err));
 

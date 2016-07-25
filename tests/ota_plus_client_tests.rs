@@ -17,7 +17,7 @@ fn bin_dir() -> String {
 }
 
 fn client(args: &[&str]) -> String {
-    let output = Command::new(format!("{}/ota_plus_client", bin_dir()))
+    let output = Command::new(format!("{}/sota_client", bin_dir()))
         .args(args)
         .output()
         .unwrap_or_else(|e| panic!("failed to execute child: {}", e));
@@ -37,7 +37,7 @@ fn client_with_config(args: &[&str], cfg: &str) -> String {
 #[test]
 fn help() {
     assert_eq!(client(&["-h"]),
-               format!(r#"Usage: {}/ota_plus_client [options]
+               format!(r#"Usage: {}/sota_client [options]
 
 Options:
     -h, --help          print this help menu

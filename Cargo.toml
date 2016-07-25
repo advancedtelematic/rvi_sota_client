@@ -1,14 +1,16 @@
 [package]
-name = "ota-plus-client"
+name = "sota_client"
 version = "0.1.0"
-authors = ["Txus <txus@advancedtelematic.com>"]
+authors = ["Jerry Trieu <jerry@advancedtelematic.com",
+           "Shaun Taheri <shaun@advancedtelematic.com>",
+           "Stevan Andjelkovic <steven@advancedtelematic.com"]
 
 [lib]
 name = "libotaplus"
 path = "src/lib.rs"
 
 [[bin]]
-name = "ota_plus_client"
+name = "sota_client"
 path = "src/main.rs"
 doc = false
 
