@@ -21,7 +21,7 @@ crossbeam = "0.2.9"
 dbus = "0.3.3"
 env_logger = "0.3.3"
 getopts = "0.2.14"
-hyper = { git = "https://github.com/hyperium/hyper" }
+hyper = { git = "https://github.com/taheris/hyper", branch="fix/openssl-version" }
 log = "0.3.6"
 nom = "1.2.3"
 rust-crypto = "0.2.36"
@@ -31,3 +31,6 @@ time = "0.1.35"
 toml = "0.1.30"
 url = "1.1.1"
 ws = "0.5.0"
+
+[replace]
+"openssl:0.7.14" = { git = "https://github.com/sfackler/rust-openssl" }
