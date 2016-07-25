@@ -2,16 +2,16 @@
 
 set -eo pipefail
 
-PKG_NAME="ota-plus-client_latest"
-WORKING_DIR="/tmp/ota_plus_client_extract_$$"
+PKG_NAME="sota_client_latest"
+WORKING_DIR="/tmp/sota_client_extract_$$"
 
 cd $(dirname $0)
 PKG_SRC_DIR=$(pwd)
 
 function convert_to_rpm {
     mv $dest $dest.deb
-    alien -c -k -r --fix-perms $dest.deb
-    mv ota-plus*.rpm $dest
+    alien -c -k -r --fixperms $dest.deb
+    mv sota*.rpm $dest
 }
 
 function tailor_deb {
@@ -27,11 +27,12 @@ function tailor_deb {
         pkgmanager="rpm"
     fi
 
-    sed -i "s/^client_id = .*$/client_id = \"$OTA_AUTH_CLIENT_ID\"/" $WORKING_DIR/opt/ats/ota.toml
-    sed -i "s/^secret = .*$/secret = \"$OTA_AUTH_SECRET\"/" $WORKING_DIR/opt/ats/ota.toml
-    sed -i "s/^uuid = .*$/uuid = \"$OTA_DEVICE_UUID\"/" $WORKING_DIR/opt/ats/ota.toml
-    sed -i "s/^vin = .*$/vin = \"$OTA_CLIENT_VIN\"/" $WORKING_DIR/opt/ats/ota.toml
-    sed -i "s/^package_manager = .*$/package_manager = \"$pkgmanager\"/" $WORKING_DIR/opt/ats/ota.toml
+    SOTA_TOML="$WORKING_DIR/opt/ats/sota.toml"
+    sed -i "s/^client_id = .*$/client_id = \"$OTA_AUTH_CLIENT_ID\"/" "$SOTA_TOML"
+    sed -i "s/^secret = .*$/secret = \"$OTA_AUTH_SECRET\"/" "$SOTA_TOML"
+    sed -i "s/^uuid = .*$/uuid = \"$OTA_DEVICE_UUID\"/" "$SOTA_TOML"
+    sed -i "s/^vin = .*$/vin = \"$OTA_CLIENT_VIN\"/" "$SOTA_TOML"
+    sed -i "s/^package_manager = .*$/package_manager = \"$pkgmanager\"/" "$SOTA_TOML"
 
     mkdir -p $(dirname $dest)
     echo "Re-packaging contents of $WORKING_DIR/ to $dest"

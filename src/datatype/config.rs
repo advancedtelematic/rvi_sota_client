@@ -240,7 +240,7 @@ mod tests {
     #[test]
     fn parse_example_config() {
         let config = String::new() + AUTH_CONFIG + DEVICE_CONFIG + GATEWAY_CONFIG + OTA_CONFIG;
-        assert_eq!(load_config("ota.toml").unwrap(), parse_config(&config).unwrap());
+        assert_eq!(load_config("sota.toml").unwrap(), parse_config(&config).unwrap());
     }
 
     #[test]

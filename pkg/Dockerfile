@@ -1,7 +1,7 @@
 FROM advancedtelematic/fpm
 
-COPY ota_plus_client /usr/bin/
-COPY ota.toml.template /etc/
+COPY sota_client /usr/bin/
+COPY sota.toml.template /etc/
 COPY start-up.sh /usr/bin/
 
 ENV LANG="en_US.UTF-8"

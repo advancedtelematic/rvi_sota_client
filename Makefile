@@ -13,7 +13,7 @@ all: test deb rpm ## Run tests and make new DEB and RPM packages.
 run: image ## Run the client inside a Docker container.
 	@docker run --rm -it --net=host \
 		--env OTA_NO_AUTH=true \
-		advancedtelematic/rvi-sota-client:latest
+		advancedtelematic/sota-client:latest
 
 clean: ## Remove all compiled libraries, builds and temporary files.
 	@cargo clean
@@ -34,10 +34,10 @@ client-musl: src/ ## Make a statically linked release build of the client.
 		--workdir /build \
 		advancedtelematic/rust:latest \
 		cargo build --release --target=$(MUSL_TARGET)
-	@cp target/$(MUSL_TARGET)/release/ota_plus_client pkg/
+	@cp target/$(MUSL_TARGET)/release/sota_client pkg/
 
 image: client-musl ## Build a Docker image from a statically linked binary.
-	@docker build -t advancedtelematic/rvi-sota-client pkg
+	@docker build -t advancedtelematic/sota-client pkg
 
 define make-pkg
 	@docker run --rm \
@@ -48,7 +48,7 @@ define make-pkg
 		--volume ~/.cargo:/cargo \
 		--volume $(CURDIR):/build \
 		--workdir /build \
-		advancedtelematic/rvi-sota-client:latest \
+		advancedtelematic/sota-client:latest \
 		pkg/pkg.sh $@
 endef
 

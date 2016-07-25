@@ -23,7 +23,7 @@ impl<C, E> Gateway<C, E> for Websocket
 {
     fn new(itx: Sender<Interpret<C, E>>) -> Result<Self, String> {
         let clients = Arc::new(Mutex::new(HashMap::new()));
-        let addr    = env::var("OTA_PLUS_CLIENT_WEBSOCKET_ADDR").unwrap_or("127.0.0.1:3012".to_string());
+        let addr    = env::var("SOTA_WEBSOCKET_ADDR").unwrap_or("127.0.0.1:3012".to_string());
 
         let handler_clients = clients.clone();
         let (start_tx, start_rx) = chan::sync::<Result<(), ws::Error>>(0);

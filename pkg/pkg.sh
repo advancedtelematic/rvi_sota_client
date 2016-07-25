@@ -10,7 +10,7 @@ fi
 
 : "${PACKAGE_VERSION:?'Environment variable PACKAGE_VERSION must be set.'}"
 
-PACKAGE_NAME="${PACKAGE_NAME-ota-plus-client}"
+PACKAGE_NAME="${PACKAGE_NAME-sota_client}"
 PACKAGE_DIR="$(cd "$(dirname "$0")" && pwd)"
 PREFIX=/opt/ats
 
@@ -24,11 +24,11 @@ export OTA_WEBSOCKET="${OTA_WEBSOCKET-true}"
 case $1 in
   "deb" )
     export PACKAGE_MANAGER="deb"
-    PKG_BUILD_OPTS="--deb-systemd ${PACKAGE_DIR}/ota-client.service"
+    PKG_BUILD_OPTS="--deb-systemd ${PACKAGE_DIR}/sota_client.service"
     ;;
   "rpm" )
     export PACKAGE_MANAGER="rpm"
-    PKG_BUILD_OPTS="--rpm-service ${PACKAGE_DIR}/ota-client.service"
+    PKG_BUILD_OPTS="--rpm-service ${PACKAGE_DIR}/sota_client.service"
     ;;
   *)
     echo "unknown package format $1"
@@ -40,7 +40,7 @@ function make_pkg {
   destination=$1
   template=$(mktemp)
 
-  envsubst < "${PACKAGE_DIR}/ota.toml.template" > "${template}"
+  envsubst < "${PACKAGE_DIR}/sota.toml.template" > "${template}"
   if [[ -n "${OTA_NO_AUTH}" ]]; then
     sed -i '1,/\[device\]/{/\[device\]/p;d}' "${template}"
   fi
@@ -55,11 +55,11 @@ function make_pkg {
     --package NAME-VERSION.TYPE \
     --prefix "${PREFIX}" \
     ${PKG_BUILD_OPTS} \
-    "${PACKAGE_DIR}/ota_plus_client=ota_plus_client" \
-    "${template}=ota.toml"
+    "${PACKAGE_DIR}/sota_client=sota_client" \
+    "${template}=sota.toml"
 
   if [ -n "$destination" ]; then
-    mv -f "ota-plus-client*.${PACKAGE_MANAGER}" "${destination}"
+    mv -f "sota_client*.${PACKAGE_MANAGER}" "${destination}"
   fi
   rm -f "${template}"
 }

@@ -51,18 +51,18 @@ else
   export OTA_CREDENTIALS_FILE=${OTA_CREDENTIALS_FILE-/opt/ats/credentials.toml}
 fi
 
-TEMPLATE_PATH=${TEMPLATE_PATH-'/etc/ota.toml.template'}
-OUTPUT_PATH=${OUTPUT_PATH-/etc/ota.toml}
+TEMPLATE_PATH=${TEMPLATE_PATH-'/etc/sota.toml.template'}
+OUTPUT_PATH=${OUTPUT_PATH-/etc/sota.toml}
 
 if [[ -n "${OTA_NO_AUTH}" ]]; then
   sed -i '1,/\[device\]/{/\[device\]/p;d}' "${TEMPLATE_PATH}"
 fi
 
 if [[ -n $PROVISION ]]; then
-  OTA_TOML=$(cat $TEMPLATE_PATH | envsubst )
-  echo "$OTA_TOML"
+  SOTA_TOML=$(cat $TEMPLATE_PATH | envsubst )
+  echo "$SOTA_TOML"
 else
-  OTA_TOML=$(cat $TEMPLATE_PATH | envsubst > $OUTPUT_PATH)
+  SOTA_TOML=$(cat $TEMPLATE_PATH | envsubst > $OUTPUT_PATH)
   cat $OUTPUT_PATH
-  RUST_LOG=${RUST_LOG-debug} ota_plus_client --config=/etc/ota.toml
+  RUST_LOG=${RUST_LOG-debug} sota_client --config=/etc/sota.toml
 fi
