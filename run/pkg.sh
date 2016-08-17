@@ -48,10 +48,10 @@ function make_pkg {
     --name "${PACKAGE_NAME:-sota-client}" \
     --version "${PACKAGE_VERSION}" \
     --package NAME-VERSION.TYPE \
-    --prefix "${PREFIX}" \
     ${PKG_BUILD_OPTS} \
-    "${PACKAGE_DIR}/sota_client=sota_client" \
-    "${template}=sota.toml"
+    "${PACKAGE_DIR}/sota_client=/usr/bin/sota_client" \
+    "${PACKAGE_DIR}/sota_certificates=/etc/sota_certificates" \
+    "${template}=/etc/sota.toml"
 
   if [ -n "$destination" ]; then
     mv -f "sota-client*.${PACKAGE_MANAGER}" "${destination}"
