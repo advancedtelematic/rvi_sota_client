@@ -20,7 +20,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use libotaplus::datatype::{config, Command, Config, Event, SystemInfo};
+use libotaplus::datatype::{Command, Config, Event, SystemInfo};
 use libotaplus::gateway::{Console, DBus, Gateway, Interpret, Http, Websocket};
 use libotaplus::gateway::broadcast::Broadcast;
 use libotaplus::http::{AuthClient, set_ca_certificates};
@@ -94,14 +94,16 @@ fn main() {
 
         let mut rvi = None;
         if config.gateway.dbus {
-            let services = Services::new(config.rvi.clone(), config.device.uuid.clone(), etx.clone());
-            let mut edge = Edge::new(services.clone(), config.rvi.edge.clone(), config.rvi.client.clone());
+            let rvi_cfg  = config.rvi.as_ref().unwrap_or_else(|| exit!("{}", "rvi config required for dbus gateway"));
+            let services = Services::new(rvi_cfg.clone(), config.device.uuid.clone(), etx.clone());
+            let mut edge = Edge::new(services.clone(), rvi_cfg.edge.clone(), rvi_cfg.client.clone());
             scope.spawn(move || edge.start());
             rvi = Some(services);
 
+            let dbus_cfg = config.dbus.as_ref().unwrap_or_else(|| exit!("{}", "dbus config required for dbus gateway"));
             let dbus_itx = itx.clone();
             let dbus_sub = broadcast.subscribe();
-            let mut dbus = DBus { dbus_cfg: config.dbus.clone(), itx: itx.clone() };
+            let mut dbus = DBus { dbus_cfg: dbus_cfg.clone(), itx: itx.clone() };
             scope.spawn(move || dbus.start(dbus_itx, dbus_sub));
         }
 
@@ -198,7 +200,7 @@ fn build_config() -> Config {
     let config_file = matches.opt_str("config").unwrap_or_else(|| {
         env::var("SOTA_CONFIG").unwrap_or_else(|_| exit!("{}", "No config file provided."))
     });
-    let mut config = config::load(&config_file).unwrap_or_else(|err| exit!("{}", err));
+    let mut config  = Config::load(&config_file).unwrap_or_else(|err| exit!("{}", err));
 
     config.auth.as_mut().map(|auth_cfg| {
         matches.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
@@ -212,13 +214,15 @@ fn build_config() -> Config {
         config.core.server = text.parse().unwrap_or_else(|err| exit!("Invalid core-server URL: {}", err));
     });
 
-    matches.opt_str("dbus-name").map(|name| config.dbus.name = name);
-    matches.opt_str("dbus-path").map(|path| config.dbus.path = path);
-    matches.opt_str("dbus-interface").map(|interface| config.dbus.interface = interface);
-    matches.opt_str("dbus-software-manager").map(|mgr| config.dbus.software_manager = mgr);
-    matches.opt_str("dbus-software-manager-path").map(|mgr_path| config.dbus.software_manager_path = mgr_path);
-    matches.opt_str("dbus-timeout").map(|timeout| {
-        config.dbus.timeout = timeout.parse().unwrap_or_else(|err| exit!("Invalid dbus timeout: {}", err));
+    config.dbus.as_mut().map(|dbus_cfg| {
+        matches.opt_str("dbus-name").map(|name| dbus_cfg.name = name);
+        matches.opt_str("dbus-path").map(|path| dbus_cfg.path = path);
+        matches.opt_str("dbus-interface").map(|interface| dbus_cfg.interface = interface);
+        matches.opt_str("dbus-software-manager").map(|mgr| dbus_cfg.software_manager = mgr);
+        matches.opt_str("dbus-software-manager-path").map(|mgr_path| dbus_cfg.software_manager_path = mgr_path);
+        matches.opt_str("dbus-timeout").map(|timeout| {
+            dbus_cfg.timeout = timeout.parse().unwrap_or_else(|err| exit!("Invalid dbus timeout: {}", err));
+        });
     });
 
     matches.opt_str("device-uuid").map(|uuid| config.device.uuid = uuid);
@@ -246,15 +250,17 @@ fn build_config() -> Config {
         config.gateway.websocket = websocket.parse().unwrap_or_else(|err| exit!("Invalid websocket gateway boolean: {}", err));
     });
 
-    matches.opt_str("rvi-client").map(|url| {
-        config.rvi.client = url.parse().unwrap_or_else(|err| exit!("Invalid rvi-client URL: {}", err));
-    });
-    matches.opt_str("rvi-edge").map(|url| {
-        config.rvi.edge = url.parse().unwrap_or_else(|err| exit!("Invalid rvi-edge: {}", err));
-    });
-    matches.opt_str("rvi-storage-dir").map(|dir| config.rvi.storage_dir = dir);
-    matches.opt_str("rvi-timeout").map(|timeout| {
-        config.rvi.timeout = Some(timeout.parse().unwrap_or_else(|err| exit!("Invalid rvi timeout: {}", err)));
+    config.rvi.as_mut().map(|rvi_cfg| {
+        matches.opt_str("rvi-client").map(|url| {
+            rvi_cfg.client = url.parse().unwrap_or_else(|err| exit!("Invalid rvi-client URL: {}", err));
+        });
+        matches.opt_str("rvi-edge").map(|url| {
+            rvi_cfg.edge = url.parse().unwrap_or_else(|err| exit!("Invalid rvi-edge: {}", err));
+        });
+        matches.opt_str("rvi-storage-dir").map(|dir| rvi_cfg.storage_dir = dir);
+        matches.opt_str("rvi-timeout").map(|timeout| {
+            rvi_cfg.timeout = Some(timeout.parse().unwrap_or_else(|err| exit!("Invalid rvi timeout: {}", err)));
+        });
     });
 
     config

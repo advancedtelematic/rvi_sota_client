@@ -6,7 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::io::prelude::*;
 use std::path::Path;
 use toml;
-use toml::{Decoder, Parser, Table};
+use toml::{Decoder, Parser, Table, Value};
 
 use datatype::{Error, SystemInfo, Url};
 use package_manager::PackageManager;
@@ -15,39 +15,53 @@ use package_manager::PackageManager;
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
 pub struct Config {
     pub auth:    Option<AuthConfig>,
-    pub dbus:    DBusConfig,
+    pub core:    CoreConfig,
+    pub dbus:    Option<DBusConfig>,
     pub device:  DeviceConfig,
     pub gateway: GatewayConfig,
-    pub core:    CoreConfig,
-    pub rvi:     RviConfig,
+    pub rvi:     Option<RviConfig>,
 }
 
-pub fn load(path: &str) -> Result<Config, Error> {
-    info!("Loading config file: {}", path);
-    let mut file = try!(File::open(path).map_err(Error::Io));
-    let mut toml = String::new();
-    try!(file.read_to_string(&mut toml));
-    parse(&toml)
-}
+impl Config {
+    pub fn load(path: &str) -> Result<Config, Error> {
+        info!("Loading config file: {}", path);
+        let mut file = try!(File::open(path).map_err(Error::Io));
+        let mut toml = String::new();
+        try!(file.read_to_string(&mut toml));
+        Config::parse(&toml)
+    }
 
-pub fn parse(toml: &str) -> Result<Config, Error> {
-    let table = try!(parse_table(&toml));
+    pub fn parse(toml: &str) -> Result<Config, Error> {
+        let table = try!(parse_table(&toml));
 
-    let auth_cfg = if table.contains_key("auth") {
-        let parsed: AuthConfig = try!(parse_section(&table, "auth"));
-        Some(try!(bootstrap_credentials(parsed)))
-    } else {
-        None
-    };
+        let auth_cfg = if let Some(auth) = table.get("auth") {
+            let parsed = try!(decode_section(auth.clone()));
+            Some(try!(bootstrap_credentials(parsed)))
+        } else {
+            None
+        };
 
-    Ok(Config {
-        auth:    auth_cfg,
-        core:    try!(parse_section(&table, "core")),
-        dbus:    try!(parse_section(&table, "dbus")),
-        device:  try!(parse_section(&table, "device")),
-        rvi:     try!(parse_section(&table, "rvi")),
-        gateway: try!(parse_section(&table, "gateway")),
-    })
+        let dbus_cfg = if let Some(dbus) = table.get("dbus") {
+            Some(try!(decode_section(dbus.clone())))
+        } else {
+            None
+        };
+
+        let rvi_cfg = if let Some(rvi) = table.get("rvi") {
+            Some(try!(decode_section(rvi.clone())))
+        } else {
+            None
+        };
+
+        Ok(Config {
+            auth:    auth_cfg,
+            core:    try!(read_section(&table, "core")),
+            dbus:    dbus_cfg,
+            device:  try!(read_section(&table, "device")),
+            rvi:     rvi_cfg,
+            gateway: try!(read_section(&table, "gateway")),
+        })
+    }
 }
 
 fn parse_table(toml: &str) -> Result<Table, Error> {
@@ -55,11 +69,14 @@ fn parse_table(toml: &str) -> Result<Table, Error> {
     Ok(try!(parser.parse().ok_or_else(move || parser.errors)))
 }
 
-fn parse_section<T: Decodable>(table: &Table, section: &str) -> Result<T, Error> {
-    let section = try!(table.get(section).ok_or_else(|| {
-        Error::Parse(format!("invalid section: {}", section.to_string()))
-    }));
-    let mut decoder = Decoder::new(section.clone());
+fn read_section<T: Decodable>(table: &Table, section: &str) -> Result<T, Error> {
+    let part = try!(table.get(section)
+                    .ok_or_else(|| Error::Parse(format!("invalid section: {}", section))));
+    decode_section(part.clone())
+}
+
+fn decode_section<T: Decodable>(section: Value) -> Result<T, Error> {
+    let mut decoder = Decoder::new(section);
     Ok(try!(T::decode(&mut decoder)))
 }
 
@@ -74,7 +91,7 @@ struct CredentialsFile {
 // current AuthConfig values to a new credentials file otherwise.
 fn bootstrap_credentials(auth_cfg: AuthConfig) -> Result<AuthConfig, Error> {
     let creds = auth_cfg.credentials_file.clone();
-    let path = Path::new(&creds);
+    let path  = Path::new(&creds);
     debug!("bootstrap_credentials: {:?}", path);
 
     let credentials = match File::open(path) {
@@ -82,7 +99,7 @@ fn bootstrap_credentials(auth_cfg: AuthConfig) -> Result<AuthConfig, Error> {
             let mut text = String::new();
             try!(file.read_to_string(&mut text));
             let table = try!(parse_table(&text));
-            try!(parse_section::<CredentialsFile>(&table, "auth"))
+            try!(read_section::<CredentialsFile>(&table, "auth"))
         }
 
         Err(ref err) if err.kind() == ErrorKind::NotFound => {
@@ -303,11 +320,9 @@ mod tests {
     fn parse_default_config() {
         let config = String::new()
             + CORE_CONFIG
-            + DBUS_CONFIG
             + DEVICE_CONFIG
-            + GATEWAY_CONFIG
-            + RVI_CONFIG;
-        assert_eq!(parse(&config).unwrap(), Config::default());
+            + GATEWAY_CONFIG;
+        assert_eq!(Config::parse(&config).unwrap(), Config::default());
     }
 
     #[test]
@@ -319,6 +334,6 @@ mod tests {
             + DEVICE_CONFIG
             + GATEWAY_CONFIG
             + RVI_CONFIG;
-        assert_eq!(load("tests/sota.toml").unwrap(), parse(&config).unwrap());
+        assert_eq!(Config::load("tests/sota.toml").unwrap(), Config::parse(&config).unwrap());
     }
 }

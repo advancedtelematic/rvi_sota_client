@@ -67,9 +67,9 @@ impl<'t> Interpreter<Interpret, Event> for GlobalInterpreter<'t> {
         info!("Interpreter started: {}", interpret.command);
 
         let (multi_tx, multi_rx) = chan::async::<Event>();
-        let outcome = match (&self.token, self.config.auth.is_none()) {
-            (&Some(_), _) | (_, true) => self.authenticated(interpret.command, multi_tx),
-            _                         => self.unauthenticated(interpret.command, multi_tx)
+        let outcome = match (self.token.as_ref(), self.config.auth.is_none()) {
+            (Some(_), _) | (_, true) => self.authenticated(interpret.command, multi_tx),
+            _                        => self.unauthenticated(interpret.command, multi_tx)
         };
 
         let mut response_ev: Option<Event> = None;
