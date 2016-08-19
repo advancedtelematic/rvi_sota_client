@@ -18,8 +18,8 @@ CARGO := $(RUST_IN_DOCKER) cargo
 define make-pkg
 	@docker run --rm \
 		--env-file run/sota.toml.env \
-		--env OTA_AUTH_URL=$(AUTH_SERVER) \
-		--env OTA_CORE_URL=$(CORE_SERVER) \
+		--env AUTH_SERVER=$(AUTH_SERVER) \
+		--env CORE_SERVER=$(CORE_SERVER) \
 		--env PACKAGE_VERSION=$(PACKAGE_VERSION) \
 		--env CARGO_HOME=/cargo \
 		--volume ~/.cargo:/cargo \
