@@ -155,13 +155,14 @@ impl Handler<Stream> for AuthHandler {
         let latency = time::precise_time_ns() as f64 - started as f64;
         debug!("on_response latency: {}ms", (latency / 1e6) as u32);
 
-        self.resp_code = *resp.status();
         if resp.status().is_redirection() {
             self.redirect_request(resp);
             Next::end()
         } else if let None = resp.headers().get::<ContentLength>() {
+            self.send_response(ResponseData { code: *resp.status(), body: Vec::new() });
             Next::end()
         } else {
+            self.resp_code = *resp.status();
             Next::read()
         }
     }
@@ -170,19 +171,9 @@ impl Handler<Stream> for AuthHandler {
         match io::copy(decoder, &mut self.resp_body) {
             Ok(0) => {
                 debug!("on_response_readable body size: {}", self.resp_body.len());
-                let resp = ResponseData {
-                    code: self.resp_code,
-                    body: mem::replace(&mut self.resp_body, Vec::new())
-                };
-
-                if resp.code == StatusCode::Unauthorized || resp.code == StatusCode::Forbidden {
-                    self.resp_tx.send(Response::Error(Error::HttpAuth(resp)));
-                } else if resp.code.is_success() {
-                    self.resp_tx.send(Response::Success(resp));
-                } else {
-                    self.resp_tx.send(Response::Failed(resp));
-                }
-
+                let code = self.resp_code.clone();
+                let body = mem::replace(&mut self.resp_body, Vec::new());
+                self.send_response(ResponseData { code: code, body: body });
                 Next::end()
             }
 
@@ -212,6 +203,16 @@ impl Handler<Stream> for AuthHandler {
 }
 
 impl AuthHandler {
+    fn send_response(&mut self, resp: ResponseData) {
+        if resp.code == StatusCode::Unauthorized || resp.code == StatusCode::Forbidden {
+            self.resp_tx.send(Response::Error(Error::HttpAuth(resp)));
+        } else if resp.code.is_success() {
+            self.resp_tx.send(Response::Success(resp));
+        } else {
+            self.resp_tx.send(Response::Failed(resp));
+        }
+    }
+
     fn redirect_request(&mut self, resp: HyperResponse) {
         match resp.headers().get::<Location>() {
             Some(&Location(ref loc)) => self.req.url.join(loc).map(|url| {
