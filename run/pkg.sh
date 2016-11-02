@@ -16,7 +16,6 @@ PREFIX=/opt/sota
 
 export AUTH_SERVER="${AUTH_SERVER-http://localhost:9001}"
 export CORE_SERVER="${CORE_SERVER-http://localhost:8080}"
-export OTA_CREDENTIALS_FILE="${OTA_CREDENTIALS_FILE-${PREFIX}/credentials.toml}"
 
 case $1 in
   "deb" )

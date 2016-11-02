@@ -2,7 +2,6 @@
 server = "${AUTH_SERVER}"
 client_id = "${AUTH_CLIENT_ID}"
 client_secret = "${AUTH_CLIENT_SECRET}"
-credentials_file = "${AUTH_CREDENTIALS_FILE}"
 
 [core]
 server = "${CORE_SERVER}"

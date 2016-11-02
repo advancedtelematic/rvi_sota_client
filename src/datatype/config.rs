@@ -1,11 +1,6 @@
 use rustc_serialize::Decodable;
-use std::fs;
 use std::fs::File;
-use std::io::ErrorKind;
-use std::os::unix::fs::PermissionsExt;
 use std::io::prelude::*;
-use std::path::Path;
-use toml;
 use toml::{Decoder, Parser, Table};
 
 use datatype::{Error, SocketAddr, Url};
@@ -25,8 +20,7 @@ pub struct Config {
 }
 
 impl Config {
-    /// Read in a toml configuration file using default values for missing
-    /// sections or fields.
+    /// Read a toml config file using default values for missing sections or fields.
     pub fn load(path: &str) -> Result<Config, Error> {
         info!("Loading config file: {}", path);
         let mut file = try!(File::open(path).map_err(Error::Io));
@@ -35,8 +29,7 @@ impl Config {
         Config::parse(&toml)
     }
 
-    /// Parse a toml configuration string using default values for missing
-    /// sections or fields while retaining backwards compatibility.
+    /// Parse a toml config using default values for missing sections or fields.
     pub fn parse(toml: &str) -> Result<Config, Error> {
         let table = try!(parse_table(&toml));
 
@@ -48,12 +41,8 @@ impl Config {
         let mut network: ParsedNetworkConfig      = try!(parse_section(&table, "network"));
         let mut rvi:     Option<ParsedRviConfig>  = try!(maybe_parse_section(&table, "rvi"));
 
-        if let Some(cfg) = auth {
-            auth = Some(try!(bootstrap_credentials(cfg)));
-        }
-
-        try!(apply_transformations(&mut auth, &mut core, &mut dbus, &mut device,
-                                   &mut gateway, &mut network, &mut rvi));
+        try!(backwards_compatibility(&mut auth, &mut core, &mut dbus, &mut device,
+                                     &mut gateway, &mut network, &mut rvi));
 
         Ok(Config {
             auth:    auth.map(|mut cfg| cfg.defaultify()),
@@ -83,69 +72,13 @@ fn maybe_parse_section<T: Decodable>(table: &Table, section: &str) -> Result<Opt
     })
 }
 
-
-#[derive(RustcEncodable, RustcDecodable)]
-struct CredentialsFile {
-    pub client_id:     String,
-    pub client_secret: String,
-}
-
-// Read AuthConfig values from the credentials file if it exists, or write the
-// current AuthConfig values to a new credentials file otherwise.
-fn bootstrap_credentials(auth: ParsedAuthConfig) -> Result<ParsedAuthConfig, Error> {
-    let creds = auth.credentials_file.expect("couldn't get credentials_file");
-    let path  = Path::new(&creds);
-    debug!("bootstrap_credentials: {:?}", path);
-
-    let credentials = match File::open(path) {
-        Ok(mut file) => {
-            let mut text = String::new();
-            try!(file.read_to_string(&mut text));
-            let table = try!(parse_table(&text));
-            let auth  = try!(table.get("auth").ok_or(Error::Config("no [auth] section".to_string())));
-            let mut decoder = Decoder::new(auth.clone());
-            try!(CredentialsFile::decode(&mut decoder))
-        }
-
-        Err(ref err) if err.kind() == ErrorKind::NotFound => {
-            let mut table   = Table::new();
-            let credentials = CredentialsFile {
-                client_id:     auth.client_id.expect("expected client_id"),
-                client_secret: auth.client_secret.expect("expected client_secret")
-            };
-            table.insert("auth".to_string(), toml::encode(&credentials));
-
-            let dir = try!(path.parent().ok_or(Error::Parse("Invalid credentials file path".to_string())));
-            try!(fs::create_dir_all(&dir));
-            let mut file  = try!(File::create(path));
-            let mut perms = try!(file.metadata()).permissions();
-            perms.set_mode(0o600);
-            try!(fs::set_permissions(path, perms));
-            try!(file.write_all(&toml::encode_str(&table).into_bytes()));
-
-            credentials
-        }
-
-        Err(err) => return Err(Error::Io(err))
-    };
-
-    Ok(ParsedAuthConfig {
-        server:           auth.server,
-        client_id:        Some(credentials.client_id),
-        client_secret:    Some(credentials.client_secret),
-        credentials_file: Some(creds.clone()),
-    })
-}
-
-
-// Apply transformations from old to new config fields for backwards compatibility.
-fn apply_transformations(_:      &mut Option<ParsedAuthConfig>,
-                         core:   &mut ParsedCoreConfig,
-                         _:      &mut Option<ParsedDBusConfig>,
-                         device: &mut ParsedDeviceConfig,
-                         _:      &mut ParsedGatewayConfig,
-                         _:      &mut ParsedNetworkConfig,
-                         _:      &mut Option<ParsedRviConfig>) -> Result<(), Error> {
+fn backwards_compatibility(_:      &mut Option<ParsedAuthConfig>,
+                           core:   &mut ParsedCoreConfig,
+                           _:      &mut Option<ParsedDBusConfig>,
+                           device: &mut ParsedDeviceConfig,
+                           _:      &mut ParsedGatewayConfig,
+                           _:      &mut ParsedNetworkConfig,
+                           _:      &mut Option<ParsedRviConfig>) -> Result<(), Error> {
 
     match (device.polling_interval, core.polling_sec) {
         (Some(_), Some(_)) => {
@@ -177,38 +110,34 @@ trait Defaultify<T: Default> {
 /// The [auth] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct AuthConfig {
-    pub server:           Url,
-    pub client_id:        String,
-    pub client_secret:    String,
-    pub credentials_file: String,
+    pub server:        Url,
+    pub client_id:     String,
+    pub client_secret: String,
 }
 
 impl Default for AuthConfig {
     fn default() -> Self {
         AuthConfig {
-            server:           "http://127.0.0.1:9001".parse().unwrap(),
-            client_id:        "client-id".to_string(),
-            client_secret:    "client-secret".to_string(),
-            credentials_file: "/tmp/sota_credentials.toml".to_string(),
+            server:        "http://127.0.0.1:9001".parse().unwrap(),
+            client_id:     "client-id".to_string(),
+            client_secret: "client-secret".to_string()
         }
     }
 }
 
 #[derive(RustcDecodable)]
 struct ParsedAuthConfig {
-    server:           Option<Url>,
-    client_id:        Option<String>,
-    client_secret:    Option<String>,
-    credentials_file: Option<String>,
+    server:        Option<Url>,
+    client_id:     Option<String>,
+    client_secret: Option<String>
 }
 
 impl Default for ParsedAuthConfig {
     fn default() -> Self {
         ParsedAuthConfig {
-            server:           None,
-            client_id:        None,
-            client_secret:    None,
-            credentials_file: None
+            server:        None,
+            client_id:     None,
+            client_secret: None
         }
     }
 }
@@ -217,10 +146,9 @@ impl Defaultify<AuthConfig> for ParsedAuthConfig {
     fn defaultify(&mut self) -> AuthConfig {
         let default = AuthConfig::default();
         AuthConfig {
-            server:           self.server.take().unwrap_or(default.server),
-            client_id:        self.client_id.take().unwrap_or(default.client_id),
-            client_secret:    self.client_secret.take().unwrap_or(default.client_secret),
-            credentials_file: self.credentials_file.take().unwrap_or(default.credentials_file)
+            server:        self.server.take().unwrap_or(default.server),
+            client_id:     self.client_id.take().unwrap_or(default.client_id),
+            client_secret: self.client_secret.take().unwrap_or(default.client_secret)
         }
     }
 }
@@ -576,7 +504,6 @@ mod tests {
         server = "http://127.0.0.1:9001"
         client_id = "client-id"
         client_secret = "client-secret"
-        credentials_file = "/tmp/sota_credentials.toml"
         "#;
 
     const CORE_CONFIG: &'static str =
