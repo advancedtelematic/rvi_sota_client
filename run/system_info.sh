@@ -1,6 +1,6 @@
 #!/bin/bash
 
-INFO=$(lshw -json -sanitize)
+INFO=$(lshw -json)
 
 MANIFEST_PATH=/etc/manifest.xml
 if [ -f $MANIFEST_PATH ]; then
