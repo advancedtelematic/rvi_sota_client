@@ -1,7 +1,9 @@
 use rustc_serialize::{Decoder, Decodable};
+use std::borrow::Cow;
 use std::str::FromStr;
 
 use datatype::{Error, Package, UpdateResultCode};
+use datatype::auth::AccessToken;
 use package_manager::{deb, otb, rpm, thm, tpm};
 
 
@@ -37,12 +39,15 @@ impl PackageManager {
 
     /// Delegates to the package manager specific function for installing a new
     /// package on the device.
-    pub fn install_package(&self, path: &str) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install_package<'t>(&self, mtoken: Option<Cow<'t, AccessToken>>, path: &str) -> Result<InstallOutcome, InstallOutcome> {
         match *self {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
-            PackageManager::TreeHub => thm::install_package(path),
+            PackageManager::TreeHub => {
+                let token = try!(mtoken.ok_or((UpdateResultCode::GENERAL_ERROR, format!("No accesstoken available"))));
+                thm::install_package(token.into_owned(), path)
+            }
             PackageManager::File { ref filename, succeeds } => {
                 tpm::install_package(filename, path, succeeds)
             }
@@ -79,7 +84,7 @@ impl FromStr for PackageManager {
             "off" => Ok(PackageManager::Off),
             "deb" => Ok(PackageManager::Deb),
             "rpm" => Ok(PackageManager::Rpm),
-            "treehub" => Ok(PackageManager::TreeHub),
+            "ostree" => Ok(PackageManager::TreeHub),
 
             file if file.len() > 5 && file[..5].as_bytes() == b"file:" => {
                 Ok(PackageManager::File { filename: file[5..].to_string(), succeeds: true })

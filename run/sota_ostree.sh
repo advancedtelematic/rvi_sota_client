@@ -6,6 +6,7 @@ function print_usage {
     echo "Envirionment variables:"
     echo "PULL_URI: The remote to pull from"
     echo "COMMIT: The commit-hash"
+    echo "AUTHPLUS_ACCESS_TOKEN: The auth-plus access token"
 }
 
 if [ -z "$PULL_URI" ]; then
@@ -20,7 +21,15 @@ if [ -z "$COMMIT" ]; then
     exit 1
 fi
 
-rm /etc/ostree/remotes.d/agl-remote.conf
+if [ -z "$AUTHPLUS_ACCESS_TOKEN" ]; then
+    echo "The auth-plus access token is not specified, set AUTHPLUS_ACCESS_TOKEN env" >&2
+    print_usage
+    exit 1
+fi
+
+HDR="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
+
+rm -f /etc/ostree/remotes.d/agl-remote.conf
 ostree remote add --no-gpg-verify agl-remote "$PULL_URI"
-ostree pull agl-remote "$COMMIT"
+ostree pull agl-remote --http-header="$HDR" "$COMMIT"
 ostree admin deploy "$COMMIT"
