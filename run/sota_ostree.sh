@@ -29,7 +29,7 @@ fi
 
 HDR="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
 
-rm /etc/ostree/remotes.d/agl-remote.conf
+rm -f /etc/ostree/remotes.d/agl-remote.conf
 ostree remote add --no-gpg-verify agl-remote "$PULL_URI"
 ostree pull agl-remote --http-header="$HDR" "$COMMIT"
 ostree admin deploy "$COMMIT"
