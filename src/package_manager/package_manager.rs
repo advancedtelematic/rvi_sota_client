@@ -2,7 +2,7 @@ use rustc_serialize::{Decoder, Decodable};
 use std::str::FromStr;
 
 use datatype::{Error, Package, UpdateResultCode};
-use package_manager::{deb, otb, rpm, tpm};
+use package_manager::{deb, otb, rpm, thm, tpm};
 
 
 /// The outcome when installing a package as a tuple of the `UpdateResultCode`
@@ -16,6 +16,7 @@ pub enum PackageManager {
     Off,
     Deb,
     Rpm,
+    TreeHub,
     File { filename: String, succeeds: bool },
     OSTree { repodir: String }
 }
@@ -28,6 +29,7 @@ impl PackageManager {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::installed_packages(),
             PackageManager::Rpm => rpm::installed_packages(),
+            PackageManager::TreeHub => thm::installed_packages(),
             PackageManager::File { ref filename, .. } => tpm::installed_packages(filename),
             PackageManager::OSTree { ref repodir } => otb::installed_packages(repodir),
         }
@@ -40,6 +42,7 @@ impl PackageManager {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
+            PackageManager::TreeHub => thm::install_package(path),
             PackageManager::File { ref filename, succeeds } => {
                 tpm::install_package(filename, path, succeeds)
             }
@@ -61,6 +64,7 @@ impl PackageManager {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => "deb".to_string(),
             PackageManager::Rpm => "rpm".to_string(),
+            PackageManager::TreeHub => "thm".to_string(),
             PackageManager::File { ref filename, .. } => filename.to_string(),
             PackageManager::OSTree {..} => "otb".to_string(),
         }
@@ -75,6 +79,7 @@ impl FromStr for PackageManager {
             "off" => Ok(PackageManager::Off),
             "deb" => Ok(PackageManager::Deb),
             "rpm" => Ok(PackageManager::Rpm),
+            "treehub" => Ok(PackageManager::TreeHub),
 
             file if file.len() > 5 && file[..5].as_bytes() == b"file:" => {
                 Ok(PackageManager::File { filename: file[5..].to_string(), succeeds: true })

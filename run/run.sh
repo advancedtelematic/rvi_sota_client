@@ -31,6 +31,7 @@ export DEVICE_UUID
         CREDENTIALS=$(http post "${AUTH_SERVER}/clients" \
                            client_name="${DEVICE_VIN}" \
                            grant_types:='["client_credentials"]' \
+                           scope="ota-core.$DEVICE_UUID.write ota-core.$DEVICE_UUID.read" \
                            --check-status --print=b)
         AUTH_CLIENT_ID=$(echo "${CREDENTIALS}" | jq -r .client_id)
         AUTH_CLIENT_SECRET=$(echo "${CREDENTIALS}" | jq -r .client_secret)
