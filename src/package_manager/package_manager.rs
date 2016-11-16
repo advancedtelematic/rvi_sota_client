@@ -84,7 +84,7 @@ impl FromStr for PackageManager {
             "off" => Ok(PackageManager::Off),
             "deb" => Ok(PackageManager::Deb),
             "rpm" => Ok(PackageManager::Rpm),
-            "treehub" => Ok(PackageManager::TreeHub),
+            "ostree" => Ok(PackageManager::TreeHub),
 
             file if file.len() > 5 && file[..5].as_bytes() == b"file:" => {
                 Ok(PackageManager::File { filename: file[5..].to_string(), succeeds: true })
