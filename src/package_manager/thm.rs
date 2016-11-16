@@ -4,6 +4,7 @@ use std::io::prelude::*;
 use std::process::Command;
 
 use datatype::{Error, Package, UpdateResultCode};
+use datatype::auth::AccessToken;
 use package_manager::package_manager::InstallOutcome;
 
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
@@ -19,7 +20,7 @@ struct TreeHubPackage {
     pullUri: String,
 }
 
-pub fn install_package(path: &str) -> Result<InstallOutcome, InstallOutcome> {
+pub fn install_package(token: AccessToken, path: &str) -> Result<InstallOutcome, InstallOutcome> {
     let mut file = try!(File::open(path)
       .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}",e))));
     let mut content = String::new();
@@ -32,6 +33,7 @@ pub fn install_package(path: &str) -> Result<InstallOutcome, InstallOutcome> {
         .env("REF_NAME", pkg.refName)
         .env("DESCRIPTION", pkg.description)
         .env("PULL_URI", pkg.pullUri)
+        .env("AUTHPLUS_ACCESS_TOKEN", token.access_token)
         .output()
         .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("running script {:?}", e))));
 

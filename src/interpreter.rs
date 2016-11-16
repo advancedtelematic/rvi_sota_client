@@ -248,7 +248,7 @@ impl<'t> GlobalInterpreter<'t> {
 
             Command::StartInstall(id) => {
                 etx.send(Event::InstallingUpdate(id.clone()));
-                let _ = sota.install_update(id)
+                let _ = sota.install_update(self.token.clone(), id)
                     .map(|report| etx.send(Event::InstallComplete(report)))
                     .map_err(|report| etx.send(Event::InstallFailed(report)));
             }
