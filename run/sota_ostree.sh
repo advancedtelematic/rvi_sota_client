@@ -29,7 +29,16 @@ fi
 
 HDR="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
 
+mkdir -p /var/sota_ostree/
+
+CUR_COMMIT=$(cat /var/sota_ostee/staging)
+
+if [ "$COMMIT" == "$CUR_COMMIT" ]; then
+    echo "already installed"
+    exit 0
+fi
+
 rm -f /etc/ostree/remotes.d/agl-remote.conf
 ostree remote add --no-gpg-verify agl-remote "$PULL_URI"
 ostree pull agl-remote --http-header="$HDR" "$COMMIT"
-ostree admin deploy "$COMMIT"
+ostree admin deploy "$COMMIT" && echo -n "$COMMIT" > /var/sota_ostree/staging
