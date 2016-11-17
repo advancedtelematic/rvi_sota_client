@@ -31,7 +31,7 @@ HDR="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
 
 mkdir -p /var/sota_ostree/
 
-CUR_COMMIT=$(cat /var/sota_ostee/staging)
+CUR_COMMIT=$(cat /var/sota_ostree/staging)
 
 if [ "$COMMIT" == "$CUR_COMMIT" ]; then
     echo "already installed"
