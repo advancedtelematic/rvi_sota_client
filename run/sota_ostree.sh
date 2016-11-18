@@ -1,5 +1,7 @@
 #!/bin/bash
 
+set -eo pipefail
+
 function print_usage {
     echo "Usage: $(basename $0)"
     echo ""
