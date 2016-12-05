@@ -33,7 +33,7 @@ HDR="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
 
 mkdir -p /var/sota_ostree/
 
-if [ -f /var/sota_ostree/staging ]
+if [ -f /var/sota_ostree/staging ]; then
     CUR_COMMIT=$(cat /var/sota_ostree/staging)
 fi
 
