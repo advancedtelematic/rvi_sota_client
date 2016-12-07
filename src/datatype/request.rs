@@ -1,6 +1,6 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
-use rvi::services::LocalServices;
+use rvi::LocalServices;
 
 
 /// Encapsulate a `String` type as the id of a specific update request.

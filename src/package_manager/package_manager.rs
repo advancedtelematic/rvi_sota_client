@@ -39,14 +39,14 @@ impl PackageManager {
 
     /// Delegates to the package manager specific function for installing a new
     /// package on the device.
-    pub fn install_package<'t>(&self, mtoken: Option<Cow<'t, AccessToken>>, path: &str) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install_package<'t>(&self, path: &str, token: Option<Cow<'t, AccessToken>>) -> Result<InstallOutcome, InstallOutcome> {
         match *self {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
             PackageManager::TreeHub => {
-                let token = try!(mtoken.ok_or((UpdateResultCode::GENERAL_ERROR, format!("No accesstoken available"))));
-                thm::install_package(token.into_owned(), path)
+                let token = try!(token.ok_or((UpdateResultCode::GENERAL_ERROR, "No token available".to_string())));
+                thm::install_package(path, &*token)
             }
             PackageManager::File { ref filename, succeeds } => {
                 tpm::install_package(filename, path, succeeds)
@@ -69,8 +69,8 @@ impl PackageManager {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => "deb".to_string(),
             PackageManager::Rpm => "rpm".to_string(),
-            PackageManager::TreeHub => "thm".to_string(),
             PackageManager::File { ref filename, .. } => filename.to_string(),
+            PackageManager::TreeHub => "ostree".to_string(),
             PackageManager::OSTree {..} => "otb".to_string(),
         }
     }
@@ -114,7 +114,7 @@ pub fn parse_package(line: &str) -> Result<Package, Error> {
                 version: String::from(parts[1])
             })
         },
-        _ => Err(Error::Parse(format!("Couldn't parse package: {}", line)))
+        _ => Err(Error::Parse(format!("couldn't parse package: {}", line)))
     }
 }
 
@@ -146,6 +146,6 @@ mod tests {
     #[test]
     fn test_rejects_bogus_input() {
         assert_eq!(format!("{}", parse_package("foobar").unwrap_err()),
-                   "Parse error: Couldn't parse package: foobar".to_string());
+                   "Parse error: couldn't parse package: foobar".to_string());
     }
 }

@@ -1,16 +1,16 @@
-use chan;
-use chan::{Sender, Receiver};
-use hyper::StatusCode;
-use hyper::net::{HttpStream, Transport};
-use hyper::server::{Server as HyperServer, Request as HyperRequest};
+use chan::{self, Sender};
+use hyper::header::ContentType;
+use hyper::mime::{Mime, SubLevel, TopLevel};
+use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
+use hyper::status::StatusCode;
 use rustc_serialize::json;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::thread;
 use std::sync::{Arc, Mutex};
 
 use datatype::{Command, Event};
 use gateway::{Gateway, Interpret};
-use http::{Server, ServerHandler};
 
 
 /// The `Http` gateway parses `Command`s from the body of incoming requests.
@@ -20,63 +20,62 @@ pub struct Http {
 
 impl Gateway for Http {
     fn initialize(&mut self, itx: Sender<Interpret>) -> Result<(), String> {
-        let itx    = Arc::new(Mutex::new(itx));
-        let server = try!(HyperServer::http(&self.server).map_err(|err| {
+        let server = try!(Server::http(&self.server).map_err(|err| {
             format!("couldn't start http gateway: {}", err)
         }));
 
-        thread::spawn(move || {
-            let (_, server) = server.handle(move |_| HttpHandler::new(itx.clone())).unwrap();
-            server.run();
-        });
-
+        let itx = Arc::new(Mutex::new(itx));
+        thread::spawn(move || server.handle(HttpHandler::new(itx.clone())).unwrap());
         Ok(info!("HTTP gateway listening at http://{}", self.server))
     }
 }
 
 
 struct HttpHandler {
-    itx:         Arc<Mutex<Sender<Interpret>>>,
-    response_rx: Option<Receiver<Event>>
+    itx: Arc<Mutex<Sender<Interpret>>>,
 }
 
 impl HttpHandler {
-    fn new(itx: Arc<Mutex<Sender<Interpret>>>) -> ServerHandler<HttpStream> {
-        ServerHandler::new(Box::new(HttpHandler { itx: itx, response_rx: None }))
+    fn new(itx: Arc<Mutex<Sender<Interpret>>>) -> HttpHandler {
+        HttpHandler { itx: itx }
     }
 }
 
-impl<T: Transport> Server<T> for HttpHandler {
-    fn headers(&mut self, _: HyperRequest<T>) {}
+impl Handler for HttpHandler {
+    fn handle(&self, mut req: HyperRequest, mut resp: HyperResponse) {
+        let mut buf = Vec::new();
+        req.read_to_end(&mut buf).expect("couldn't read HTTP request body");
 
-    fn request(&mut self, body: Vec<u8>) {
-        String::from_utf8(body).map(|body| {
+        let mut response_rx = None;
+        String::from_utf8(buf).map(|body| {
             json::decode::<Command>(&body).map(|cmd| {
                 info!("Incoming HTTP request command: {}", cmd);
-                let (etx, erx)   = chan::async::<Event>();
-                self.response_rx = Some(erx);
+                let (etx, erx) = chan::async::<Event>();
+                response_rx = Some(erx);
                 self.itx.lock().unwrap().send(Interpret {
                     command:     cmd,
                     response_tx: Some(Arc::new(Mutex::new(etx))),
                 });
             }).unwrap_or_else(|err| error!("http request parse json: {}", err))
-        }).unwrap_or_else(|err| error!("http request parse string: {}", err))
-    }
+        }).unwrap_or_else(|err| error!("http request parse string: {}", err));
 
-    fn response(&mut self) -> (StatusCode, Option<Vec<u8>>) {
-        self.response_rx.as_ref().map_or((StatusCode::BadRequest, None), |rx| {
+        let mut body = Vec::new();
+        *resp.status_mut() = response_rx.map_or(StatusCode::BadRequest, |rx| {
             rx.recv().map_or_else(|| {
-                error!("on_response receiver error");
-                (StatusCode::InternalServerError, None)
+                error!("http receiver error");
+                StatusCode::InternalServerError
             }, |event| {
-                json::encode(&event).map(|body| {
-                    (StatusCode::Ok, Some(body.into_bytes()))
+                json::encode(&event).map(|text| {
+                    resp.headers_mut().set(ContentType(Mime(TopLevel::Application, SubLevel::Json, vec![])));
+                    body = text.into_bytes();
+                    StatusCode::Ok
                 }).unwrap_or_else(|err| {
-                    error!("on_response encoding json: {:?}", err);
-                    (StatusCode::InternalServerError, None)
+                    error!("http response encoding: {:?}", err);
+                    StatusCode::InternalServerError
                 })
             })
-        })
+        });
+        resp.send(&body).expect("couldn't send HTTP response");
     }
 }
 
@@ -86,18 +85,17 @@ mod tests {
     use chan;
     use crossbeam;
     use rustc_serialize::json;
-    use std::path::Path;
     use std::thread;
 
     use super::*;
     use gateway::{Gateway, Interpret};
     use datatype::{Command, Event};
-    use http::{AuthClient, Client, Response, set_ca_certificates};
+    use http::{AuthClient, Client, Response, use_default_certificates};
 
 
     #[test]
     fn http_connections() {
-        set_ca_certificates(&Path::new("run/sota_certificates"));
+        use_default_certificates();
 
         let (etx, erx) = chan::sync::<Event>(0);
         let (itx, irx) = chan::sync::<Interpret>(0);

@@ -16,14 +16,14 @@ use getopts::Options;
 use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
 use std::collections::HashMap;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
+use std::ops::Deref;
 use std::time::Duration;
 
 use sota::datatype::{Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient, set_ca_certificates};
+use sota::http::{AuthClient, set_certificates};
 use sota::interpreter::{EventInterpreter, CommandInterpreter, Interpreter, GlobalInterpreter};
 use sota::rvi::{Edge, Services};
 
@@ -40,7 +40,9 @@ fn main() {
     let version = start_logging();
     let config  = build_config(&version);
 
-    set_ca_certificates(Path::new(&config.device.certificates_path));
+    set_certificates(config.device.certificates_path.as_ref().map(Deref::deref),
+                     config.device.p12_path.as_ref().map(Deref::deref),
+                     &config.device.p12_password);
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -74,10 +76,9 @@ fn main() {
         }
 
         if config.gateway.dbus {
-            let dbus_cfg = config.dbus.as_ref().unwrap_or_else(|| exit!(1, "{}", "dbus config required for dbus gateway"));
             let dbus_itx = itx.clone();
             let dbus_sub = broadcast.subscribe();
-            let mut dbus = DBus { dbus_cfg: dbus_cfg.clone(), itx: itx.clone() };
+            let mut dbus = DBus { dbus_cfg: config.dbus.clone(), itx: itx.clone() };
             scope.spawn(move || dbus.start(dbus_itx, dbus_sub));
         }
 
@@ -89,11 +90,9 @@ fn main() {
         }
 
         let rvi_services = if config.gateway.rvi {
-            let _        = config.dbus.as_ref().unwrap_or_else(|| exit!(1, "{}", "dbus config required for rvi gateway"));
-            let rvi_cfg  = config.rvi.as_ref().unwrap_or_else(|| exit!(1, "{}", "rvi config required for rvi gateway"));
             let rvi_edge = config.network.rvi_edge_server.clone();
-            let services = Services::new(rvi_cfg.clone(), config.device.uuid.clone(), etx.clone());
-            let mut edge = Edge::new(services.clone(), rvi_edge, rvi_cfg.client.clone());
+            let services = Services::new(config.rvi.clone(), config.device.uuid.clone(), etx.clone());
+            let mut edge = Edge::new(services.clone(), rvi_edge, config.rvi.client.clone());
             scope.spawn(move || edge.start());
             Some(services)
         } else {
@@ -213,10 +212,11 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "dbus-timeout", "change the dbus installation timeout", "TIMEOUT");
 
     opts.optopt("", "device-uuid", "change the device uuid", "UUID");
-    opts.optopt("", "device-vin", "change the device vin", "VIN");
     opts.optopt("", "device-packages-dir", "change downloaded directory for packages", "PATH");
     opts.optopt("", "device-package-manager", "change the package manager", "MANAGER");
-    opts.optopt("", "device-certificates-path", "change the OpenSSL CA certificates file", "PATH");
+    opts.optopt("", "device-certificates-path", "change the CA certificates path", "PATH");
+    opts.optopt("", "device-p12-path", "change the PKCS12 file path", "PATH");
+    opts.optopt("", "device-p12-password", "change the PKCS12 file password", "PASSWORD");
     opts.optopt("", "device-system-info", "change the system information command", "PATH");
 
     opts.optopt("", "gateway-console", "toggle the console gateway", "BOOL");
@@ -270,27 +270,24 @@ fn build_config(version: &str) -> Config {
         config.core.polling_sec = secs.parse().unwrap_or_else(|err| exit!(1, "Invalid core-polling-sec: {}", err));
     });
 
-    config.dbus.as_mut().map(|dbus_cfg| {
-        matches.opt_str("dbus-name").map(|name| dbus_cfg.name = name);
-        matches.opt_str("dbus-path").map(|path| dbus_cfg.path = path);
-        matches.opt_str("dbus-interface").map(|interface| dbus_cfg.interface = interface);
-        matches.opt_str("dbus-software-manager").map(|mgr| dbus_cfg.software_manager = mgr);
-        matches.opt_str("dbus-software-manager-path").map(|mgr_path| dbus_cfg.software_manager_path = mgr_path);
-        matches.opt_str("dbus-timeout").map(|timeout| {
-            dbus_cfg.timeout = timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid dbus-timeout: {}", err));
-        });
+    matches.opt_str("dbus-name").map(|name| config.dbus.name = name);
+    matches.opt_str("dbus-path").map(|path| config.dbus.path = path);
+    matches.opt_str("dbus-interface").map(|interface| config.dbus.interface = interface);
+    matches.opt_str("dbus-software-manager").map(|mgr| config.dbus.software_manager = mgr);
+    matches.opt_str("dbus-software-manager-path").map(|mgr_path| config.dbus.software_manager_path = mgr_path);
+    matches.opt_str("dbus-timeout").map(|timeout| {
+        config.dbus.timeout = timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid dbus-timeout: {}", err));
     });
 
     matches.opt_str("device-uuid").map(|uuid| config.device.uuid = uuid);
-    matches.opt_str("device-vin").map(|vin| config.device.vin = vin);
     matches.opt_str("device-packages-dir").map(|path| config.device.packages_dir = path);
     matches.opt_str("device-package-manager").map(|text| {
         config.device.package_manager = text.parse().unwrap_or_else(|err| exit!(1, "Invalid device-package-manager: {}", err));
     });
-    matches.opt_str("device-certificates-path").map(|certs| config.device.certificates_path = certs);
-    matches.opt_str("device-system-info").map(|cmd| {
-        config.device.system_info = if cmd.len() > 0 { Some(cmd) } else { None }
-    });
+    matches.opt_str("device-certificates-path").map(|path| config.device.certificates_path = Some(path));
+    matches.opt_str("device-p12-path").map(|path| config.device.p12_path = Some(path));
+    matches.opt_str("device-p12-password").map(|pw| config.device.p12_password = pw);
+    matches.opt_str("device-system-info").map(|cmd| config.device.system_info = Some(cmd));
 
     matches.opt_str("gateway-console").map(|console| {
         config.gateway.console = console.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-console boolean: {}", err));
@@ -321,14 +318,12 @@ fn build_config(version: &str) -> Config {
     matches.opt_str("network-socket-events-path").map(|path| config.network.socket_events_path = path);
     matches.opt_str("network-websocket-server").map(|server| config.network.websocket_server = server);
 
-    config.rvi.as_mut().map(|rvi_cfg| {
-        matches.opt_str("rvi-client").map(|url| {
-            rvi_cfg.client = url.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-client URL: {}", err));
-        });
-        matches.opt_str("rvi-storage-dir").map(|dir| rvi_cfg.storage_dir = dir);
-        matches.opt_str("rvi-timeout").map(|timeout| {
-            rvi_cfg.timeout = Some(timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-timeout: {}", err)));
-        });
+    matches.opt_str("rvi-client").map(|url| {
+        config.rvi.client = url.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-client URL: {}", err));
+    });
+    matches.opt_str("rvi-storage-dir").map(|dir| config.rvi.storage_dir = dir);
+    matches.opt_str("rvi-timeout").map(|timeout| {
+        config.rvi.timeout = Some(timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-timeout: {}", err)));
     });
 
     if matches.opt_present("print") {

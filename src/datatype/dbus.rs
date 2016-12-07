@@ -1,7 +1,7 @@
 use dbus::{FromMessageItem, MessageItem};
 use toml::{decode, Table, Value};
 
-use datatype::update_report::{InstalledFirmware, InstalledPackage, OperationResult};
+use datatype::{InstalledFirmware, InstalledPackage, OperationResult};
 
 
 static MISSING_ARG: &'static str = "Error.MissingArgument";

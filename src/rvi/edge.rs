@@ -1,12 +1,10 @@
-use hyper::StatusCode;
-use hyper::net::{HttpStream, Transport};
-use hyper::server::{Server as HyperServer, Request as HyperRequest};
-use rustc_serialize::json;
-use rustc_serialize::json::Json;
-use std::{mem, str};
+use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
+use hyper::status::StatusCode;
+use rustc_serialize::json::{self, Json};
+use std::str;
+use std::io::Read;
 
 use datatype::{RpcRequest, RpcOk, RpcErr, SocketAddr, Url};
-use http::{Server, ServerHandler};
 use super::services::Services;
 
 
@@ -36,11 +34,10 @@ impl Edge {
 
     /// Start the HTTP server listening for incoming RVI client connections.
     pub fn start(&mut self) {
-        let server = HyperServer::http(&*self.rvi_edge)
+        let server = Server::http(&*self.rvi_edge)
             .unwrap_or_else(|err| panic!("couldn't start rvi edge server: {}", err));
-        let (addr, server) = server.handle(move |_| EdgeHandler::new(self.services.clone())).unwrap();
-        info!("RVI server edge listening at http://{}.", addr);
-        server.run();
+        let _ = server.handle(EdgeHandler::new(self.services.clone())).unwrap();
+        info!("RVI server edge listening at http://{}.", self.rvi_edge);
     }
 }
 
@@ -59,27 +56,22 @@ struct RegisterServiceResponse {
 
 
 struct EdgeHandler {
-    services:  Services,
-    resp_code: StatusCode,
-    resp_body: Option<Vec<u8>>
+    services: Services,
 }
 
 impl EdgeHandler {
-    fn new(services: Services) -> ServerHandler<HttpStream> {
-        ServerHandler::new(Box::new(EdgeHandler {
-            services:  services,
-            resp_code: StatusCode::InternalServerError,
-            resp_body: None,
-        }))
+    fn new(services: Services) -> EdgeHandler {
+        EdgeHandler { services:  services }
     }
 }
 
-impl<T: Transport> Server<T> for EdgeHandler {
-    fn headers(&mut self, _: HyperRequest<T>) {}
+impl Handler for EdgeHandler {
+    fn handle(&self, mut req: HyperRequest, mut resp: HyperResponse) {
+        let mut buf = Vec::new();
+        req.read_to_end(&mut buf).expect("couldn't read Edge HTTP request body");
 
-    fn request(&mut self, body: Vec<u8>) {
         let outcome = || -> Result<RpcOk<i32>, RpcErr> {
-            let text   = try!(str::from_utf8(&body).map_err(|err| RpcErr::parse_error(err.to_string())));
+            let text   = try!(str::from_utf8(&buf).map_err(|err| RpcErr::parse_error(err.to_string())));
             let data   = try!(Json::from_str(text).map_err(|err| RpcErr::parse_error(err.to_string())));
             let object = try!(data.as_object().ok_or(RpcErr::parse_error("not an object".to_string())));
             let id     = try!(object.get("id").and_then(|x| x.as_u64())
@@ -102,22 +94,18 @@ impl<T: Transport> Server<T> for EdgeHandler {
             }
         }();
 
-        match outcome {
+        let body = match outcome {
             Ok(msg)  => {
-                let body = json::encode::<RpcOk<i32>>(&msg).expect("couldn't encode RpcOk response");
-                self.resp_code = StatusCode::Ok;
-                self.resp_body = Some(body.into_bytes());
+                *resp.status_mut() = StatusCode::Ok;
+                json::encode::<RpcOk<i32>>(&msg).expect("couldn't encode RpcOk response")
             }
 
             Err(err) => {
-                let body = json::encode::<RpcErr>(&err).expect("couldn't encode RpcErr response");
-                self.resp_code = StatusCode::BadRequest;
-                self.resp_body = Some(body.into_bytes());
+                *resp.status_mut() = StatusCode::BadRequest;
+                json::encode::<RpcErr>(&err).expect("couldn't encode RpcErr response")
             }
-        }
-    }
+        };
 
-    fn response(&mut self) -> (StatusCode, Option<Vec<u8>>) {
-        (self.resp_code, mem::replace(&mut self.resp_body, None))
+        resp.send(&body.into_bytes()).expect("couldn't send Edge HTTP response");
     }
 }

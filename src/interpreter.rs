@@ -267,8 +267,7 @@ impl<'t> GlobalInterpreter<'t> {
                     client_id:     config.client_id,
                     client_secret: config.client_secret,
                 }));
-                let server = config.server.join("/token").expect("couldn't build authentication url");
-                let token  = try!(authenticate(server, self.http_client.as_ref()));
+                let token = try!(authenticate(config.server.join("/token"), self.http_client.as_ref()));
                 self.set_client(Auth::Token(token.clone()));
                 self.token = Some(token.into());
                 etx.send(Event::Authenticated);

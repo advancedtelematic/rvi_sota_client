@@ -1,28 +1,22 @@
 use chan::Sender;
-use hyper;
-use hyper::{Encoder, Decoder, Next};
-use hyper::client::{Client as HyperClient, Handler, HttpsConnector,
-                    Request as HyperRequest, Response as HyperResponse};
-use hyper::header::{Authorization, Basic, Bearer, ContentLength, ContentType, Location};
+use hyper::client::{Body, Client as HyperClient, ProxyConfig, RedirectPolicy, Response as HyperResponse};
+use hyper::header::{Authorization, Basic, Bearer, ContentLength, ContentType, Headers, Location};
 use hyper::mime::{Attr, Mime, TopLevel, SubLevel, Value};
-use hyper::net::{HttpStream, HttpsStream, OpensslStream};
+use hyper::net::{HttpsConnector};
 use hyper::status::StatusCode;
-use std::{io, mem};
-use std::io::{ErrorKind, Write};
-use std::str;
-use std::time::Duration;
+use std::{env, str};
+use std::io::Read;
 use time;
 
 use datatype::{Auth, Error};
-use http::{Client, get_openssl, Request, Response, ResponseData};
+use http::{Client, Request, Response, ResponseData, TlsClient};
+use url::Url;
 
 
-/// The `AuthClient` will attach an `Authentication` header to each outgoing
-/// HTTP request.
-#[derive(Clone)]
+/// The `AuthClient` will attach an `Authentication` header to each outgoing request.
 pub struct AuthClient {
     auth:   Auth,
-    client: HyperClient<AuthHandler>,
+    client: HyperClient,
 }
 
 impl Default for AuthClient {
@@ -31,68 +25,116 @@ impl Default for AuthClient {
     }
 }
 
+impl Client for AuthClient {
+    fn chan_request(&self, req: Request, resp_tx: Sender<Response>) {
+        resp_tx.send(self.send(AuthRequest::new(&self.auth, req)));
+    }
+}
+
 impl AuthClient {
-    /// Instantiates a new client ready to make requests for the given `Auth` type.
+    /// Create a new HTTP client for the given `Auth` type.
     pub fn from(auth: Auth) -> Self {
-        let client  = HyperClient::<AuthHandler>::configure()
-            .keep_alive(true)
-            .max_sockets(1024)
-            .connector(HttpsConnector::new(get_openssl()))
-            .build()
-            .expect("unable to create a new hyper Client");
+        let mut client = match env::var("HTTP_PROXY") {
+            Ok(ref proxy) => {
+                let url = Url::parse(proxy).unwrap_or_else(|err| panic!("couldn't parse HTTP_PROXY: {}", err));
+                let host = url.host_str().expect("couldn't parse HTTP_PROXY host").to_string();
+                let port = url.port_or_known_default().expect("couldn't parse HTTP_PROXY port");
+                HyperClient::with_proxy_config(ProxyConfig(host, port, TlsClient::new()))
+            },
+
+            Err(_) => HyperClient::with_connector(HttpsConnector::new(TlsClient::new()))
+        };
+
+        client.set_redirect_policy(RedirectPolicy::FollowNone);
 
         AuthClient {
             auth:   auth,
             client: client,
         }
     }
-}
 
-impl Client for AuthClient {
-    fn chan_request(&self, req: Request, resp_tx: Sender<Response>) {
-        info!("{} {}", req.method, req.url);
-        let _ = self.client.request((*req.url).clone(), AuthHandler {
-            auth:      self.auth.clone(),
-            req:       req,
-            timeout:   Duration::from_secs(20),
-            started:   None,
-            written:   0,
-            resp_code: StatusCode::InternalServerError,
-            resp_body: Vec::new(),
-            resp_tx:   resp_tx.clone(),
-        }).map_err(|err| resp_tx.send(Response::Error(Error::from(err))));
+    /// Set the Authorization headers that are used for each outgoing request.
+    pub fn set_auth(&mut self, auth: Auth) {
+        self.auth = auth;
     }
+
+    fn send(&self, req: AuthRequest) -> Response {
+        let started = time::precise_time_ns();
+        let mut request = self.client
+            .request(req.request.method.clone().into(), (*req.request.url).clone())
+            .headers(req.headers.clone());
+
+        if let Some(ref body) = req.request.body {
+            request = request.body(Body::BufBody(body, body.len()));
+            debug!("request length: {} bytes", body.len());
+            if let Ok(text) = str::from_utf8(body) {
+                debug!("request body:\n{}", text);
+            }
+        }
+
+        match request.send() {
+            Ok(mut resp) => {
+                info!("Response status: {}", resp.status);
+                debug!("response headers:\n{}", resp.headers);
+                let latency = time::precise_time_ns() as f64 - started as f64;
+                debug!("response latency: {}ms", (latency / 1e6) as u32);
+
+                let mut body = Vec::new();
+                let data = match resp.read_to_end(&mut body) {
+                    Ok(_)    => ResponseData { code: resp.status, body: body },
+                    Err(err) => return Response::Error(Error::Client(format!("couldn't read response body: {}", err)))
+                };
+                debug!("response body size: {}", data.body.len());
+
+                if resp.status.is_redirection() {
+                    self.redirect_request(&req, resp)
+                } else if resp.status.is_success() {
+                    Response::Success(data)
+                } else if resp.status == StatusCode::Unauthorized || resp.status == StatusCode::Forbidden {
+                    Response::Error(Error::HttpAuth(data))
+                } else {
+                    Response::Failed(data)
+                }
+            }
+
+            Err(err) => Response::Error(Error::Client(format!("couldn't send request: {}", err)))
+        }
+    }
+
+    fn redirect_request(&self, req: &AuthRequest, resp: HyperResponse) -> Response {
+        match resp.headers.get::<Location>() {
+            Some(&Location(ref loc)) => {
+                // drop Authorization header
+                self.send(AuthRequest::new(&Auth::None, Request {
+                    url:    req.request.url.join(loc),
+                    method: req.request.method.clone(),
+                    body:   req.request.body.clone(),
+                }))
+            },
+
+            None => Response::Error(Error::Client("redirect missing Location header".to_string()))
+        }
+    }
+
 }
 
 
-/// The async handler for outgoing HTTP requests.
-#[derive(Debug)]
-pub struct AuthHandler {
-    auth:      Auth,
-    req:       Request,
-    timeout:   Duration,
-    started:   Option<u64>,
-    written:   usize,
-    resp_code: StatusCode,
-    resp_body: Vec<u8>,
-    resp_tx:   Sender<Response>,
+struct AuthRequest {
+    request: Request,
+    headers: Headers,
 }
 
-/// The `AuthClient` may be used for both HTTP and HTTPS connections.
-pub type Stream = HttpsStream<OpensslStream<HttpStream>>;
-
-impl Handler<Stream> for AuthHandler {
-    fn on_request(&mut self, req: &mut HyperRequest) -> Next {
-        req.set_method(self.req.method.clone().into());
-        self.started    = Some(time::precise_time_ns());
-        let mut headers = req.headers_mut();
+impl AuthRequest {
+    fn new(auth: &Auth, req: Request) -> Self {
+        let mut headers = Headers::new();
+        headers.set(ContentLength(req.body.as_ref().map_or(0, |body| body.len() as u64)));
 
         // empty Charset to keep RVI happy
         let mime_json = Mime(TopLevel::Application, SubLevel::Json, vec![]);
         let mime_form = Mime(TopLevel::Application, SubLevel::WwwFormUrlEncoded,
                              vec![(Attr::Charset, Value::Utf8)]);
 
-        match self.auth {
+        match *auth {
             Auth::None => {
                 headers.set(ContentType(mime_json));
             }
@@ -111,123 +153,9 @@ impl Handler<Stream> for AuthHandler {
             }
         };
 
-        self.req.body.as_ref().map_or(Next::read().timeout(self.timeout), |body| {
-            headers.set(ContentLength(body.len() as u64));
-            Next::write()
-        })
-    }
-
-    fn on_request_writable(&mut self, encoder: &mut Encoder<Stream>) -> Next {
-        let body = self.req.body.as_ref().expect("on_request_writable expects a body");
-
-        match encoder.write(&body[self.written..]) {
-            Ok(0) => {
-                info!("Request length: {} bytes", body.len());
-                if let Ok(body) = str::from_utf8(body) {
-                    debug!("body:\n{}", body);
-                }
-                Next::read().timeout(self.timeout)
-            },
-
-            Ok(n) => {
-                self.written += n;
-                trace!("{} bytes written to request body", n);
-                Next::write()
-            }
-
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
-                trace!("retry on_request_writable");
-                Next::write()
-            }
-
-            Err(err) => {
-                error!("unable to write request body: {}", err);
-                self.resp_tx.send(Response::Error(Error::from(err)));
-                Next::remove()
-            }
-        }
-    }
-
-    fn on_response(&mut self, resp: HyperResponse) -> Next {
-        info!("Response status: {}", resp.status());
-        debug!("on_response headers:\n{}", resp.headers());
-        let started = self.started.expect("expected start time");
-        let latency = time::precise_time_ns() as f64 - started as f64;
-        debug!("on_response latency: {}ms", (latency / 1e6) as u32);
-
-        if resp.status().is_redirection() {
-            self.redirect_request(resp);
-            Next::end()
-        } else if let None = resp.headers().get::<ContentLength>() {
-            self.send_response(ResponseData { code: *resp.status(), body: Vec::new() });
-            Next::end()
-        } else {
-            self.resp_code = *resp.status();
-            Next::read()
-        }
-    }
-
-    fn on_response_readable(&mut self, decoder: &mut Decoder<Stream>) -> Next {
-        match io::copy(decoder, &mut self.resp_body) {
-            Ok(0) => {
-                debug!("on_response_readable body size: {}", self.resp_body.len());
-                let code = self.resp_code.clone();
-                let body = mem::replace(&mut self.resp_body, Vec::new());
-                self.send_response(ResponseData { code: code, body: body });
-                Next::end()
-            }
-
-            Ok(n) => {
-                trace!("{} more response bytes read", n);
-                Next::read()
-            }
-
-            Err(ref err) if err.kind() == ErrorKind::WouldBlock => {
-                trace!("retry on_response_readable");
-                Next::read()
-            }
-
-            Err(err) => {
-                error!("unable to read response body: {}", err);
-                self.resp_tx.send(Response::Error(Error::from(err)));
-                Next::end()
-            }
-        }
-    }
-
-    fn on_error(&mut self, err: hyper::Error) -> Next {
-        error!("on_error: {}", err);
-        self.resp_tx.send(Response::Error(Error::from(err)));
-        Next::remove()
-    }
-}
-
-impl AuthHandler {
-    fn send_response(&mut self, resp: ResponseData) {
-        if resp.code == StatusCode::Unauthorized || resp.code == StatusCode::Forbidden {
-            self.resp_tx.send(Response::Error(Error::HttpAuth(resp)));
-        } else if resp.code.is_success() {
-            self.resp_tx.send(Response::Success(resp));
-        } else {
-            self.resp_tx.send(Response::Failed(resp));
-        }
-    }
-
-    fn redirect_request(&mut self, resp: HyperResponse) {
-        match resp.headers().get::<Location>() {
-            Some(&Location(ref loc)) => self.req.url.join(loc).map(|url| {
-                debug!("redirecting to {}", url);
-                // drop Authorization Header on redirect
-                let client  = AuthClient::default();
-                let resp_rx = client.send_request(Request {
-                    url:    url,
-                    method: self.req.method.clone(),
-                    body:   mem::replace(&mut self.req.body, None),
-                });
-                self.resp_tx.send(resp_rx.recv().expect("no redirect_request response"))
-            }).unwrap_or_else(|err| self.resp_tx.send(Response::Error(Error::from(err)))),
-
-            None => self.resp_tx.send(Response::Error((Error::Client("redirect missing Location header".to_string()))))
+        AuthRequest {
+            request: req,
+            headers: headers,
         }
     }
 }
@@ -236,14 +164,13 @@ impl AuthHandler {
 #[cfg(test)]
 mod tests {
     use rustc_serialize::json::Json;
-    use std::path::Path;
 
     use super::*;
-    use http::{Client, Response, set_ca_certificates};
+    use http::{Client, Response, use_default_certificates};
 
 
     fn get_client() -> AuthClient {
-        set_ca_certificates(&Path::new("run/sota_certificates"));
+        use_default_certificates();
         AuthClient::default()
     }
 

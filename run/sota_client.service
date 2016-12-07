@@ -7,7 +7,7 @@ Requires=network-online.target
 [Service]
 RestartSec=5
 Restart=on-failure
-Environment="RUST_LOG=info"
+Environment="RUST_LOG=debug"
 DefaultTimeoutStopSec=5
 ExecStart=/usr/bin/sota_client --config /etc/sota.toml
 

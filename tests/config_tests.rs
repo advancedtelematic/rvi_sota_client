@@ -1,4 +1,4 @@
-use std::env;
+use std::{env, str};
 use std::path::Path;
 use std::process::{Command, Output};
 
@@ -14,23 +14,30 @@ fn run_client(config: &str) -> Output {
         .unwrap_or_else(|err| panic!("couldn't start client: {}", err))
 }
 
+fn test_config(path: &str, is_ok: bool) {
+    let output = run_client(path);
+    if output.status.success() != is_ok {
+        panic!("{}", str::from_utf8(&output.stderr).unwrap_or(""));
+    }
+}
+
 
 #[test]
 fn default_config() {
-    assert!(run_client("tests/toml/default.toml").status.success());
+    test_config("tests/toml/default.toml", true);
 }
 
 #[test]
 fn genivi_config() {
-    assert!(run_client("tests/toml/genivi.toml").status.success());
+    test_config("tests/toml/genivi.toml", true);
 }
 
 #[test]
 fn old_config() {
-    assert!(run_client("tests/toml/old.toml").status.success());
+    test_config("tests/toml/old.toml", true);
 }
 
 #[test]
 fn polling_config() {
-    assert!(run_client("tests/toml/polling.toml").status.success() != true);
+    test_config("tests/toml/polling.toml", false);
 }
