@@ -1,5 +1,4 @@
-use chan;
-use chan::{Sender, Receiver};
+use chan::{self, Sender, Receiver};
 use hyper::status::StatusCode;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::str;
@@ -7,12 +6,13 @@ use std::str;
 use datatype::{Error, Method, Url};
 
 
-/// Abstracts a particular HTTP Client implementation with the basic methods
-/// for sending `Request`s and receiving asynchronous `Response`s via a channel.
+/// Abstracts a particular HTTP Client implementation with methods for sending
+/// `Request`s and receiving asynchronous `Response`s.
 pub trait Client {
     fn chan_request(&self, req: Request, resp_tx: Sender<Response>);
 
     fn send_request(&self, req: Request) -> Receiver<Response> {
+        info!("{} {}", req.method, req.url);
         let (resp_tx, resp_rx) = chan::async::<Response>();
         self.chan_request(req, resp_tx);
         resp_rx
@@ -34,12 +34,12 @@ pub trait Client {
 }
 
 
-/// A simplified representation of an HTTP request for use in the client.
+/// A new HTTP request to be sent from a specific Client.
 #[derive(Debug)]
 pub struct Request {
     pub method: Method,
     pub url:    Url,
-    pub body:   Option<Vec<u8>>
+    pub body:   Option<Vec<u8>>,
 }
 
 

@@ -4,9 +4,8 @@ use std::{fs, io};
 use std::fs::File;
 use std::path::PathBuf;
 
-use datatype::{Config, DownloadComplete, Error, Package,
-               UpdateReport, UpdateRequest, UpdateRequestId, Url};
-use datatype::auth::AccessToken;
+use datatype::{AccessToken, Config, DownloadComplete, Error, Package, UpdateReport,
+               UpdateRequest, UpdateRequestId, Url};
 use http::{Client, Response};
 
 
@@ -24,10 +23,9 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Takes a path and returns a new endpoint of the format
-    /// `<Core server>/api/v1/mydevice/<device-id>$path`.
+    /// `<server>/api/v1/mydevice/<device-id>/<path>`.
     fn endpoint(&self, path: &str) -> Url {
-        let endpoint = format!("/api/v1/mydevice/{}{}", self.config.device.uuid, path);
-        self.config.core.server.join(&endpoint).expect("couldn't build endpoint url")
+        self.config.core.server.join(&format!("/api/v1/mydevice/{}/{}", self.config.device.uuid, path))
     }
 
     /// Returns the path to a package on the device.
@@ -40,8 +38,8 @@ impl<'c, 'h> Sota<'c, 'h> {
 
     /// Query the Core server for any pending or in-flight package updates.
     pub fn get_update_requests(&mut self) -> Result<Vec<UpdateRequest>, Error> {
-        let resp_rx = self.client.get(self.endpoint("/updates"), None);
-        let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't get new updates".to_string())));
+        let resp_rx = self.client.get(self.endpoint("updates"), None);
+        let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't get update requests".to_string())));
         let data    = match resp {
             Response::Success(data) => data,
             Response::Failed(data)  => return Err(Error::from(data)),
@@ -54,7 +52,8 @@ impl<'c, 'h> Sota<'c, 'h> {
 
     /// Download a specific update from the Core server.
     pub fn download_update(&mut self, id: UpdateRequestId) -> Result<DownloadComplete, Error> {
-        let resp_rx = self.client.get(self.endpoint(&format!("/updates/{}/download", id)), None);
+        let url     = self.endpoint(&format!("updates/{}/download", id));
+        let resp_rx = self.client.get(url, None);
         let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't download update".to_string())));
         let data    = match resp {
             Response::Success(data) => data,
@@ -76,7 +75,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     pub fn install_update<'t>(&mut self, token: Option<Cow<'t, AccessToken>>, id: UpdateRequestId) -> Result<UpdateReport, UpdateReport> {
         let ref pacman = self.config.device.package_manager;
         let path       = self.package_path(id.clone()).expect("install_update expects a valid path");
-        pacman.install_package(token, &path).and_then(|(code, output)| {
+        pacman.install_package(&path, token).and_then(|(code, output)| {
             let _ = fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
             Ok(UpdateReport::single(id.clone(), code, output))
         }).or_else(|(code, output)| {
@@ -87,7 +86,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     /// Send a list of the currently installed packages to the Core server.
     pub fn send_installed_packages(&mut self, packages: &Vec<Package>) -> Result<(), Error> {
         let body    = try!(json::encode(packages));
-        let resp_rx = self.client.put(self.endpoint("/installed"), Some(body.into_bytes()));
+        let resp_rx = self.client.put(self.endpoint("installed"), Some(body.into_bytes()));
         let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't send installed packages".to_string())));
 
         match resp {
@@ -100,7 +99,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     /// Send the outcome of a package update to the Core server.
     pub fn send_update_report(&mut self, update_report: &UpdateReport) -> Result<(), Error> {
         let body    = try!(json::encode(&update_report.operation_results));
-        let url     = self.endpoint(&format!("/updates/{}", update_report.update_id));
+        let url     = self.endpoint(&format!("updates/{}", update_report.update_id));
         let resp_rx = self.client.post(url, Some(body.into_bytes()));
         let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't send update report".to_string())));
 
@@ -113,7 +112,7 @@ impl<'c, 'h> Sota<'c, 'h> {
 
     /// Send system information from the device to the Core server.
     pub fn send_system_info(&mut self, body: &str) -> Result<(), Error> {
-        let resp_rx = self.client.put(self.endpoint("/system_info"), Some(body.as_bytes().to_vec()));
+        let resp_rx = self.client.put(self.endpoint("system_info"), Some(body.as_bytes().to_vec()));
         let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't send system info".to_string())));
 
         match resp {

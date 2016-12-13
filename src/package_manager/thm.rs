@@ -7,35 +7,36 @@ use datatype::{Error, Package, UpdateResultCode};
 use datatype::auth::AccessToken;
 use package_manager::package_manager::InstallOutcome;
 
+
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
     Ok(vec![])
 }
 
 #[derive(RustcDecodable)]
-#[allow(non_snake_case)] // RustcDecodable don't allow us to rename fields yet
-struct TreeHubPackage {
-    commit: String,
-    refName: String,
+#[allow(non_snake_case)]
+struct OstreePackage {
+    commit:      String,
+    refName:     String,
     description: String,
-    pullUri: String,
+    pullUri:     String,
 }
 
-pub fn install_package(token: AccessToken, path: &str) -> Result<InstallOutcome, InstallOutcome> {
+pub fn install_package(path: &str, token: &AccessToken) -> Result<InstallOutcome, InstallOutcome> {
     let mut file = try!(File::open(path)
-      .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}",e))));
+                        .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}", err))));
     let mut content = String::new();
     try!(file.read_to_string(&mut content)
-         .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("reading file: {:?}", e))));
-    let pkg = try!(json::decode::<TreeHubPackage>(&content)
+         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("reading file: {:?}", err))));
+    let pkg = try!(json::decode::<OstreePackage>(&content)
                    .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("parsing file {:?}", e))));
     let output = try!(Command::new("sota_ostree.sh")
-        .env("COMMIT", pkg.commit)
-        .env("REF_NAME", pkg.refName)
-        .env("DESCRIPTION", pkg.description)
-        .env("PULL_URI", pkg.pullUri)
-        .env("AUTHPLUS_ACCESS_TOKEN", token.access_token)
-        .output()
-        .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("running script {:?}", e))));
+                      .env("COMMIT", pkg.commit)
+                      .env("REF_NAME", pkg.refName)
+                      .env("DESCRIPTION", pkg.description)
+                      .env("PULL_URI", pkg.pullUri)
+                      .env("AUTHPLUS_ACCESS_TOKEN", token.access_token.clone())
+                      .output()
+                      .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("running script {:?}", e))));
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
@@ -48,6 +49,7 @@ pub fn install_package(token: AccessToken, path: &str) -> Result<InstallOutcome,
                 Ok((UpdateResultCode::OK, stdout))
             }
         }
+
         _ => {
             let out = format!("stdout: {}\nstderr: {}", stdout, stderr);
             Err((UpdateResultCode::INSTALL_FAILED, out))

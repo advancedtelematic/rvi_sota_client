@@ -1,5 +1,4 @@
 use hyper::error::Error as HyperError;
-use hyper::client::ClientError as HyperClientError;
 use rustc_serialize::json::{EncoderError as JsonEncoderError,
                             DecoderError as JsonDecoderError,
                             ParserError as JsonParserError};
@@ -13,7 +12,7 @@ use toml::{ParserError as TomlParserError, DecodeError as TomlDecodeError};
 use url::ParseError as UrlParseError;
 
 use datatype::Event;
-use http::{AuthHandler, ResponseData};
+use http::ResponseData;
 use gateway::Interpret;
 use ws::Error as WebsocketError;
 
@@ -28,7 +27,6 @@ pub enum Error {
     Http(ResponseData),
     HttpAuth(ResponseData),
     Hyper(HyperError),
-    HyperClient(HyperClientError<AuthHandler>),
     Io(IoError),
     JsonDecoder(JsonDecoderError),
     JsonEncoder(JsonEncoderError),
@@ -85,7 +83,6 @@ derive_from!([
 ]);
 
 derive_from!([
-    HyperClientError<AuthHandler> => HyperClient,
     SendError<Event>              => SendEvent,
     SendError<Interpret>          => SendInterpret,
     Vec<TomlParserError>          => TomlParser
@@ -101,7 +98,6 @@ impl Display for Error {
             Error::Http(ref r)          => format!("HTTP client error: {}", r.clone()),
             Error::HttpAuth(ref r)      => format!("HTTP authorization error: {}", r.clone()),
             Error::Hyper(ref e)         => format!("Hyper error: {}", e.clone()),
-            Error::HyperClient(ref e)   => format!("Hyper client error: {}", e.clone()),
             Error::Io(ref e)            => format!("IO error: {}", e.clone()),
             Error::JsonDecoder(ref e)   => format!("Failed to decode JSON: {}", e.clone()),
             Error::JsonEncoder(ref e)   => format!("Failed to encode JSON: {}", e.clone()),

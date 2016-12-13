@@ -1,5 +1,5 @@
-use hyper::method;
-use rustc_serialize::{Decoder, Decodable};
+use hyper::method::Method as HyperMethod;
+use rustc_serialize::{Decoder, Decodable, Encoder, Encodable};
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::{SocketAddr as StdSocketAddr};
@@ -53,9 +53,10 @@ pub struct Url(pub url::Url);
 
 impl Url {
     /// Append the string suffix to this URL.
-    pub fn join(&self, suffix: &str) -> Result<Url, Error> {
-        let url = try!(self.0.join(suffix));
-        Ok(Url(url))
+    pub fn join(&self, suffix: &str) -> Url {
+        Url(self.0.join(suffix).unwrap_or_else(|err| {
+            panic!("couldn't join url {} with suffix {}: {}", self, suffix, err);
+        }))
     }
 }
 
@@ -78,6 +79,12 @@ impl Decodable for Url {
     fn decode<D: Decoder>(d: &mut D) -> Result<Url, D::Error> {
         let s = try!(d.read_str());
         s.parse().map_err(|e: Error| d.error(&e.to_string()))
+    }
+}
+
+impl Encodable for Url {
+    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
+        s.emit_str(&format!("{}", self))
     }
 }
 
@@ -109,12 +116,12 @@ pub enum Method {
     Put,
 }
 
-impl Into<method::Method> for Method {
-    fn into(self) -> method::Method {
+impl Into<HyperMethod> for Method {
+    fn into(self) -> HyperMethod {
         match self {
-            Method::Get  => method::Method::Get,
-            Method::Post => method::Method::Post,
-            Method::Put  => method::Method::Put,
+            Method::Get  => HyperMethod::Get,
+            Method::Post => HyperMethod::Post,
+            Method::Put  => HyperMethod::Put,
         }
     }
 }

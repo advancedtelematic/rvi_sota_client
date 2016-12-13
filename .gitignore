@@ -1,4 +1,2 @@
 target
 run/sota_client
-.cargo
-rust-openssl

@@ -12,11 +12,11 @@ use package_manager::PackageManager;
 pub struct Config {
     pub auth:    Option<AuthConfig>,
     pub core:    CoreConfig,
-    pub dbus:    Option<DBusConfig>,
+    pub dbus:    DBusConfig,
     pub device:  DeviceConfig,
     pub gateway: GatewayConfig,
     pub network: NetworkConfig,
-    pub rvi:     Option<RviConfig>,
+    pub rvi:     RviConfig,
 }
 
 impl Config {
@@ -30,28 +30,28 @@ impl Config {
     }
 
     /// Parse a toml config using default values for missing sections or fields.
+    #[allow(unused_mut)]
     pub fn parse(toml: &str) -> Result<Config, Error> {
         let table = try!(parse_table(&toml));
 
         let mut auth:    Option<ParsedAuthConfig> = try!(maybe_parse_section(&table, "auth"));
         let mut core:    ParsedCoreConfig         = try!(parse_section(&table, "core"));
-        let mut dbus:    Option<ParsedDBusConfig> = try!(maybe_parse_section(&table, "dbus"));
+        let mut dbus:    ParsedDBusConfig         = try!(parse_section(&table, "dbus"));
         let mut device:  ParsedDeviceConfig       = try!(parse_section(&table, "device"));
         let mut gateway: ParsedGatewayConfig      = try!(parse_section(&table, "gateway"));
         let mut network: ParsedNetworkConfig      = try!(parse_section(&table, "network"));
-        let mut rvi:     Option<ParsedRviConfig>  = try!(maybe_parse_section(&table, "rvi"));
+        let mut rvi:     ParsedRviConfig          = try!(parse_section(&table, "rvi"));
 
-        try!(backwards_compatibility(&mut auth, &mut core, &mut dbus, &mut device,
-                                     &mut gateway, &mut network, &mut rvi));
+        try!(backwards_compatibility(&mut core, &mut device));
 
         Ok(Config {
             auth:    auth.map(|mut cfg| cfg.defaultify()),
             core:    core.defaultify(),
-            dbus:    dbus.map(|mut cfg| cfg.defaultify()),
+            dbus:    dbus.defaultify(),
             device:  device.defaultify(),
             gateway: gateway.defaultify(),
             network: network.defaultify(),
-            rvi:     rvi.map(|mut cfg| cfg.defaultify())
+            rvi:     rvi.defaultify(),
         })
     }
 }
@@ -72,13 +72,8 @@ fn maybe_parse_section<T: Decodable>(table: &Table, section: &str) -> Result<Opt
     })
 }
 
-fn backwards_compatibility(_:      &mut Option<ParsedAuthConfig>,
-                           core:   &mut ParsedCoreConfig,
-                           _:      &mut Option<ParsedDBusConfig>,
-                           device: &mut ParsedDeviceConfig,
-                           _:      &mut ParsedGatewayConfig,
-                           _:      &mut ParsedNetworkConfig,
-                           _:      &mut Option<ParsedRviConfig>) -> Result<(), Error> {
+fn backwards_compatibility(core:   &mut ParsedCoreConfig,
+                           device: &mut ParsedDeviceConfig) -> Result<(), Error> {
 
     match (device.polling_interval, core.polling_sec) {
         (Some(_), Some(_)) => {
@@ -267,10 +262,11 @@ impl Defaultify<DBusConfig> for ParsedDBusConfig {
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct DeviceConfig {
     pub uuid:              String,
-    pub vin:               String,
     pub packages_dir:      String,
     pub package_manager:   PackageManager,
-    pub certificates_path: String,
+    pub certificates_path: Option<String>,
+    pub p12_path:          Option<String>,
+    pub p12_password:      String,
     pub system_info:       Option<String>,
 }
 
@@ -278,11 +274,12 @@ impl Default for DeviceConfig {
     fn default() -> DeviceConfig {
         DeviceConfig {
             uuid:              "123e4567-e89b-12d3-a456-426655440000".to_string(),
-            vin:               "V1234567890123456".to_string(),
             packages_dir:      "/tmp/".to_string(),
             package_manager:   PackageManager::Off,
-            certificates_path: "/tmp/sota_certificates".to_string(),
-            system_info:       Some("system_info.sh".to_string())
+            certificates_path: None,
+            p12_path:          None,
+            p12_password:      "".to_string(),
+            system_info:       None,
         }
     }
 }
@@ -290,11 +287,12 @@ impl Default for DeviceConfig {
 #[derive(RustcDecodable)]
 struct ParsedDeviceConfig {
     pub uuid:              Option<String>,
-    pub vin:               Option<String>,
     pub packages_dir:      Option<String>,
     pub package_manager:   Option<PackageManager>,
     pub polling_interval:  Option<u64>,
     pub certificates_path: Option<String>,
+    pub p12_path:          Option<String>,
+    pub p12_password:      Option<String>,
     pub system_info:       Option<String>,
 }
 
@@ -302,11 +300,12 @@ impl Default for ParsedDeviceConfig {
     fn default() -> Self {
         ParsedDeviceConfig {
             uuid:              None,
-            vin:               None,
             packages_dir:      None,
             package_manager:   None,
             polling_interval:  None,
             certificates_path: None,
+            p12_path:          None,
+            p12_password:      None,
             system_info:       None,
         }
     }
@@ -317,10 +316,11 @@ impl Defaultify<DeviceConfig> for ParsedDeviceConfig {
         let default = DeviceConfig::default();
         DeviceConfig {
             uuid:              self.uuid.take().unwrap_or(default.uuid),
-            vin:               self.vin.take().unwrap_or(default.vin),
             packages_dir:      self.packages_dir.take().unwrap_or(default.packages_dir),
             package_manager:   self.package_manager.take().unwrap_or(default.package_manager),
-            certificates_path: self.certificates_path.take().unwrap_or(default.certificates_path),
+            certificates_path: self.certificates_path.take().or(default.certificates_path),
+            p12_path:          self.p12_path.take().or(default.p12_path),
+            p12_password:      self.p12_password.take().unwrap_or(default.p12_password),
             system_info:       self.system_info.take().or(default.system_info),
         }
     }
@@ -403,7 +403,7 @@ impl Default for NetworkConfig {
     fn default() -> NetworkConfig {
         NetworkConfig {
             http_server:          "127.0.0.1:8888".parse().unwrap(),
-            rvi_edge_server:      "127.0.0.1:9080".parse().unwrap(),
+            rvi_edge_server:      "127.0.0.1:9999".parse().unwrap(),
             socket_commands_path: "/tmp/sota-commands.socket".to_string(),
             socket_events_path:   "/tmp/sota-events.socket".to_string(),
             websocket_server:     "127.0.0.1:3012".to_string()
@@ -529,11 +529,8 @@ mod tests {
         r#"
         [device]
         uuid = "123e4567-e89b-12d3-a456-426655440000"
-        vin = "V1234567890123456"
         packages_dir = "/tmp/"
         package_manager = "off"
-        certificates_path = "/tmp/sota_certificates"
-        system_info = "system_info.sh"
         "#;
 
     const GATEWAY_CONFIG: &'static str =
@@ -551,7 +548,7 @@ mod tests {
         r#"
         [network]
         http_server = "127.0.0.1:8888"
-        rvi_edge_server = "127.0.0.1:9080"
+        rvi_edge_server = "127.0.0.1:9999"
         socket_commands_path = "/tmp/sota-commands.socket"
         socket_events_path = "/tmp/sota-events.socket"
         websocket_server = "127.0.0.1:3012"

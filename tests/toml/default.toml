@@ -18,11 +18,8 @@ timeout = 60
 
 [device]
 uuid = "123e4567-e89b-12d3-a456-426655440000"
-vin = "V1234567890123456"
 packages_dir = "/tmp/"
 package_manager = "off"
-certificates_path = "/tmp/sota_certificates"
-system_info = "system_info.sh"
 
 [gateway]
 console = false
@@ -34,7 +31,7 @@ websocket = false
 
 [network]
 http_server = "127.0.0.1:8888"
-rvi_edge_server = "127.0.0.1:9080"
+rvi_edge_server = "127.0.0.1:9999"
 socket_commands_path = "/tmp/sota-commands.socket"
 socket_events_path = "/tmp/sota-events.socket"
 websocket_server = "127.0.0.1:3012"
