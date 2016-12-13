@@ -32,10 +32,10 @@ function make_pkg {
   dest="$1"
   bin_dir="${BIN_DIR:-/usr/bin}"
   config_dir="${CONFIG_DIR:-/etc}"
-  config_file="${CONFIG_FILE:-${cwd}/../tests/toml/default.toml}"
+  config_path="${CONFIG_PATH:-${cwd}/../tests/toml/default.toml}"
   toml_file=$(mktemp)
 
-  cp "${config_file}" "${toml_file}"
+  cp "${config_path}" "${toml_file}"
   chmod 600 "${toml_file}"
 
   # FIXME: better substitutions with rq
