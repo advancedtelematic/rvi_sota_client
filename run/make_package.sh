@@ -1,6 +1,6 @@
 #!/bin/bash
 
-set -eo pipefail
+set -xeo pipefail
 
 
 if [ $# -lt 1 ]; then
@@ -10,7 +10,6 @@ if [ $# -lt 1 ]; then
 fi
 
 cwd="$(cd "$(dirname "$0")" && pwd)"
-config_file="${CONFIG_FILE:-${CWD}/../tests/toml/default.toml}"
 : "${PACKAGE_VERSION:?}" # check package version is set
 
 case $1 in
@@ -30,12 +29,13 @@ shift
 
 
 function make_pkg {
-  dest=$1
+  dest="$1"
   bin_dir="${BIN_DIR:-/usr/bin}"
   config_dir="${CONFIG_DIR:-/etc}"
+  config_file="${CONFIG_FILE:-${cwd}/../tests/toml/default.toml}"
   toml_file=$(mktemp)
 
-  cp "${CONFIG_FILE}" "${toml_file}"
+  cp "${config_file}" "${toml_file}"
   chmod 600 "${toml_file}"
 
   # FIXME: better substitutions with rq
@@ -58,7 +58,7 @@ function make_pkg {
     "${toml_file}=${config_dir}/sota.toml"
 
   [[ -n "${dest}" ]] && mv -f "sota-client*.${pac_man}" "${dest}"
-  rm -f "${toml}"
+  rm -f "${toml_file}"
 }
 
 make_pkg $*
