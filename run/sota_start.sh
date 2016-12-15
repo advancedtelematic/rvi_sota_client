@@ -5,6 +5,7 @@ set -eo pipefail
 
 CONFIG_PATH="${CONFIG_PATH:-/tmp/sota.toml}"
 AUTH_SERVER="${AUTH_SERVER:-http://localhost:9001}"
+CORE_SERVER="${CORE_SERVER:-http://localhost:8001}"
 REGISTRY_SERVER="${REGISTRY_SERVER:-http://localhost:8083}"
 PACKAGE_MANAGER="${PACKAGE_MANAGER:-deb}"
 
@@ -29,6 +30,9 @@ function generate_config() {
     -d "{ \"deviceName\": \"${vin}\", \"deviceId\": \"${vin}\", \"deviceType\": \"Vehicle\" }" | tr -d '"')}
 
   cat << EOF > "${CONFIG_PATH}"
+[core]
+server = "${CORE_SERVER}"
+
 [device]
 uuid = "${uuid}"
 package_manager = "${PACKAGE_MANAGER}"
