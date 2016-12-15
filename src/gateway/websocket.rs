@@ -122,7 +122,6 @@ mod tests {
 
 
     #[test]
-    #[ignore] // FIXME: wait for https://github.com/housleyjk/ws-rs/issues/64
     fn websocket_connections() {
         let (etx, erx) = chan::sync::<Event>(0);
         let (itx, irx) = chan::sync::<Interpret>(0);

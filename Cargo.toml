@@ -33,4 +33,4 @@ time = "0.1.35"
 toml = "0.2.1"
 unix_socket = "0.5.0"
 url = "1.2.1"
-ws = "0.5.3"
+ws = { git = "https://github.com/taheris/ws-rs", branch = "openssl-0.9" }
