@@ -1,11 +1,16 @@
-# target client binary format
-TARGET := x86_64-unknown-linux-gnu
-
 # set version for client logs and new packages
 SOTA_VERSION    := $(shell git rev-parse HEAD | cut -c-7)
 PACKAGE_VERSION := $(shell git describe --tags | cut -c2-)
 
-DOCKER := \
+# docker images
+IMAGE_RUST := advancedtelematic/rust:x86-1.10.0
+IMAGE_SOTA := advancedtelematic/sota-client:latest
+IMAGE_FPM  := advancedtelematic/fpm:latest
+
+# target client binary format
+TARGET := x86_64-unknown-linux-gnu
+
+DOCKER_RUN := \
 	@docker run --rm \
 		--env RUST_LOG=$(RUST_LOG) \
 		--env SOTA_VERSION=$(SOTA_VERSION) \
@@ -15,16 +20,12 @@ DOCKER := \
 		--env CORE_SERVER=$(CORE_SERVER) \
 		--env REGISTRY_SERVER=$(REGISTRY_SERVER) \
 		--env DEVICE_UUID=$(DEVICE_UUID) \
-		--env CARGO_HOME=/cargo \
-		--volume ~/.cargo:/cargo \
+		--volume ~/.cargo/git:/root/.cargo/git \
+		--volume ~/.cargo/registry:/root/.cargo/registry \
 		--volume $(CURDIR):/src \
 		--workdir /src
 
-CARGO := $(DOCKER) advancedtelematic/rust:latest cargo
-
-define make-pkg
-	$(DOCKER) advancedtelematic/fpm:latest run/make_package.sh $@
-endef
+CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
 
 .PHONY: help new old clean test doc client image deb rpm sota-version package-version
@@ -34,10 +35,10 @@ help:
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%16s\033[0m : %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
 new: image ## Generate a new config then run the client.
-	$(DOCKER) --net=host advancedtelematic/sota-client
+	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
 old: image ## Use a config file at `./sota.toml` to run the client.
-	$(DOCKER) --net=host -v $(CURDIR)/sota.toml:/tmp/sota.toml advancedtelematic/sota-client
+	$(DOCKER_RUN) --net=host --volume $(CURDIR)/sota.toml:/tmp/sota.toml $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
 	$(CARGO) test --target=$(TARGET)
@@ -57,10 +58,10 @@ image: client ## Build a Docker image for running the client.
 	@docker build --tag advancedtelematic/sota-client run
 
 deb: client ## Create a new DEB package of the client.
-	$(make-pkg)
+	$(DOCKER_RUN) $(IMAGE_FPM) run/make_package.sh deb
 
 rpm: client ## Create a new RPM package of the client.
-	$(make-pkg)
+	$(DOCKER_RUN) $(IMAGE_FPM) run/make_package.sh rpm
 
 sota-version: ## Print the version displayed inside the sota client logs.
 	@echo $(SOTA_VERSION)
