@@ -57,7 +57,7 @@ function make_pkg {
     "${cwd}/sota_certificates=${config_dir}/sota_certificates" \
     "${toml_file}=${config_dir}/sota.toml"
 
-  [[ -n "${dest}" ]] && mv -f "sota-client*.${pac_man}" "${dest}"
+  [[ -n "${dest}" ]] && mv -f sota-client*.${pac_man} "${dest}"
   rm -f "${toml_file}"
 }
 
