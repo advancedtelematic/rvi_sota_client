@@ -20,6 +20,7 @@ timeout = 60
 uuid = "123e4567-e89b-12d3-a456-426655440000"
 packages_dir = "/tmp/"
 package_manager = "off"
+certificates_path = "/usr/local/etc/sota_certificates"
 
 [gateway]
 console = false
