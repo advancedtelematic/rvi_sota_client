@@ -43,8 +43,9 @@ pub trait Interpreter<I, O> {
 /// The `EventInterpreter` listens for `Event`s and optionally responds with
 /// `Command`s that may be sent to the `CommandInterpreter`.
 pub struct EventInterpreter {
-    pub pacman:  PackageManager,
-    pub sysinfo: Option<String>,
+    pub pacman:        PackageManager,
+    pub auto_download: bool,
+    pub sysinfo:       Option<String>,
 }
 
 impl Interpreter<Event, Command> for EventInterpreter {
@@ -71,7 +72,9 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 for request in requests {
                     let id = request.requestId.clone();
                     match request.status {
-                        Status::Pending => ctx.send(Command::StartDownload(id)),
+                        Status::Pending if self.auto_download => {
+                            ctx.send(Command::StartDownload(id));
+                        },
 
                         Status::InFlight if self.pacman != PackageManager::Off => {
                             if self.pacman.is_installed(&request.packageId) {

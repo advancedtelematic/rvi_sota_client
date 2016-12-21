@@ -124,11 +124,13 @@ fn main() {
         let event_sub = broadcast.subscribe();
         let event_ctx = ctx.clone();
         let event_mgr = config.device.package_manager.clone();
+        let event_dl  = config.device.auto_download.clone();
         let event_sys = config.device.system_info.clone();
         let event_wg  = wg.clone();
         scope.spawn(move || EventInterpreter {
-            pacman:  event_mgr,
-            sysinfo: event_sys,
+            pacman:        event_mgr,
+            auto_download: event_dl,
+            sysinfo:       event_sys,
         }.run(event_sub, event_ctx, event_wg));
 
         let cmd_itx = itx.clone();
