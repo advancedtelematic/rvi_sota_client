@@ -86,6 +86,7 @@ mod tests {
     use crossbeam;
     use rustc_serialize::json;
     use std::thread;
+    use std::time::Duration;
 
     use super::*;
     use gateway::{Gateway, Interpret};
@@ -101,6 +102,8 @@ mod tests {
         let (itx, irx) = chan::sync::<Interpret>(0);
 
         thread::spawn(move || Http { server: "127.0.0.1:8888".parse().unwrap() }.start(itx, erx));
+        thread::sleep(Duration::from_millis(100)); // add delay for http gateway starting
+
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {

@@ -276,7 +276,7 @@ impl Default for DeviceConfig {
             uuid:              "123e4567-e89b-12d3-a456-426655440000".to_string(),
             packages_dir:      "/tmp/".to_string(),
             package_manager:   PackageManager::Off,
-            certificates_path: None,
+            certificates_path: Some("/usr/local/etc/sota_certificates".to_string()),
             p12_path:          None,
             p12_password:      "".to_string(),
             system_info:       None,
@@ -531,6 +531,7 @@ mod tests {
         uuid = "123e4567-e89b-12d3-a456-426655440000"
         packages_dir = "/tmp/"
         package_manager = "off"
+        certificates_path = "/usr/local/etc/sota_certificates"
         "#;
 
     const GATEWAY_CONFIG: &'static str =

@@ -15,11 +15,11 @@ cwd="$(cd "$(dirname "$0")" && pwd)"
 case $1 in
   "deb" )
     pac_man="deb"
-    pac_flags="--deb-systemd ${cwd}/sota_client.service"
+    pac_flags="--deb-systemd ${cwd}/sota_client_default.service"
     ;;
   "rpm" )
     pac_man="rpm"
-    pac_flags="--rpm-service ${cwd}/sota_client.service"
+    pac_flags="--rpm-service ${cwd}/sota_client_default.service"
     ;;
   *)
     echo "unknown package format $1"
@@ -30,8 +30,8 @@ shift
 
 function make_pkg {
   dest="$1"
-  bin_dir="${BIN_DIR:-/usr/bin}"
-  config_dir="${CONFIG_DIR:-/etc}"
+  bin_dir="${BIN_DIR:-/usr/local/bin}"
+  config_dir="${CONFIG_DIR:-/usr/local/etc}"
   config_path="${CONFIG_PATH:-${cwd}/../tests/toml/default.toml}"
   toml_file=$(mktemp)
 

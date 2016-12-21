@@ -37,8 +37,8 @@ help:
 new: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
-old: image ## Use a config file at `./sota.toml` to run the client.
-	$(DOCKER_RUN) --net=host --volume $(CURDIR)/sota.toml:/tmp/sota.toml $(IMAGE_SOTA)
+old: image ## Use a config file at `/usr/local/etc/sota.toml` to run the client.
+	$(DOCKER_RUN) --net=host --volume /usr/local/etc/sota.toml:/usr/local/etc/sota.toml $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
 	$(CARGO) test --target=$(TARGET)

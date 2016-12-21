@@ -3,9 +3,9 @@
 set -eo pipefail
 
 
-CONFIG_PATH="${CONFIG_PATH:-/tmp/sota.toml}"
+CONFIG_PATH="${CONFIG_PATH:-/usr/local/etc/sota.toml}"
 AUTH_SERVER="${AUTH_SERVER:-http://localhost:9001}"
-CORE_SERVER="${CORE_SERVER:-http://localhost:8001}"
+CORE_SERVER="${CORE_SERVER:-http://localhost:8080}"
 REGISTRY_SERVER="${REGISTRY_SERVER:-http://localhost:8083}"
 PACKAGE_MANAGER="${PACKAGE_MANAGER:-deb}"
 
