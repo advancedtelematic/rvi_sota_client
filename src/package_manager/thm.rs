@@ -5,11 +5,25 @@ use std::process::Command;
 
 use datatype::{Error, Package, UpdateResultCode};
 use datatype::auth::AccessToken;
-use package_manager::package_manager::InstallOutcome;
+use package_manager::package_manager::{InstallOutcome, parse_package};
 
 
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
-    Ok(vec![])
+    Command::new("cat")
+        .arg("/usr/package.manifest")
+        .output()
+        .map_err(|e| Error::Package(format!("Error fetching packages: {}", e)))
+        .and_then(|c| {
+            String::from_utf8(c.stdout)
+                .map_err(|e| Error::Parse(format!("Error parsing package: {}", e)))
+                .map(|s| s.lines().map(String::from).collect::<Vec<String>>())
+        })
+        .and_then(|lines| {
+            lines.iter()
+                 .map(|line| parse_package(line))
+                 .filter(|pkg| pkg.is_ok())
+                 .collect::<Result<Vec<Package>, _>>()
+        })
 }
 
 #[derive(RustcDecodable)]
