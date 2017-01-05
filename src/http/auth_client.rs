@@ -1,6 +1,8 @@
 use chan::Sender;
-use hyper::client::{Body, Client as HyperClient, ProxyConfig, RedirectPolicy, Response as HyperResponse};
-use hyper::header::{Authorization, Basic, Bearer, ContentLength, ContentType, Headers, Location};
+use hyper::client::{Body, Client as HyperClient, ProxyConfig, RedirectPolicy,
+                    Response as HyperResponse};
+use hyper::header::{Authorization, Basic, Bearer, Connection, ContentLength,
+                    ContentType, Headers, Location};
 use hyper::mime::{Attr, Mime, TopLevel, SubLevel, Value};
 use hyper::net::{HttpsConnector};
 use hyper::status::StatusCode;
@@ -127,6 +129,8 @@ struct AuthRequest {
 impl AuthRequest {
     fn new(auth: &Auth, req: Request) -> Self {
         let mut headers = Headers::new();
+
+        headers.set(Connection::close());
         headers.set(ContentLength(req.body.as_ref().map_or(0, |body| body.len() as u64)));
 
         // empty Charset to keep RVI happy
