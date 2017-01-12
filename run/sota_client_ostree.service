@@ -9,7 +9,7 @@ RestartSec=5
 Restart=on-failure
 Environment="RUST_LOG=debug"
 DefaultTimeoutStopSec=5
-ExecStart=/usr/bin/sota_client --config /sysroot/boot/sota.toml
+ExecStart=/usr/bin/sota_client --config /sysroot/boot/sota.toml --device-certificates-path /usr/etc/sota_certificates --device-package-manager ostree
 
 [Install]
 WantedBy=multi-user.target
