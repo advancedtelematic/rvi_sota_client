@@ -8,6 +8,7 @@ AUTH_SERVER="${AUTH_SERVER:-http://localhost:9001}"
 CORE_SERVER="${CORE_SERVER:-http://localhost:8080}"
 REGISTRY_SERVER="${REGISTRY_SERVER:-http://localhost:8083}"
 PACKAGE_MANAGER="${PACKAGE_MANAGER:-deb}"
+NAMESPACE="${NAMESPACE:-default}"
 
 
 function start_client() {
@@ -24,10 +25,18 @@ function start_dbus() {
     export DBUS_SESSION_BUS_PID
 }
 
+function register_device() {
+  curl -f -X POST \
+    -H "Content-Type: application/json" \
+    -H "x-ats-namespace: ${NAMESPACE}" \
+    "${REGISTRY_SERVER}/api/v1/devices" \
+    -d "{ \"deviceName\": \"${vin}\", \"deviceId\": \"${vin}\", \"deviceType\": \"Vehicle\" }" \
+    | tr -d '"'
+}
+
 function generate_config() {
   vin=${DEVICE_VIN:-TEST$(< /dev/urandom tr -dc A-HJ-NPR-Z0-9 | head -c 13 || [[ $? -eq 141 ]])}
-  uuid=${DEVICE_UUID:-$(curl -f -XPOST -H "Content-Type: application/json" "${REGISTRY_SERVER}/api/v1/devices" \
-    -d "{ \"deviceName\": \"${vin}\", \"deviceId\": \"${vin}\", \"deviceType\": \"Vehicle\" }" | tr -d '"')}
+  uuid=${DEVICE_UUID:-$(register_device)}
 
   cat << EOF > "${CONFIG_PATH}"
 [core]
