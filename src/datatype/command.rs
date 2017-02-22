@@ -3,15 +3,16 @@ use std::str;
 use std::str::FromStr;
 
 use nom::{IResult, space, eof};
-use datatype::{ClientCredentials, Error, InstalledSoftware, Package, UpdateReport,
+use datatype::{ClientCredentials, RegistrationCredentials, Error,
+               InstalledSoftware, Package, UpdateReport,
                UpdateRequestId, UpdateResultCode};
-
+use datatype::auth::Auth;
 
 /// System-wide commands that are sent to the interpreter.
 #[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
 pub enum Command {
     /// Authenticate with the auth server.
-    Authenticate(Option<ClientCredentials>),
+    Authenticate(Option<Auth>),
     /// Shutdown the client immediately.
     Shutdown,
 
@@ -109,11 +110,13 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
     match cmd {
         Command::Authenticate(_) => match args.len() {
             0 => Ok(Command::Authenticate(None)),
-            1 => Err(Error::Command("usage: auth <client-id> <client-secret>".to_string())),
-            2 => Ok(Command::Authenticate(Some(ClientCredentials {
+            1 => Ok(Command::Authenticate(Some(Auth::Registration(RegistrationCredentials {
+                client_id:     args[0].to_string()
+            })))),
+            2 => Ok(Command::Authenticate(Some(Auth::Credentials(ClientCredentials {
                 client_id:     args[0].to_string(),
                 client_secret: args[1].to_string()
-            }))),
+            })))),
             _ => Err(Error::Command(format!("unexpected Authenticate args: {:?}", args))),
         },
 
@@ -193,7 +196,7 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
 #[cfg(test)]
 mod tests {
     use super::{command, arguments};
-    use datatype::{Command, ClientCredentials, Package, UpdateReport, UpdateResultCode};
+    use datatype::{Auth, Command, ClientCredentials, Package, UpdateReport, UpdateResultCode};
     use nom::IResult;
 
 
@@ -223,11 +226,10 @@ mod tests {
         assert_eq!("Authenticate".parse::<Command>().unwrap(), Command::Authenticate(None));
         assert_eq!("auth".parse::<Command>().unwrap(), Command::Authenticate(None));
         assert_eq!("auth user pass".parse::<Command>().unwrap(),
-                   Command::Authenticate(Some(ClientCredentials {
+                   Command::Authenticate(Some(Auth::Credentials(ClientCredentials {
                        client_id:     "user".to_string(),
                        client_secret: "pass".to_string(),
-                   })));
-        assert!("auth one".parse::<Command>().is_err());
+                   }))));
         assert!("auth one two three".parse::<Command>().is_err());
     }
 

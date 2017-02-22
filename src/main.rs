@@ -17,13 +17,13 @@ use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
-use std::ops::Deref;
 use std::time::Duration;
 
-use sota::datatype::{Command, Config, Event};
+use sota::datatype::{Command, Config, Event, Auth};
+use sota::datatype::config::AuthConfig;
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient, set_certificates};
+use sota::http::{AuthClient};
 use sota::interpreter::{EventInterpreter, CommandInterpreter, Interpreter, GlobalInterpreter};
 use sota::rvi::{Edge, Services};
 
@@ -39,10 +39,6 @@ macro_rules! exit {
 fn main() {
     let version = start_logging();
     let config  = build_config(&version);
-
-    set_certificates(config.device.certificates_path.as_ref().map(Deref::deref),
-                     config.device.p12_path.as_ref().map(Deref::deref),
-                     &config.device.p12_password);
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -139,7 +135,7 @@ fn main() {
 
         scope.spawn(move || GlobalInterpreter {
             config:      config,
-            token:       None,
+            auth:        Auth::None,
             http_client: Box::new(AuthClient::default()),
             rvi:         rvi_services,
         }.run(irx, etx, wg));
@@ -187,6 +183,10 @@ fn start_update_poller(interval: u64, itx: Sender<Interpret>, wg: WaitGroup) {
     }
 }
 
+fn auth_config_integrity_ok(auth_config: &AuthConfig) -> bool {
+    return auth_config.client_secret.is_some() != auth_config.p12_path.is_some();
+}
+
 fn build_config(version: &str) -> Config {
     let args     = env::args().collect::<Vec<String>>();
     let program  = args[0].clone();
@@ -201,6 +201,9 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "auth-client-id", "change the auth client id", "ID");
     opts.optopt("", "auth-client-secret", "change the auth client secret", "SECRET");
     opts.optopt("", "auth-credentials-file", "change the auth credentials file", "PATH");
+    opts.optopt("", "auth-p12-path", "change the auth credentials file", "PATH");
+    opts.optopt("", "auth-p12-password", "change the PKCS12 file password", "PASSWORD");
+    opts.optopt("", "auth-expires-in", "change the duration of the access certificate in days", "INT");
 
     opts.optopt("", "core-server", "change the core server", "URL");
     opts.optopt("", "core-polling", "toggle polling the core server for updates", "BOOL");
@@ -256,10 +259,19 @@ fn build_config(version: &str) -> Config {
 
     config.auth.as_mut().map(|auth_cfg| {
         matches.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
-        matches.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = secret);
+        matches.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = Some(secret));
+        matches.opt_str("auth-p12-path").map(|path| auth_cfg.p12_path = Some(path));
+        matches.opt_str("auth-p12-password").map(|password| auth_cfg.p12_password = Some(password));
+        matches.opt_str("auth-expires-in").map(|text| {
+            auth_cfg.expires_in = Some(text.parse().unwrap_or_else(|err| exit!(1, "Invalid access duration: {}", err)));
+        });
         matches.opt_str("auth-server").map(|text| {
             auth_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid auth-server URL: {}", err));
         });
+        
+        if !auth_config_integrity_ok(auth_cfg) {
+            exit!(1, "Auth config needs either client_secret or p12_path, found {:?}", auth_cfg);
+        }
     });
 
     matches.opt_str("core-server").map(|text| {

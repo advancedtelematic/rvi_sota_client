@@ -10,7 +10,7 @@ pub mod report;
 pub mod request;
 pub mod shell;
 
-pub use self::auth::{AccessToken, Auth, ClientCredentials};
+pub use self::auth::{AccessToken, Auth, ClientCredentials, RegistrationCredentials};
 pub use self::command::Command;
 pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
                        GatewayConfig, RviConfig};

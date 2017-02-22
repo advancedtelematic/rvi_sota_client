@@ -1,5 +1,4 @@
 use rustc_serialize::{Decoder, Decodable};
-use std::borrow::Cow;
 use std::str::FromStr;
 
 use datatype::{Error, Package, UpdateResultCode};
@@ -39,14 +38,13 @@ impl PackageManager {
 
     /// Delegates to the package manager specific function for installing a new
     /// package on the device.
-    pub fn install_package<'t>(&self, path: &str, token: Option<Cow<'t, AccessToken>>) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install_package<'t>(&self, path: &str, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
         match *self {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
             PackageManager::TreeHub => {
-                let token = try!(token.ok_or((UpdateResultCode::GENERAL_ERROR, "No token available".to_string())));
-                thm::install_package(path, &*token)
+                thm::install_package(path, token)
             }
             PackageManager::File { ref filename, succeeds } => {
                 tpm::install_package(filename, path, succeeds)

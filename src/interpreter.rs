@@ -1,16 +1,20 @@
 use chan;
 use chan::{Sender, Receiver, WaitGroup};
 use std::{process, thread};
-use std::borrow::Cow;
+use std::ops::Deref;
 use std::time::Duration;
+use std::fs::OpenOptions;
+use std::io::Write;
 use time;
 
-use datatype::{AccessToken, Auth, ClientCredentials, Command, Config, Error, Event,
+use datatype::{Auth, ClientCredentials, Command, Config, Error, Event,
                Package, UpdateReport, UpdateRequestStatus as Status, UpdateResultCode,
-               system_info};
+               Url, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use oauth2::authenticate;
+use http::tls::set_certificates;
+use registration::register;
 use package_manager::PackageManager;
 use rvi::Services;
 use sota::Sota;
@@ -134,23 +138,30 @@ impl Interpreter<Command, Interpret> for CommandInterpreter {
 /// The `GlobalInterpreter` interprets the `Command` inside incoming `Interpret`
 /// messages, broadcasting `Event`s globally and (optionally) sending the final
 /// outcome `Event` to the `Interpret` response channel.
-pub struct GlobalInterpreter<'t> {
+pub struct GlobalInterpreter {
     pub config:      Config,
-    pub token:       Option<Cow<'t, AccessToken>>,
+    pub auth:        Auth,
     pub http_client: Box<Client>,
     pub rvi:         Option<Services>
 }
 
-impl<'t> Interpreter<Interpret, Event> for GlobalInterpreter<'t> {
+impl<'t> Interpreter<Interpret, Event> for GlobalInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
         info!("GlobalInterpreter received: {}", interpret.command);
 
         let (multi_tx, multi_rx) = chan::async::<Event>();
-        let outcome = match (self.token.as_ref(), self.config.auth.is_none()) {
-            (Some(_), _) | (_, true) => self.authenticated(interpret.command, multi_tx),
-            _                        => self.unauthenticated(interpret.command, multi_tx)
-        };
 
+        let outcome = match self.auth {
+            Auth::None => match self.config.auth {
+                None    => self.authenticated(interpret.command, multi_tx),
+                Some(_) => self.unauthenticated(interpret.command, multi_tx),
+            },
+            Auth::Credentials(_) => self.unauthenticated(interpret.command, multi_tx),
+            Auth::Token(_)       => self.authenticated(interpret.command, multi_tx),
+            Auth::Registration(_) => self.unauthenticated(interpret.command, multi_tx),
+            Auth::Certificate => self.authenticated(interpret.command, multi_tx),
+        };
+        
         let mut response_ev: Option<Event> = None;
         match outcome {
             Ok(_) => {
@@ -162,7 +173,7 @@ impl<'t> Interpreter<Interpret, Event> for GlobalInterpreter<'t> {
 
             Err(Error::HttpAuth(resp)) => {
                 error!("HTTP authorization failed: {}", resp);
-                self.token = None;
+                self.auth = Auth::None;
                 let ev = Event::NotAuthenticated;
                 etx.send(ev.clone());
                 response_ev = Some(ev);
@@ -180,7 +191,7 @@ impl<'t> Interpreter<Interpret, Event> for GlobalInterpreter<'t> {
     }
 }
 
-impl<'t> GlobalInterpreter<'t> {
+impl<'t> GlobalInterpreter {
     fn authenticated(&self, cmd: Command, etx: Sender<Event>) -> Result<(), Error> {
         let mut sota = Sota::new(&self.config, self.http_client.as_ref());
 
@@ -251,7 +262,11 @@ impl<'t> GlobalInterpreter<'t> {
 
             Command::StartInstall(id) => {
                 etx.send(Event::InstallingUpdate(id.clone()));
-                let _ = sota.install_update(self.token.clone(), id)
+                let token = match self.auth {
+                    Auth::Token(ref t) => Some(t),
+                    _ => None,
+                };
+                let _ = sota.install_update(token, id)
                     .map(|report| etx.send(Event::InstallComplete(report)))
                     .map_err(|report| etx.send(Event::InstallFailed(report)));
             }
@@ -262,17 +277,73 @@ impl<'t> GlobalInterpreter<'t> {
         Ok(())
     }
 
+    fn auth_credentials(&mut self, server: Url, client_id: String, client_secret: String,
+                        certificates_path: Option<&str>, device_p12_path: Option<&str>,
+                        device_p12_password: &str) -> Result<(), Error> {
+        set_certificates(certificates_path, device_p12_path, device_p12_password);
+
+        self.set_client(Auth::Credentials(ClientCredentials {
+            client_id:     client_id,
+            client_secret: client_secret,
+        }));
+        let token = try!(authenticate(server.join("/token"), self.http_client.as_ref()));
+        self.set_client(Auth::Token(token.clone()));
+        self.auth = Auth::Token(token.into());
+        Ok(())
+    }
+
+    fn auth_certificate(&mut self, server: Url, client_id: String, expires_in: u32,
+                        certificates_path: Option<&str>, auth_p12_path: &str, auth_p12_password: &str,
+                        device_p12_path: Option<&str>, device_p12_password: &str) -> Result<(), Error> {
+        set_certificates(certificates_path, Some(auth_p12_path), auth_p12_password);
+        let access_certificate = try!(register(server.join("/devices"),
+                                               client_id, expires_in,
+                                               self.http_client.as_ref()));
+        let mut file = OpenOptions::new().read(true).write(true).open(device_p12_path.unwrap())
+            .map_err(|err| panic!("couldn't open file: {}", err)).unwrap();
+        file.write(&*access_certificate).expect("Error writing file");
+        set_certificates(certificates_path, device_p12_path, device_p12_password);
+        self.auth = Auth::Certificate;
+        Ok(())
+    }
+    
     fn unauthenticated(&mut self, cmd: Command, etx: Sender<Event>) -> Result<(), Error> {
+        let device_config = self.config.device.clone();
+
         match cmd {
-            Command::Authenticate(_) => {
-                let config = self.config.auth.clone().expect("trying to authenticate without auth config");
-                self.set_client(Auth::Credentials(ClientCredentials {
-                    client_id:     config.client_id,
-                    client_secret: config.client_secret,
-                }));
-                let token = try!(authenticate(config.server.join("/token"), self.http_client.as_ref()));
-                self.set_client(Auth::Token(token.clone()));
-                self.token = Some(token.into());
+            Command::Authenticate(None) => {
+                let auth_config = self.config.auth.clone().expect("trying to authenticate without auth config");
+                if auth_config.client_secret.is_some() {
+                    try!(self.auth_credentials(auth_config.server, auth_config.client_id,
+                                               auth_config.client_secret.unwrap(),
+                                               device_config.certificates_path.as_ref().map(Deref::deref),device_config.p12_path.as_ref().map(Deref::deref),
+                                               &device_config.p12_password));
+                } else {
+                    let device_config = self.config.device.clone();
+                    try!(self.auth_certificate(auth_config.server, auth_config.client_id,
+                                               auth_config.expires_in.unwrap(),
+                                               device_config.certificates_path.as_ref().map(Deref::deref),
+                                               auth_config.p12_path.unwrap().as_ref(), &auth_config.p12_password.unwrap(),
+                                               device_config.p12_path.as_ref().map(Deref::deref),
+                                               &device_config.p12_password));
+                }
+            }
+            Command::Authenticate(Some(Auth::Credentials(client_credentials))) =>
+            {
+                let auth_config = self.config.auth.clone().expect("trying to authenticate without auth config");
+                try!(self.auth_credentials(auth_config.server, client_credentials.client_id, client_credentials.client_secret,
+                                           device_config.certificates_path.as_ref().map(Deref::deref),
+                                           device_config.p12_path.as_ref().map(Deref::deref),
+                                           &device_config.p12_password));
+            }
+            Command::Authenticate(Some(Auth::Registration(registration_credentials))) => {
+                let auth_config = self.config.auth.clone().expect("trying to authenticate without auth config");
+                try!(self.auth_certificate(auth_config.server, registration_credentials.client_id,
+                                           auth_config.expires_in.unwrap(),
+                                           device_config.certificates_path.as_ref().map(Deref::deref),
+                                           auth_config.p12_path.unwrap().as_ref(), &auth_config.p12_password.unwrap(),
+                                           device_config.p12_path.as_ref().map(Deref::deref),
+                                           &device_config.p12_password));
                 etx.send(Event::Authenticated);
             }
 
@@ -299,7 +370,7 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use datatype::{AccessToken, Command, Config, DownloadComplete, Event,
+    use datatype::{Command, Config, DownloadComplete, Event,
                    UpdateReport, UpdateResultCode};
     use gateway::Interpret;
     use http::test_client::TestClient;
@@ -314,7 +385,7 @@ mod tests {
         thread::spawn(move || {
             let mut gi = GlobalInterpreter {
                 config:      Config::default(),
-                token:       Some(AccessToken::default().into()),
+                auth:        Auth::None,
                 http_client: Box::new(TestClient::from(replies)),
                 rvi:         None
             };

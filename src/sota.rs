@@ -1,5 +1,4 @@
 use rustc_serialize::json;
-use std::borrow::Cow;
 use std::{fs, io};
 use std::fs::File;
 use std::path::PathBuf;
@@ -72,7 +71,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Install an update using the package manager.
-    pub fn install_update<'t>(&mut self, token: Option<Cow<'t, AccessToken>>, id: UpdateRequestId) -> Result<UpdateReport, UpdateReport> {
+    pub fn install_update<'t>(&mut self, token: Option<&AccessToken>, id: UpdateRequestId) -> Result<UpdateReport, UpdateReport> {
         let ref pacman = self.config.device.package_manager;
         let path       = self.package_path(id.clone()).expect("install_update expects a valid path");
         pacman.install_package(&path, token).and_then(|(code, output)| {
