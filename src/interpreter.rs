@@ -5,6 +5,7 @@ use std::ops::Deref;
 use std::time::Duration;
 use std::fs::OpenOptions;
 use std::io::Write;
+use std::path::Path;
 use time;
 
 use datatype::{Auth, ClientCredentials, Command, Config, Error, Event,
@@ -295,15 +296,18 @@ impl<'t> GlobalInterpreter {
     fn auth_certificate(&mut self, server: Url, client_id: String, expires_in: u32,
                         certificates_path: Option<&str>, auth_p12_path: &str, auth_p12_password: &str,
                         device_p12_path: Option<&str>, device_p12_password: &str) -> Result<(), Error> {
-        set_certificates(certificates_path, Some(auth_p12_path), auth_p12_password);
-        let access_certificate = try!(register(server.join("/devices"),
-                                               client_id, expires_in,
-                                               self.http_client.as_ref()));
-        let mut file = OpenOptions::new().read(true).write(true).open(device_p12_path.unwrap())
-            .map_err(|err| panic!("couldn't open file: {}", err)).unwrap();
-        file.write(&*access_certificate).expect("Error writing file");
-        set_certificates(certificates_path, device_p12_path, device_p12_password);
+        if !Path::new(device_p12_path.unwrap()).exists() {
+            self.set_client(&self.auth, certificates_path, Some(auth_p12_path), &auth_p12_password);
+            let access_certificate = try!(register(server.join("/devices"),
+                                                   client_id, expires_in,
+                                                   self.http_client.as_ref()));
+            let mut file = OpenOptions::new().read(true).write(true).open(device_p12_path.unwrap())
+                .map_err(|err| panic!("couldn't open file: {}", err)).unwrap();
+            file.write(&*access_certificate).expect("Error writing file");
+        }
+
         self.auth = Auth::Certificate;
+        self.set_client(&self.auth, certificates_path, device_p12_path, &device_p12_password);
         Ok(())
     }
     

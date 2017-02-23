@@ -136,6 +136,7 @@ fn main() {
         scope.spawn(move || GlobalInterpreter {
             config:      config,
             auth:        Auth::None,
+            // TODO
             http_client: Box::new(AuthClient::default()),
             rvi:         rvi_services,
         }.run(irx, etx, wg));
