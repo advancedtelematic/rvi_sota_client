@@ -386,7 +386,7 @@ mod tests {
     use std::thread;
 
     use super::*;
-    use datatype::{Command, Config, DownloadComplete, Event,
+    use datatype::{Auth, Command, Config, DownloadComplete, Event,
                    UpdateReport, UpdateResultCode};
     use gateway::Interpret;
     use http::test_client::TestClient;
