@@ -1,6 +1,6 @@
 #[macro_use] extern crate nom; // use before log to avoid error!() macro conflict
 
-#[macro_use] extern crate chan;
+extern crate chan;
 extern crate crossbeam;
 extern crate crypto;
 extern crate dbus;

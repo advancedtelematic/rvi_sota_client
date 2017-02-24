@@ -28,3 +28,5 @@ rvi_edge_server = "192.168.1.40:9080"
 client = "http://192.168.1.40:8901"
 storage_dir = "/tmp"
 timeout = 20
+
+[uptane]
