@@ -3,7 +3,7 @@ use std::{fs, io};
 use std::fs::File;
 use std::path::PathBuf;
 
-use datatype::{AccessToken, Config, DownloadComplete, Error, Package, UpdateReport,
+use datatype::{AccessToken, AuthConfig, Config, DownloadComplete, Error, Package, UpdateReport,
                UpdateRequest, UpdateRequestId, Url};
 use http::{Client, Response};
 
@@ -24,7 +24,13 @@ impl<'c, 'h> Sota<'c, 'h> {
     /// Takes a path and returns a new endpoint of the format
     /// `<server>/api/v1/mydevice/<device-id>/<path>`.
     fn endpoint(&self, path: &str) -> Url {
-        self.config.core.server.join(&format!("/api/v1/mydevice/{}/{}", self.config.device.uuid, path))
+        match self.config.auth {
+            Some(ref auth @ AuthConfig { p12_path: Some(_), .. }) =>
+                // certificate mode, talking to device gateway
+                auth.server.join(&format!("/core/{}", path)),
+            _ => // talking to core by default
+                self.config.core.server.join(&format!("/api/v1/mydevice/{}/{}", self.config.device.uuid, path))
+        }
     }
 
     /// Returns the path to a package on the device.

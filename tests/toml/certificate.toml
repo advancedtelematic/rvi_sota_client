@@ -1,0 +1,48 @@
+[auth]
+server = "http://127.0.0.1:9001"
+client_id = "client-id"
+p12_path = "/usr/local/etc/sota_registration_certificates"
+p12_password = ""
+expires_in = 365
+
+[core]
+server = "http://127.0.0.1:8080"
+polling = true
+polling_sec = 10
+
+[dbus]
+name = "org.genivi.SotaClient"
+path = "/org/genivi/SotaClient"
+interface = "org.genivi.SotaClient"
+software_manager = "org.genivi.SoftwareLoadingManager"
+software_manager_path = "/org/genivi/SoftwareLoadingManager"
+timeout = 60
+
+[device]
+uuid = "123e4567-e89b-12d3-a456-426655440000"
+packages_dir = "/tmp/"
+package_manager = "off"
+auto_download = true
+certificates_path = "/usr/local/etc/sota_certificates"
+p12_path = "/var/sota/device.p12"
+p12_password = ""
+
+[gateway]
+console = false
+dbus = false
+http = false
+rvi = false
+socket = false
+websocket = false
+
+[network]
+http_server = "127.0.0.1:8888"
+rvi_edge_server = "127.0.0.1:9999"
+socket_commands_path = "/tmp/sota-commands.socket"
+socket_events_path = "/tmp/sota-events.socket"
+websocket_server = "127.0.0.1:3012"
+
+[rvi]
+client = "http://127.0.0.1:8901"
+storage_dir = "/var/sota"
+timeout = 20

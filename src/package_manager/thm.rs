@@ -45,12 +45,10 @@ pub fn install_package(path: &str, token: Option<&AccessToken>) -> Result<Instal
                    .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("parsing file {:?}", e))));
     let mut command = Command::new("sota_ostree.sh");
     command.env("COMMIT", pkg.commit)
-                        .env("REF_NAME", pkg.refName)
-                        .env("DESCRIPTION", pkg.description)
-                        .env("PULL_URI", pkg.pullUri);
-    if token.is_some() {
-        command.env("AUTHPLUS_ACCESS_TOKEN", token.unwrap().access_token.clone());
-    };
+           .env("REF_NAME", pkg.refName)
+           .env("DESCRIPTION", pkg.description)
+           .env("PULL_URI", pkg.pullUri);
+    token.map(|t| command.env("AUTHPLUS_ACCESS_TOKEN", t.access_token.clone()));
     let output = try!(command.output()
                       .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("running script {:?}", e))));
 

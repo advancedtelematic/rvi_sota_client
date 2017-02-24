@@ -118,7 +118,7 @@ impl Default for AuthConfig {
         AuthConfig {
             server:        "http://127.0.0.1:9001".parse().unwrap(),
             client_id:     "client-id".to_string(),
-            client_secret: Some("default-client-secret".to_string()),
+            client_secret: None,
             p12_path:      None,
             p12_password:  None,
             expires_in:    Some(365),
@@ -564,6 +564,17 @@ mod tests {
         certificates_path = "/usr/local/etc/sota_certificates"
         "#;
 
+    const DEVICE_CONFIG_CERTIFICATE: &'static str =
+        r#"
+        [device]
+        uuid = "123e4567-e89b-12d3-a456-426655440000"
+        packages_dir = "/tmp/"
+        package_manager = "off"
+        certificates_path = "/usr/local/etc/sota_certificates"
+        p12_path = "/var/sota/device.p12"
+        p12_password = ""
+        "#;
+
     const GATEWAY_CONFIG: &'static str =
         r#"
         [gateway]
@@ -628,7 +639,7 @@ mod tests {
             + AUTH_CONFIG_CERTIFICATE
             + CORE_CONFIG
             + DBUS_CONFIG
-            + DEVICE_CONFIG
+            + DEVICE_CONFIG_CERTIFICATE
             + GATEWAY_CONFIG
             + NETWORK_CONFIG
             + RVI_CONFIG;

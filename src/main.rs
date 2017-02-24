@@ -20,10 +20,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sota::datatype::{Command, Config, Event, Auth};
-use sota::datatype::config::AuthConfig;
+use sota::datatype::config::{AuthConfig,DeviceConfig};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient};
+use sota::http::{AuthClient, set_certificates};
 use sota::interpreter::{EventInterpreter, CommandInterpreter, Interpreter, GlobalInterpreter};
 use sota::rvi::{Edge, Services};
 
@@ -39,6 +39,8 @@ macro_rules! exit {
 fn main() {
     let version = start_logging();
     let config  = build_config(&version);
+
+    set_certificates(None, None, "");
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -184,8 +186,14 @@ fn start_update_poller(interval: u64, itx: Sender<Interpret>, wg: WaitGroup) {
     }
 }
 
-fn auth_config_integrity_ok(auth_config: &AuthConfig) -> bool {
-    return auth_config.client_secret.is_some() != auth_config.p12_path.is_some();
+fn check_auth_config_integrity(device_cfg: &DeviceConfig, auth_cfg: &AuthConfig) {
+    if auth_cfg.client_secret.is_some() == auth_cfg.p12_path.is_some() {
+        exit!(1, "Auth config needs either client_secret or p12_path for registration, found {:?}", auth_cfg);
+    }
+
+    if auth_cfg.p12_path.is_some() && device_cfg.p12_path.is_none() {
+        exit!(1, "Certificate registration needs device p12_path, found {:?} and {:?}", auth_cfg, device_cfg);
+    }
 }
 
 fn build_config(version: &str) -> Config {
@@ -269,10 +277,10 @@ fn build_config(version: &str) -> Config {
         matches.opt_str("auth-server").map(|text| {
             auth_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid auth-server URL: {}", err));
         });
-        
-        if !auth_config_integrity_ok(auth_cfg) {
-            exit!(1, "Auth config needs either client_secret or p12_path, found {:?}", auth_cfg);
-        }
+    });
+
+    config.auth.as_ref().map(|auth_cfg| {
+        check_auth_config_integrity(&config.device, auth_cfg);
     });
 
     matches.opt_str("core-server").map(|text| {
