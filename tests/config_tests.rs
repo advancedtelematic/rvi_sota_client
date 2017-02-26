@@ -1,26 +1,15 @@
-use std::{env, str};
-use std::path::Path;
-use std::process::{Command, Output};
+extern crate sota;
 
+use sota::datatype::Config;
 
-fn run_client(config: &str) -> Output {
-    let out_dir = env::var("OUT_DIR").expect("expected OUT_DIR environment variable");
-    let bin_dir = Path::new(&out_dir).parent().unwrap().parent().unwrap().parent().unwrap();
-
-    Command::new(format!("{}/sota_client", bin_dir.to_str().unwrap()))
-        .arg("--print")
-        .arg(format!("--config={}", config))
-        .output()
-        .unwrap_or_else(|err| panic!("couldn't start client: {}", err))
-}
 
 fn test_config(path: &str, is_ok: bool) {
-    let output = run_client(path);
-    if output.status.success() != is_ok {
-        panic!("{}", str::from_utf8(&output.stderr).unwrap_or(""));
+    match (Config::load(path), is_ok) {
+        (Ok(_), false)       => panic!("config parsing ok but should have failed"),
+        (Err(ref err), true) => panic!("config parsing failed: {}", err),
+        _ => ()
     }
 }
-
 
 #[test]
 fn default_config() {
@@ -30,6 +19,11 @@ fn default_config() {
 #[test]
 fn genivi_config() {
     test_config("tests/toml/genivi.toml", true);
+}
+
+#[test]
+fn certificate_config() {
+    test_config("tests/toml/certificate.toml", true);
 }
 
 #[test]

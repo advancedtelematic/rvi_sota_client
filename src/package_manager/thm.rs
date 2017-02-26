@@ -35,7 +35,7 @@ struct OstreePackage {
     pullUri:     String,
 }
 
-pub fn install_package(path: &str, token: &AccessToken) -> Result<InstallOutcome, InstallOutcome> {
+pub fn install_package(path: &str, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
     let mut file = try!(File::open(path)
                         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}", err))));
     let mut content = String::new();
@@ -43,13 +43,13 @@ pub fn install_package(path: &str, token: &AccessToken) -> Result<InstallOutcome
          .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("reading file: {:?}", err))));
     let pkg = try!(json::decode::<OstreePackage>(&content)
                    .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("parsing file {:?}", e))));
-    let output = try!(Command::new("sota_ostree.sh")
-                      .env("COMMIT", pkg.commit)
-                      .env("REF_NAME", pkg.refName)
-                      .env("DESCRIPTION", pkg.description)
-                      .env("PULL_URI", pkg.pullUri)
-                      .env("AUTHPLUS_ACCESS_TOKEN", token.access_token.clone())
-                      .output()
+    let mut command = Command::new("sota_ostree.sh");
+    command.env("COMMIT", pkg.commit)
+           .env("REF_NAME", pkg.refName)
+           .env("DESCRIPTION", pkg.description)
+           .env("PULL_URI", pkg.pullUri);
+    token.map(|t| command.env("AUTHPLUS_ACCESS_TOKEN", t.access_token.clone()));
+    let output = try!(command.output()
                       .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("running script {:?}", e))));
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

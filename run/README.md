@@ -25,5 +25,5 @@ The generated image accepts several environment variables for configuration.
 ## Known Issues
 
 * The address is both the listening and advertised address. That means you
-  currently can't connect the client to a RVI node, thats running on a different
+  currently can't connect the client to a RVI node, that is running on a different
   docker host machine.

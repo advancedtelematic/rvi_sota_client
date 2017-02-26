@@ -25,3 +25,4 @@ pub mod oauth2;
 pub mod package_manager;
 pub mod rvi;
 pub mod sota;
+pub mod registration;

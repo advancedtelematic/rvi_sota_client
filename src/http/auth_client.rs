@@ -139,10 +139,6 @@ impl AuthRequest {
                              vec![(Attr::Charset, Value::Utf8)]);
 
         match *auth {
-            Auth::None => {
-                headers.set(ContentType(mime_json));
-            }
-
             Auth::Credentials(ref cred) => {
                 headers.set(Authorization(Basic {
                     username: cred.client_id.clone(),
@@ -153,6 +149,10 @@ impl AuthRequest {
 
             Auth::Token(ref token) => {
                 headers.set(Authorization(Bearer { token: token.access_token.clone() }));
+                headers.set(ContentType(mime_json));
+            }
+
+            _ => {
                 headers.set(ContentType(mime_json));
             }
         };

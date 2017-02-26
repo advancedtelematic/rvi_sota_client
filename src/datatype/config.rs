@@ -107,7 +107,10 @@ trait Defaultify<T: Default> {
 pub struct AuthConfig {
     pub server:        Url,
     pub client_id:     String,
-    pub client_secret: String,
+    pub client_secret: Option<String>,
+    pub p12_path:      Option<String>,
+    pub p12_password:  Option<String>,
+    pub expires_in:    Option<u32> // days
 }
 
 impl Default for AuthConfig {
@@ -115,16 +118,22 @@ impl Default for AuthConfig {
         AuthConfig {
             server:        "http://127.0.0.1:9001".parse().unwrap(),
             client_id:     "client-id".to_string(),
-            client_secret: "client-secret".to_string()
+            client_secret: None,
+            p12_path:      None,
+            p12_password:  None,
+            expires_in:    Some(365),
         }
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(RustcDecodable, Debug)]
 struct ParsedAuthConfig {
     server:        Option<Url>,
     client_id:     Option<String>,
-    client_secret: Option<String>
+    client_secret: Option<String>,
+    p12_path:      Option<String>,
+    p12_password:  Option<String>,
+    expires_in:    Option<u32>
 }
 
 impl Default for ParsedAuthConfig {
@@ -132,7 +141,10 @@ impl Default for ParsedAuthConfig {
         ParsedAuthConfig {
             server:        None,
             client_id:     None,
-            client_secret: None
+            client_secret: None,
+            p12_path:      None,
+            p12_password:  None,
+            expires_in:    None,
         }
     }
 }
@@ -143,7 +155,10 @@ impl Defaultify<AuthConfig> for ParsedAuthConfig {
         AuthConfig {
             server:        self.server.take().unwrap_or(default.server),
             client_id:     self.client_id.take().unwrap_or(default.client_id),
-            client_secret: self.client_secret.take().unwrap_or(default.client_secret)
+            client_secret: self.client_secret.take().or(default.client_secret),
+            p12_path:      self.p12_path.take().or(default.p12_path),
+            p12_password:  self.p12_password.take().or(default.p12_password),
+            expires_in:    self.expires_in.take().or(default.expires_in)
         }
     }
 }
@@ -503,12 +518,22 @@ mod tests {
     use super::*;
 
 
-    const AUTH_CONFIG: &'static str =
+    const AUTH_CONFIG_CREDENTIALS: &'static str =
         r#"
         [auth]
         server = "http://127.0.0.1:9001"
         client_id = "client-id"
         client_secret = "client-secret"
+        "#;
+
+    const AUTH_CONFIG_CERTIFICATE: &'static str =
+        r#"
+        [auth]
+        server = "http://127.0.0.1:9001"
+        client_id = "client-id"
+        p12_path = "/usr/local/etc/sota_registration_certificates"
+        p12_password = ""
+        expires_in = 365
         "#;
 
     const CORE_CONFIG: &'static str =
@@ -537,6 +562,17 @@ mod tests {
         packages_dir = "/tmp/"
         package_manager = "off"
         certificates_path = "/usr/local/etc/sota_certificates"
+        "#;
+
+    const DEVICE_CONFIG_CERTIFICATE: &'static str =
+        r#"
+        [device]
+        uuid = "123e4567-e89b-12d3-a456-426655440000"
+        packages_dir = "/tmp/"
+        package_manager = "off"
+        certificates_path = "/usr/local/etc/sota_certificates"
+        p12_path = "/var/sota/device.p12"
+        p12_password = ""
         "#;
 
     const GATEWAY_CONFIG: &'static str =
@@ -587,7 +623,7 @@ mod tests {
     #[test]
     fn default_config() {
         let config = String::new()
-            + AUTH_CONFIG
+            + AUTH_CONFIG_CREDENTIALS
             + CORE_CONFIG
             + DBUS_CONFIG
             + DEVICE_CONFIG
@@ -595,6 +631,19 @@ mod tests {
             + NETWORK_CONFIG
             + RVI_CONFIG;
         assert_eq!(Config::load("tests/toml/default.toml").unwrap(), Config::parse(&config).unwrap());
+    }
+
+    #[test]
+    fn certificates_config() {
+        let config = String::new()
+            + AUTH_CONFIG_CERTIFICATE
+            + CORE_CONFIG
+            + DBUS_CONFIG
+            + DEVICE_CONFIG_CERTIFICATE
+            + GATEWAY_CONFIG
+            + NETWORK_CONFIG
+            + RVI_CONFIG;
+        assert_eq!(Config::load("tests/toml/certificate.toml").unwrap(), Config::parse(&config).unwrap());
     }
 
     #[test]
