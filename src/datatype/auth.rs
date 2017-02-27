@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 
 /// The available authentication types for communicating with the Auth server.
 #[derive(Clone, PartialEq, Eq, Debug, RustcEncodable, RustcDecodable)]
@@ -9,12 +7,6 @@ pub enum Auth {
     Token(AccessToken),
     Registration(RegistrationCredentials),
     Certificate,
-}
-
-impl<'a> Into<Cow<'a, Auth>> for Auth {
-    fn into(self) -> Cow<'a, Auth> {
-        Cow::Owned(self)
-    }
 }
 
 
@@ -33,12 +25,6 @@ pub struct AccessToken {
     pub token_type:   String,
     pub expires_in:   i32,
     pub scope:        String
-}
-
-impl<'a> Into<Cow<'a, AccessToken>> for AccessToken {
-    fn into(self) -> Cow<'a, AccessToken> {
-        Cow::Owned(self)
-    }
 }
 
 #[derive(RustcEncodable, RustcDecodable, Debug, Clone, PartialEq, Eq)]

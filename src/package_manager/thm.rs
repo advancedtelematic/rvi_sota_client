@@ -3,36 +3,13 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::process::Command;
 
-use datatype::{Error, Package, UpdateResultCode};
-use datatype::auth::AccessToken;
-use package_manager::package_manager::{InstallOutcome, parse_package};
+use datatype::{AccessToken, Error, OstreePackage, Package, UpdateResultCode,
+               ostree_installed_packages};
+use package_manager::package_manager::InstallOutcome;
 
 
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
-    Command::new("cat")
-        .arg("/usr/package.manifest")
-        .output()
-        .map_err(|e| Error::Package(format!("Error fetching packages: {}", e)))
-        .and_then(|c| {
-            String::from_utf8(c.stdout)
-                .map_err(|e| Error::Parse(format!("Error parsing package: {}", e)))
-                .map(|s| s.lines().map(String::from).collect::<Vec<String>>())
-        })
-        .and_then(|lines| {
-            lines.iter()
-                 .map(|line| parse_package(line))
-                 .filter(|pkg| pkg.is_ok())
-                 .collect::<Result<Vec<Package>, _>>()
-        })
-}
-
-#[derive(RustcDecodable)]
-#[allow(non_snake_case)]
-struct OstreePackage {
-    commit:      String,
-    refName:     String,
-    description: String,
-    pullUri:     String,
+    ostree_installed_packages()
 }
 
 pub fn install_package(path: &str, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {

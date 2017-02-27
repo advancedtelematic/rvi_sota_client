@@ -3,7 +3,7 @@ use std::str::FromStr;
 
 use datatype::{Error, Package, UpdateResultCode};
 use datatype::auth::AccessToken;
-use package_manager::{deb, otb, rpm, thm, tpm};
+use package_manager::{deb, otb, rpm, thm, tpm, uptane};
 
 
 /// The outcome when installing a package as a tuple of the `UpdateResultCode`
@@ -19,7 +19,8 @@ pub enum PackageManager {
     Rpm,
     TreeHub,
     File { filename: String, succeeds: bool },
-    OSTree { repodir: String }
+    OSTree { repodir: String },
+    Uptane
 }
 
 impl PackageManager {
@@ -33,6 +34,7 @@ impl PackageManager {
             PackageManager::TreeHub => thm::installed_packages(),
             PackageManager::File { ref filename, .. } => tpm::installed_packages(filename),
             PackageManager::OSTree { ref repodir } => otb::installed_packages(repodir),
+            PackageManager::Uptane => uptane::installed_packages()
         }
     }
 
@@ -43,15 +45,12 @@ impl PackageManager {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
-            PackageManager::TreeHub => {
-                thm::install_package(path, token)
-            }
+            PackageManager::TreeHub => thm::install_package(path, token),
             PackageManager::File { ref filename, succeeds } => {
                 tpm::install_package(filename, path, succeeds)
             }
-            PackageManager::OSTree { ref repodir } => {
-                otb::install_package(repodir, path)
-            }
+            PackageManager::OSTree { ref repodir } => otb::install_package(repodir, path),
+            PackageManager::Uptane => uptane::install_package(path, token)
         }
     }
 
@@ -70,6 +69,7 @@ impl PackageManager {
             PackageManager::File { ref filename, .. } => filename.to_string(),
             PackageManager::TreeHub => "ostree".to_string(),
             PackageManager::OSTree {..} => "otb".to_string(),
+            PackageManager::Uptane => "uptane".to_string()
         }
     }
 }
@@ -83,6 +83,7 @@ impl FromStr for PackageManager {
             "deb" => Ok(PackageManager::Deb),
             "rpm" => Ok(PackageManager::Rpm),
             "ostree" => Ok(PackageManager::TreeHub),
+            "uptane" => Ok(PackageManager::Uptane),
 
             file if file.len() > 5 && file[..5].as_bytes() == b"file:" => {
                 Ok(PackageManager::File { filename: file[5..].to_string(), succeeds: true })

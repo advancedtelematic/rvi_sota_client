@@ -1,9 +1,11 @@
 use rustc_serialize::Decodable;
 use std::fs::File;
 use std::io::prelude::*;
+use std::ops::Deref;
 use toml::{Decoder, Parser, Table};
 
 use datatype::{Error, SocketAddr, Url};
+use http::TlsData;
 use package_manager::PackageManager;
 
 
@@ -17,6 +19,7 @@ pub struct Config {
     pub gateway: GatewayConfig,
     pub network: NetworkConfig,
     pub rvi:     RviConfig,
+    pub uptane:  UptaneConfig,
 }
 
 impl Config {
@@ -41,6 +44,7 @@ impl Config {
         let mut gateway: ParsedGatewayConfig      = try!(parse_section(&table, "gateway"));
         let mut network: ParsedNetworkConfig      = try!(parse_section(&table, "network"));
         let mut rvi:     ParsedRviConfig          = try!(parse_section(&table, "rvi"));
+        let mut uptane:  ParsedUptaneConfig       = try!(parse_section(&table, "uptane"));
 
         try!(backwards_compatibility(&mut core, &mut device));
 
@@ -52,7 +56,33 @@ impl Config {
             gateway: gateway.defaultify(),
             network: network.defaultify(),
             rvi:     rvi.defaultify(),
+            uptane:  uptane.defaultify()
         })
+    }
+
+    /// Return the certificate paths for TLS configuration.
+    pub fn tls_data(&self) -> TlsData {
+        TlsData {
+            ca_path:  self.device.certificates_path.as_ref().map(Deref::deref),
+            p12_path: self.device.p12_path.as_ref().map(Deref::deref),
+            p12_pass: self.device.p12_path.as_ref().map(Deref::deref)
+        }
+    }
+
+    /// Authenticate with PKCS#12 bundle.
+    pub fn authenticate_with_certs(&self) -> bool {
+        match self.auth {
+            Some(ref auth_cfg) => auth_cfg.p12_path.is_some(),
+            None => false
+        }
+    }
+
+    /// Authenticate with client id and secret.
+    pub fn authenticate_with_creds(&self) -> bool {
+        match self.auth {
+            Some(ref auth_cfg) => auth_cfg.client_secret.is_some(),
+            None => false
+        }
     }
 }
 
@@ -110,7 +140,7 @@ pub struct AuthConfig {
     pub client_secret: Option<String>,
     pub p12_path:      Option<String>,
     pub p12_password:  Option<String>,
-    pub expires_in:    Option<u32> // days
+    pub expiry_days:   Option<u32>
 }
 
 impl Default for AuthConfig {
@@ -121,7 +151,7 @@ impl Default for AuthConfig {
             client_secret: None,
             p12_path:      None,
             p12_password:  None,
-            expires_in:    Some(365),
+            expiry_days:   Some(365)
         }
     }
 }
@@ -133,7 +163,7 @@ struct ParsedAuthConfig {
     client_secret: Option<String>,
     p12_path:      Option<String>,
     p12_password:  Option<String>,
-    expires_in:    Option<u32>
+    expiry_days:   Option<u32>
 }
 
 impl Default for ParsedAuthConfig {
@@ -144,7 +174,7 @@ impl Default for ParsedAuthConfig {
             client_secret: None,
             p12_path:      None,
             p12_password:  None,
-            expires_in:    None,
+            expiry_days:   None,
         }
     }
 }
@@ -158,7 +188,7 @@ impl Defaultify<AuthConfig> for ParsedAuthConfig {
             client_secret: self.client_secret.take().or(default.client_secret),
             p12_path:      self.p12_path.take().or(default.p12_path),
             p12_password:  self.p12_password.take().or(default.p12_password),
-            expires_in:    self.expires_in.take().or(default.expires_in)
+            expiry_days:   self.expiry_days.take().or(default.expiry_days)
         }
     }
 }
@@ -513,6 +543,53 @@ impl Defaultify<RviConfig> for ParsedRviConfig {
 }
 
 
+/// The [uptane] configuration section.
+#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+pub struct UptaneConfig {
+    pub director_server: Url,
+    pub images_server:   Url,
+    pub metadata_path:   String,
+}
+
+impl Default for UptaneConfig {
+    fn default() -> UptaneConfig {
+        UptaneConfig {
+            director_server: "http://localhost:5555/director".parse().unwrap(),
+            images_server:   "http://localhost:5555/repo".parse().unwrap(),
+            metadata_path:   "/var/lib/uptane".to_string(),
+        }
+    }
+}
+
+#[derive(RustcDecodable)]
+struct ParsedUptaneConfig {
+    director_server: Option<Url>,
+    images_server:   Option<Url>,
+    metadata_path:   Option<String>,
+}
+
+impl Default for ParsedUptaneConfig {
+    fn default() -> ParsedUptaneConfig {
+        ParsedUptaneConfig {
+            director_server: None,
+            images_server:   None,
+            metadata_path:   None
+        }
+    }
+}
+
+impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
+    fn defaultify(&mut self) -> UptaneConfig {
+        let default = UptaneConfig::default();
+        UptaneConfig {
+            director_server: self.director_server.take().unwrap_or(default.director_server),
+            images_server:   self.images_server.take().unwrap_or(default.images_server),
+            metadata_path:   self.metadata_path.take().unwrap_or(default.metadata_path),
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -604,6 +681,14 @@ mod tests {
         timeout = 20
         "#;
 
+    const UPTANE_CONFIG: &'static str =
+        r#"
+        [uptane]
+        director_server = "http://localhost:5555/director"
+        images_server = "http://localhost:5555/repo"
+        metadata_path = "/var/lib/uptane"
+        "#;
+
 
     #[test]
     fn empty_config() {
@@ -629,26 +714,22 @@ mod tests {
             + DEVICE_CONFIG
             + GATEWAY_CONFIG
             + NETWORK_CONFIG
-            + RVI_CONFIG;
-        assert_eq!(Config::load("tests/toml/default.toml").unwrap(), Config::parse(&config).unwrap());
+            + RVI_CONFIG
+            + UPTANE_CONFIG;
+        assert_eq!(Config::load("tests/config/default.toml").unwrap(), Config::parse(&config).unwrap());
     }
 
     #[test]
     fn certificates_config() {
         let config = String::new()
             + AUTH_CONFIG_CERTIFICATE
-            + CORE_CONFIG
-            + DBUS_CONFIG
-            + DEVICE_CONFIG_CERTIFICATE
-            + GATEWAY_CONFIG
-            + NETWORK_CONFIG
-            + RVI_CONFIG;
-        assert_eq!(Config::load("tests/toml/certificate.toml").unwrap(), Config::parse(&config).unwrap());
+            + DEVICE_CONFIG_CERTIFICATE;
+        assert_eq!(Config::load("tests/config/certificate.toml").unwrap(), Config::parse(&config).unwrap());
     }
 
     #[test]
     fn backwards_compatible_config() {
-        let config = Config::load("tests/toml/old.toml").unwrap();
+        let config = Config::load("tests/config/old.toml").unwrap();
         assert_eq!(config.core.polling, true);
         assert_eq!(config.core.polling_sec, 10);
     }

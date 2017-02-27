@@ -4,6 +4,7 @@ pub mod rpm;
 pub mod tpm;
 pub mod otb;
 pub mod thm;
+pub mod uptane;
 
 pub use self::package_manager::PackageManager;
 pub use self::tpm::{assert_rx, TestDir};
