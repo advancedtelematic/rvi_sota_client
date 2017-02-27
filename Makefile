@@ -3,7 +3,7 @@ SOTA_VERSION    := $(shell git rev-parse HEAD | cut -c-7)
 PACKAGE_VERSION := $(shell git describe --tags | cut -c2-)
 
 # docker images
-IMAGE_RUST := advancedtelematic/rust:x86-1.10.0
+IMAGE_RUST := advancedtelematic/rust:x86-nightly-2017-02-23 # FIXME: stable canonical_json crate
 IMAGE_SOTA := advancedtelematic/sota-client:latest
 IMAGE_FPM  := advancedtelematic/fpm:latest
 

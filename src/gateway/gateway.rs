@@ -5,14 +5,14 @@ use std::sync::{Arc, Mutex};
 use datatype::{Command, Event};
 
 
-/// Encapsulates a `Command` to be sent to the `GlobalInterpreter` for processing,
+/// Encapsulates a `Command` to be sent to the `CommandInterpreter` for processing,
 /// with an optional channel to receive the outcome `Event`.
 pub struct Interpret {
     pub command:     Command,
     pub response_tx: Option<Arc<Mutex<Sender<Event>>>>,
 }
 
-/// A `Gateway` may send `Command`s to the `GlobalInterpreter`, as well as listen
+/// A `Gateway` may send `Command`s to the `CommandInterpreter`, as well as listen
 /// to the system-wide `Event` messages.
 pub trait Gateway {
     fn initialize(&mut self, itx: Sender<Interpret>) -> Result<(), String>;

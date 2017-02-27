@@ -1,0 +1,27 @@
+{
+  "signatures": [
+    {
+      "keyid": "FIXME",
+      "method": "rsa-FIXME",
+      "sig": "FIXME"
+    }
+  ],
+  "signed": {
+    "_type": "Targets",
+    "expires": "2030-01-01T00:00:00Z",
+    "version": 0,
+    "targets": {
+      "/file1.img": {
+        "custom": {
+          "uri": "https://ostree/uri",
+          "ecuIdentifier": "file1-ecu-serial"
+          ""
+        },
+        "hashes": {
+          "sha256": "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
+        },
+        "length": 31
+      }
+    }
+  }
+}

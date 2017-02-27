@@ -1,0 +1,11 @@
+[auth]
+server = "http://127.0.0.1:9001"
+client_id = "client-id"
+p12_path = "/usr/local/etc/sota_registration_certificates"
+p12_password = ""
+expires_in = 365
+
+[device]
+certificates_path = "/usr/local/etc/sota_certificates"
+p12_path = "/var/sota/device.p12"
+p12_password = ""

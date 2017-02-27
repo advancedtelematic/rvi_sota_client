@@ -1,7 +1,7 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
 
 use datatype::{DownloadComplete, Package, UpdateAvailable, UpdateReport,
-               UpdateRequest, UpdateRequestId};
+               UpdateRequest, UpdateRequestId, UptaneMeta};
 
 
 /// System-wide events that are broadcast to all interested parties.
@@ -54,6 +54,13 @@ pub enum Event {
 
     /// A broadcast event requesting an update on externally installed software.
     InstalledSoftwareNeeded,
+
+    /// A new Uptane client was created.
+    UptaneInitialised,
+    /// There are no new Uptane updates.
+    UptaneTimestampChecked,
+    /// The updated snapshot.json and target.json metadata.
+    UptaneMetadataUpdated(UptaneMeta, UptaneMeta)
 }
 
 impl Display for Event {

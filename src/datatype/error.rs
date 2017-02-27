@@ -1,3 +1,5 @@
+use cjson::Error as CanonicalJsonError;
+use chrono::ParseError as ChronoParseError;
 use hyper::error::Error as HyperError;
 use rustc_serialize::json::{EncoderError as JsonEncoderError,
                             DecoderError as JsonDecoderError,
@@ -20,6 +22,8 @@ use ws::Error as WebsocketError;
 /// System-wide errors that are returned from `Result` type failures.
 #[derive(Debug)]
 pub enum Error {
+    CanonicalJson(CanonicalJsonError),
+    ChronoParse(ChronoParseError),
     Client(String),
     Command(String),
     Config(String),
@@ -31,6 +35,7 @@ pub enum Error {
     JsonDecoder(JsonDecoderError),
     JsonEncoder(JsonEncoderError),
     JsonParser(JsonParserError),
+    OstreeCommand(String),
     Poison(String),
     Package(String),
     Parse(String),
@@ -41,6 +46,18 @@ pub enum Error {
     SystemInfo(String),
     TomlParser(Vec<TomlParserError>),
     TomlDecode(TomlDecodeError),
+    UptaneExpired,
+    UptaneInvalidId,
+    UptaneInvalidKey,
+    UptaneInvalidKeyType,
+    UptaneInvalidMeta,
+    UptaneInvalidRole,
+    UptaneMissingMetadata(&'static str),
+    UptaneMissingSignatures,
+    UptaneRoleThreshold,
+    UptaneUnknownRole,
+    UptaneVerifySignatures,
+    UptaneVersion,
     UrlParse(UrlParseError),
     Websocket(WebsocketError),
 }
@@ -70,27 +87,31 @@ macro_rules! derive_from {
 }
 
 derive_from!([
-    FromUtf8Error    => FromUtf8,
-    HyperError       => Hyper,
-    IoError          => Io,
-    JsonEncoderError => JsonEncoder,
-    JsonDecoderError => JsonDecoder,
-    RecvError        => Recv,
-    ResponseData     => Http,
-    TomlDecodeError  => TomlDecode,
-    UrlParseError    => UrlParse,
-    WebsocketError   => Websocket
+    CanonicalJsonError => CanonicalJson,
+    ChronoParseError   => ChronoParse,
+    FromUtf8Error      => FromUtf8,
+    HyperError         => Hyper,
+    IoError            => Io,
+    JsonEncoderError   => JsonEncoder,
+    JsonDecoderError   => JsonDecoder,
+    RecvError          => Recv,
+    ResponseData       => Http,
+    TomlDecodeError    => TomlDecode,
+    UrlParseError      => UrlParse,
+    WebsocketError     => Websocket
 ]);
 
 derive_from!([
-    SendError<Event>              => SendEvent,
-    SendError<Interpret>          => SendInterpret,
-    Vec<TomlParserError>          => TomlParser
+    SendError<Event>     => SendEvent,
+    SendError<Interpret> => SendInterpret,
+    Vec<TomlParserError> => TomlParser
 ]);
 
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         let inner: String = match *self {
+            Error::CanonicalJson(ref e) => format!("Canonical JSON error: {}", e.clone()),
+            Error::ChronoParse(ref e)   => format!("DateTime parse error: {}", e.clone()),
             Error::Client(ref s)        => format!("Http client error: {}", s.clone()),
             Error::Command(ref e)       => format!("Unknown Command: {}", e.clone()),
             Error::Config(ref s)        => format!("Bad Config: {}", s.clone()),
@@ -102,6 +123,7 @@ impl Display for Error {
             Error::JsonDecoder(ref e)   => format!("Failed to decode JSON: {}", e.clone()),
             Error::JsonEncoder(ref e)   => format!("Failed to encode JSON: {}", e.clone()),
             Error::JsonParser(ref e)    => format!("Failed to parse JSON: {}", e.clone()),
+            Error::OstreeCommand(ref s) => format!("OsTree command failed: {}", s.clone()),
             Error::Poison(ref e)        => format!("Poison error: {}", e.clone()),
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),
             Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),
@@ -112,8 +134,20 @@ impl Display for Error {
             Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
             Error::TomlDecode(ref e)    => format!("Toml decode error: {}", e.clone()),
             Error::TomlParser(ref e)    => format!("Toml parser errors: {:?}", e.clone()),
-            Error::UrlParse(ref s)      => format!("Url parse error: {}", s.clone()),
-            Error::Websocket(ref e)     => format!("Websocket Error: {:?}", e.clone()),
+            Error::UptaneExpired                => format!("Uptane: expired"),
+            Error::UptaneInvalidId              => format!("Uptane: invalid id"),
+            Error::UptaneInvalidKey             => format!("Uptane: invalid key"),
+            Error::UptaneInvalidKeyType         => format!("Uptane: invalid key type"),
+            Error::UptaneInvalidMeta            => format!("Uptane: invalid meta"),
+            Error::UptaneInvalidRole            => format!("Uptane: invalid role"),
+            Error::UptaneMissingMetadata(ref e) => format!("Uptane: missing metadata: {}", e.clone()),
+            Error::UptaneMissingSignatures      => format!("Uptane: missing signatures"),
+            Error::UptaneRoleThreshold          => format!("Uptane: role threshold not met"),
+            Error::UptaneUnknownRole            => format!("Uptane: unknown role"),
+            Error::UptaneVerifySignatures       => format!("Uptane: invalid signature"),
+            Error::UptaneVersion                => format!("Uptane: bad version"),
+            Error::UrlParse(ref s)  => format!("Url parse error: {}", s.clone()),
+            Error::Websocket(ref e) => format!("Websocket Error: {:?}", e.clone()),
         };
         write!(f, "{}", inner)
     }

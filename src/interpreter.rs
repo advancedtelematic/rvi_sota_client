@@ -1,24 +1,21 @@
 use chan;
 use chan::{Sender, Receiver, WaitGroup};
-use std::{process, thread};
-use std::ops::Deref;
-use std::time::Duration;
+use std::process;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use time;
 
-use datatype::{Auth, ClientCredentials, Command, Config, Error, Event,
-               Package, UpdateReport, UpdateRequestStatus as Status, UpdateResultCode,
-               Url, system_info};
+use datatype::{Auth, Command, Config, Error, Event, Package, UpdateReport,
+               UpdateRequestStatus as Status, UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
-use oauth2::authenticate;
-use http::tls::set_certificates;
-use registration::register;
+use authenticate::{pkcs12, oauth2};
+use http::tls::init_tls_client;
 use package_manager::PackageManager;
 use rvi::Services;
 use sota::Sota;
+use uptane::Uptane;
 
 
 /// An `Interpreter` loops over any incoming values, on receipt of which it
@@ -27,17 +24,12 @@ pub trait Interpreter<I, O> {
     fn interpret(&mut self, input: I, otx: &Sender<O>);
 
     fn run(&mut self, irx: Receiver<I>, otx: Sender<O>, wg: WaitGroup) {
-        let cooldown = Duration::from_millis(100);
-
         loop {
-            let input   = irx.recv().expect("interpreter sender closed");
-            let started = time::precise_time_ns();
-
             wg.add(1);
+            let input = irx.recv().expect("interpreter sender closed");
+            let started = time::precise_time_ns();
             trace!("interpreter starting: {}", started);
             self.interpret(input, &otx);
-
-            thread::sleep(cooldown); // let any further work commence
             trace!("interpreter stopping: {}", started);
             wg.done();
         }
@@ -48,9 +40,9 @@ pub trait Interpreter<I, O> {
 /// The `EventInterpreter` listens for `Event`s and optionally responds with
 /// `Command`s that may be sent to the `CommandInterpreter`.
 pub struct EventInterpreter {
-    pub pacman:        PackageManager,
-    pub auto_download: bool,
-    pub sysinfo:       Option<String>,
+    pub pacman:  PackageManager,
+    pub auto_dl: bool,
+    pub sysinfo: Option<String>,
 }
 
 impl Interpreter<Event, Command> for EventInterpreter {
@@ -77,17 +69,16 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 for request in requests {
                     let id = request.requestId.clone();
                     match request.status {
-                        Status::Pending if self.auto_download => {
+                        Status::Pending if self.auto_dl => {
                             ctx.send(Command::StartDownload(id));
                         },
 
                         Status::InFlight if self.pacman != PackageManager::Off => {
                             if self.pacman.is_installed(&request.packageId) {
                                 let report = UpdateReport::single(id, UpdateResultCode::OK, "".to_string());
-                                ctx.send(Command::SendUpdateReport(report));
-                            } else {
-                                ctx.send(Command::StartDownload(id));
+                                return ctx.send(Command::SendUpdateReport(report));
                             }
+                            ctx.send(Command::StartDownload(id));
                         }
 
                         _ => ()
@@ -118,95 +109,124 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 }
             }
 
+            Event::UptaneMetadataUpdated(snapshot, targets) => {
+                unimplemented!();
+            }
+
             _ => ()
         }
     }
 }
 
 
-/// The `CommandInterpreter` wraps each incoming `Command` inside an `Interpret`
-/// type with no response channel for sending to the `GlobalInterpreter`.
-pub struct CommandInterpreter;
+/// The `IntermediateInterpreter` wraps each incoming `Command` inside an
+/// `Interpret` type with no response channel for sending to the `CommandInterpreter`.
+pub struct IntermediateInterpreter;
 
-impl Interpreter<Command, Interpret> for CommandInterpreter {
+impl Interpreter<Command, Interpret> for IntermediateInterpreter {
     fn interpret(&mut self, cmd: Command, itx: &Sender<Interpret>) {
-        info!("CommandInterpreter received: {}", cmd);
+        info!("IntermediateInterpreter received: {}", cmd);
         itx.send(Interpret { command: cmd, response_tx: None });
     }
 }
 
 
-/// The `GlobalInterpreter` interprets the `Command` inside incoming `Interpret`
-/// messages, broadcasting `Event`s globally and (optionally) sending the final
-/// outcome `Event` to the `Interpret` response channel.
-pub struct GlobalInterpreter {
-    pub config:      Config,
-    pub auth:        Auth,
-    pub http_client: Box<Client>,
-    pub rvi:         Option<Services>
+/// The `CommandMode` toggles the `Command` handling procedure.
+pub enum CommandMode {
+    Rvi(Box<Services>),
+    Uptane(Option<Uptane>),
+    Sota
 }
 
-impl Interpreter<Interpret, Event> for GlobalInterpreter {
-    fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
-        info!("GlobalInterpreter received: {}", interpret.command);
+/// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
+/// messages, broadcasting `Event`s globally and (optionally) sending the final
+/// outcome `Event` to the `Interpret` response channel.
+pub struct CommandInterpreter {
+    pub mode:   CommandMode,
+    pub config: Config,
+    pub auth:   Auth,
+    pub http:   Box<Client>
+}
 
-        let (multi_tx, multi_rx) = chan::async::<Event>();
+impl Interpreter<Interpret, Event> for CommandInterpreter {
+    fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
+        info!("CommandInterpreter received: {}", interpret.command);
+        let (events_tx, events_rx) = chan::async::<Event>();
 
         let outcome = match self.auth {
-            Auth::None => match self.config.auth {
-                None    => self.authenticated(interpret.command, multi_tx),
-                Some(_) => self.unauthenticated(interpret.command, multi_tx),
-            },
-            Auth::Credentials(_) => self.unauthenticated(interpret.command, multi_tx),
-            Auth::Token(_)       => self.authenticated(interpret.command, multi_tx),
-            Auth::Registration(_) => self.unauthenticated(interpret.command, multi_tx),
-            Auth::Certificate => self.authenticated(interpret.command, multi_tx),
+            Auth::None |
+            Auth::Token(_) |
+            Auth::Certificate => self.authenticated(interpret.command, events_tx),
+
+            Auth::Registration(_) |
+            Auth::Credentials(_) => self.unauthenticated(interpret.command, events_tx),
         };
 
-        let mut response_ev: Option<Event> = None;
-        match outcome {
-            Ok(_) => {
-                for ev in multi_rx {
-                    etx.send(ev.clone());
-                    response_ev = Some(ev);
+        let response_ev = match outcome {
+            Ok(final_ev) => {
+                for ev in events_rx {
+                    etx.send(ev);
                 }
+                etx.send(final_ev.clone());
+                final_ev
             }
 
             Err(Error::HttpAuth(resp)) => {
                 error!("HTTP authorization failed: {}", resp);
                 self.auth = Auth::None;
-                let ev = Event::NotAuthenticated;
-                etx.send(ev.clone());
-                response_ev = Some(ev);
+                etx.send(Event::NotAuthenticated);
+                Event::NotAuthenticated
             }
 
             Err(err) => {
                 let ev = Event::Error(format!("{}", err));
                 etx.send(ev.clone());
-                response_ev = Some(ev);
+                ev
             }
-        }
+        };
 
-        let ev = response_ev.expect("no response event to send back");
-        interpret.response_tx.map(|tx| tx.lock().unwrap().send(ev));
+        interpret.response_tx.map(|tx| tx.lock().unwrap().send(response_ev));
     }
 }
 
-impl GlobalInterpreter {
-    fn authenticated(&self, cmd: Command, etx: Sender<Event>) -> Result<(), Error> {
-        let mut sota = Sota::new(&self.config, self.http_client.as_ref());
+impl CommandInterpreter {
+    fn authenticated(&mut self, cmd: Command, etx: Sender<Event>) -> Result<Event, Error> {
+        let mut sota = Sota::new(&self.config, self.http.as_ref());
 
-        // always send at least one Event response
-        match cmd {
-            Command::Authenticate(_) => etx.send(Event::AlreadyAuthenticated),
+        Ok(match cmd {
+            Command::Authenticate(_) => Event::AlreadyAuthenticated,
 
             Command::GetUpdateRequests => {
-                let mut updates = try!(sota.get_update_requests());
-                if updates.is_empty() {
-                    etx.send(Event::NoUpdateRequests);
-                } else {
-                    updates.sort_by_key(|u| u.installPos);
-                    etx.send(Event::UpdatesReceived(updates));
+                match self.mode {
+                    CommandMode::Uptane(None) => {
+                        info!("initialising uptane mode");
+                        let uptane = Uptane::new(self.config.uptane.clone(), self.config.device.uuid.clone());
+                        let manifest = self.config.device.package_manager.installed_packages();
+                        // FIXME: uptane.put_manifest(self.http.as_ref(), true, manifest)?;
+                        self.mode = CommandMode::Uptane(Some(uptane));
+                        Event::UptaneInitialised
+                    }
+
+                    CommandMode::Uptane(Some(ref mut uptane)) => {
+                        let (_, timestamp_new) = uptane.get_timestamp(self.http.as_ref(), true)?;
+                        if timestamp_new {
+                            let (snapshot, _) = uptane.get_snapshot(self.http.as_ref(), true)?;
+                            let (targets, _)  = uptane.get_targets(self.http.as_ref(), true)?;
+                            Event::UptaneMetadataUpdated(snapshot, targets)
+                        } else {
+                            Event::UptaneTimestampChecked
+                        }
+                    }
+
+                    _ => {
+                        let mut updates = try!(sota.get_update_requests());
+                        if updates.is_empty() {
+                            Event::NoUpdateRequests
+                        } else {
+                            updates.sort_by_key(|u| u.installPos);
+                            Event::UpdatesReceived(updates)
+                        }
+                    }
                 }
             }
 
@@ -215,167 +235,137 @@ impl GlobalInterpreter {
                 if self.config.device.package_manager != PackageManager::Off {
                     packages = try!(self.config.device.package_manager.installed_packages());
                 }
-                etx.send(Event::FoundInstalledPackages(packages));
+                Event::FoundInstalledPackages(packages)
             }
 
             Command::ListSystemInfo => {
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                etx.send(Event::FoundSystemInfo(try!(system_info(&cmd))));
+                Event::FoundSystemInfo(try!(system_info(&cmd)))
             }
 
             Command::SendInstalledPackages(packages) => {
                 try!(sota.send_installed_packages(&packages));
-                etx.send(Event::InstalledPackagesSent);
+                Event::InstalledPackagesSent
             }
 
             Command::SendInstalledSoftware(sw) => {
-                if let Some(ref rvi) = self.rvi {
-                    let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
+                match self.mode {
+                    CommandMode::Rvi(ref rvi) => {
+                        let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
+                        Event::InstalledSoftwareSent
+                    }
+
+                    _ => Event::InstalledSoftwareSent
                 }
-                etx.send(Event::InstalledSoftwareSent);
             }
 
             Command::SendSystemInfo => {
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
                 try!(sota.send_system_info(&try!(system_info(&cmd))));
-                etx.send(Event::SystemInfoSent);
+                Event::SystemInfoSent
             }
 
             Command::SendUpdateReport(report) => {
-                if let Some(ref rvi) = self.rvi {
-                    let _ = rvi.remote.lock().unwrap().send_update_report(report);
-                } else {
-                    try!(sota.send_update_report(&report));
+                match self.mode {
+                    CommandMode::Rvi(ref rvi) => {
+                        let _ = rvi.remote.lock().unwrap().send_update_report(report);
+                        Event::UpdateReportSent
+                    }
+
+                    _ => {
+                        sota.send_update_report(&report)?;
+                        Event::UpdateReportSent
+                    }
                 }
-                etx.send(Event::UpdateReportSent);
             }
 
             Command::StartDownload(id) => {
-                etx.send(Event::DownloadingUpdate(id.clone()));
-                if let Some(ref rvi) = self.rvi {
-                    let _ = rvi.remote.lock().unwrap().send_download_started(id);
-                } else {
-                    let _ = sota.download_update(id.clone())
-                        .map(|dl| etx.send(Event::DownloadComplete(dl)))
-                        .map_err(|err| etx.send(Event::DownloadFailed(id, format!("{}", err))));
+                match self.mode {
+                    CommandMode::Rvi(ref rvi) => {
+                        let _ = rvi.remote.lock().unwrap().send_download_started(id.clone());
+                        Event::DownloadingUpdate(id)
+                    }
+
+                    _ => {
+                        etx.send(Event::DownloadingUpdate(id.clone()));
+                        match sota.download_update(id.clone()) {
+                            Ok(dl)   => Event::DownloadComplete(dl),
+                            Err(err) => Event::DownloadFailed(id, format!("{}", err))
+                        }
+                    }
                 }
             }
 
             Command::StartInstall(id) => {
-                etx.send(Event::InstallingUpdate(id.clone()));
-                let token = match self.auth {
-                    Auth::Token(ref t) => Some(t),
-                    _ => None,
-                };
-                let _ = sota.install_update(token, id)
-                    .map(|report| etx.send(Event::InstallComplete(report)))
-                    .map_err(|report| etx.send(Event::InstallFailed(report)));
-            }
+                match self.mode {
+                    CommandMode::Rvi(ref rvi) => {
+                        let _ = rvi.remote.lock().unwrap().send_download_started(id.clone());
+                        Event::DownloadingUpdate(id)
+                    }
 
-            Command::Shutdown => process::exit(0),
-        }
-
-        Ok(())
-    }
-
-    fn auth_credentials(&mut self, server: Url, client_id: String, client_secret: String,
-                        certificates_path: Option<&str>, device_p12_path: Option<&str>,
-                        device_p12_password: &str) -> Result<(), Error> {
-        set_certificates(certificates_path, device_p12_path, device_p12_password);
-
-        self.set_client(Auth::Credentials(ClientCredentials {
-            client_id:     client_id,
-            client_secret: client_secret,
-        }));
-        let token = try!(authenticate(server.join("/token"), self.http_client.as_ref()));
-        self.set_client(Auth::Token(token.clone()));
-        self.auth = Auth::Token(token.into());
-        Ok(())
-    }
-
-    fn auth_certificate(&mut self, server: Url, client_id: String, expires_in: u32,
-                        certificates_path: Option<&str>, auth_p12_path: &str, auth_p12_password: &str,
-                        device_p12_path: Option<&str>, device_p12_password: &str) -> Result<(), Error> {
-        if !Path::new(device_p12_path.unwrap()).exists() {
-            // no access certificate, need to get it
-            set_certificates(certificates_path, Some(auth_p12_path), &auth_p12_password);
-            let auth = self.auth.clone();
-            self.set_client(auth);
-            let access_certificate = try!(register(server.join("/devices"),
-                                                   client_id, expires_in,
-                                                   self.http_client.as_ref()));
-            let mut file = File::create(device_p12_path.unwrap())
-                .map_err(|err| panic!("couldn't open file for writing: {}", err)).unwrap();
-            file.write(&*access_certificate).expect("Error writing file");
-        }
-
-        self.auth = Auth::Certificate;
-        set_certificates(certificates_path, device_p12_path, &device_p12_password);
-        let auth = self.auth.clone();
-        self.set_client(auth);
-        Ok(())
-    }
-
-    fn unauthenticated(&mut self, cmd: Command, etx: Sender<Event>) -> Result<(), Error> {
-        let device_config = self.config.device.clone();
-
-        match cmd {
-            Command::Authenticate(None) => {
-                let auth_config = self.config.auth.clone().expect("trying to authenticate without auth config");
-                match auth_config.client_secret {
-                    Some(client_secret) =>
-                        try!(self.auth_credentials(auth_config.server, auth_config.client_id, client_secret,
-                                                   device_config.certificates_path.as_ref().map(Deref::deref),
-                                                   device_config.p12_path.as_ref().map(Deref::deref),
-                                                   &device_config.p12_password)),
-                    None => { // certificate mode is default
-                        let device_config = self.config.device.clone();
-                        try!(self.auth_certificate(auth_config.server, auth_config.client_id,
-                                                   auth_config.expires_in.unwrap(),
-                                                   device_config.certificates_path.as_ref().map(Deref::deref),
-                                                   auth_config.p12_path.unwrap().as_ref(),
-                                                   &auth_config.p12_password.unwrap(),
-                                                   device_config.p12_path.as_ref().map(Deref::deref),
-                                                   &device_config.p12_password));
+                    _ => {
+                        etx.send(Event::InstallingUpdate(id.clone()));
+                        let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
+                        match sota.install_update(token, id) {
+                            Ok(report)  => Event::InstallComplete(report),
+                            Err(report) => Event::InstallFailed(report)
+                        }
                     }
                 }
-                etx.send(Event::Authenticated);
-            }
-            Command::Authenticate(Some(Auth::Credentials(client_credentials))) =>
-            {
-                let auth_config = self.config.auth.clone().expect("trying to authenticate without auth config");
-                try!(self.auth_credentials(auth_config.server, client_credentials.client_id,
-                                           client_credentials.client_secret,
-                                           device_config.certificates_path.as_ref().map(Deref::deref),
-                                           device_config.p12_path.as_ref().map(Deref::deref),
-                                           &device_config.p12_password));
-                etx.send(Event::Authenticated);
-            }
-            Command::Authenticate(Some(Auth::Registration(registration_credentials))) => {
-                let auth_config = self.config.auth.clone().expect("trying to authenticate without auth config");
-                try!(self.auth_certificate(auth_config.server, registration_credentials.client_id,
-                                           auth_config.expires_in.unwrap(),
-                                           device_config.certificates_path.as_ref().map(Deref::deref),
-                                           auth_config.p12_path.unwrap().as_ref(), &auth_config.p12_password.unwrap(),
-                                           device_config.p12_path.as_ref().map(Deref::deref),
-                                           &device_config.p12_password));
-                etx.send(Event::Authenticated);
             }
 
             Command::Shutdown => process::exit(0),
-
-            _ => etx.send(Event::NotAuthenticated)
-        }
-
-        Ok(())
+        })
     }
 
-    fn set_client(&mut self, auth: Auth) {
-        if !self.http_client.is_testing() {
-            self.http_client = Box::new(AuthClient::from(auth));
-        }
-    }
+    fn unauthenticated(&mut self, cmd: Command, _: Sender<Event>) -> Result<Event, Error> {
+        Ok(match cmd {
+            Command::Authenticate(Some(Auth::Credentials(creds))) => {
+                init_tls_client(Some(self.config.tls_data()));
+                if !self.http.is_testing() {
+                    self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
+                }
 
+                let server = self.config.auth.as_ref().expect("auth config required").server.join("/token");
+                let token  = oauth2(server, self.http.as_ref())?;
+                self.auth  = Auth::Token(token.clone());
+                if !self.http.is_testing() {
+                    self.http = Box::new(AuthClient::from(Auth::Token(token.clone())));
+                }
+
+                Event::Authenticated
+            }
+
+            Command::Authenticate(Some(Auth::Registration(reg))) => {
+                let auth = self.config.auth.as_ref().expect("auth config required");
+                let p12  = self.config.device.p12_path.as_ref().expect("auth_certificate expects a p12_path");
+
+                if !Path::new(&p12).exists() {
+                    // no access certificate, need to get it
+                    let endpoint = auth.server.join("/devices");
+                    let expires  = auth.expiry_days.expect("need auth.expiry_days");
+                    let bundle   = pkcs12(endpoint, auth.client_id.clone(), expires, self.http.as_ref())?;
+                    let _ = File::create(p12)
+                        .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
+                        .map_err(|err| panic!("couldn't open auth.p12_path for writing: {}", err));
+                }
+                init_tls_client(Some(self.config.tls_data()));
+
+                self.auth = Auth::Certificate;
+                if !self.http.is_testing() {
+                    self.http = Box::new(AuthClient::from(Auth::Registration(reg)));
+                }
+
+                Event::Authenticated
+            }
+
+            Command::Authenticate(_) => Event::Authenticated,
+
+            Command::Shutdown => process::exit(0),
+
+            _ => Event::NotAuthenticated
+        })
+    }
 }
 
 
@@ -394,22 +384,14 @@ mod tests {
     use package_manager::tpm::assert_rx;
 
 
-    fn new_interpreter(replies: Vec<String>, pkg_mgr: PackageManager) -> (Sender<Command>, Receiver<Event>) {
+    fn new_interpreter(mut ci: CommandInterpreter) -> (Sender<Command>, Receiver<Event>) {
         let (etx, erx) = chan::sync::<Event>(0);
         let (ctx, crx) = chan::sync::<Command>(0);
 
         thread::spawn(move || {
-            let mut gi = GlobalInterpreter {
-                config:      Config::default(),
-                auth:        Auth::None,
-                http_client: Box::new(TestClient::from(replies)),
-                rvi:         None
-            };
-            gi.config.device.package_manager = pkg_mgr;
-
             loop {
                 match crx.recv() {
-                    Some(cmd) => gi.interpret(Interpret { command: cmd, response_tx: None }, &etx),
+                    Some(cmd) => ci.interpret(Interpret { command: cmd, response_tx: None }, &etx),
                     None      => break
                 }
             }
@@ -418,11 +400,19 @@ mod tests {
         (ctx, erx)
     }
 
+    extern crate env_logger;
     #[test]
     fn already_authenticated() {
-        let replies    = Vec::new();
-        let pkg_mgr    = PackageManager::new_tpm(true);
-        let (ctx, erx) = new_interpreter(replies, pkg_mgr);
+        env_logger::init().unwrap();
+        let vec: Vec<String> = Vec::new();
+        let mut ci = CommandInterpreter {
+            mode:   CommandMode::Sota,
+            config: Config::default(),
+            auth:   Auth::None,
+            http:   Box::new(TestClient::from(vec))
+        };
+        ci.config.device.package_manager = PackageManager::new_tpm(true);
+        let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::Authenticate(None));
         assert_rx(erx, &[Event::AlreadyAuthenticated]);
@@ -430,9 +420,14 @@ mod tests {
 
     #[test]
     fn download_updates() {
-        let replies    = vec!["[]".to_string(); 10];
-        let pkg_mgr    = PackageManager::new_tpm(true);
-        let (ctx, erx) = new_interpreter(replies, pkg_mgr);
+        let mut ci = CommandInterpreter {
+            mode:   CommandMode::Sota,
+            config: Config::default(),
+            auth:   Auth::None,
+            http:   Box::new(TestClient::from(vec!["[]".to_string(); 10]))
+        };
+        ci.config.device.package_manager = PackageManager::new_tpm(true);
+        let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::StartDownload("1".to_string()));
         assert_rx(erx, &[
@@ -447,9 +442,14 @@ mod tests {
 
     #[test]
     fn install_update_success() {
-        let replies    = vec!["[]".to_string(); 10];
-        let pkg_mgr    = PackageManager::new_tpm(true);
-        let (ctx, erx) = new_interpreter(replies, pkg_mgr);
+        let mut ci = CommandInterpreter {
+            mode:   CommandMode::Sota,
+            config: Config::default(),
+            auth:   Auth::None,
+            http:   Box::new(TestClient::from(vec!["[]".to_string(); 10]))
+        };
+        ci.config.device.package_manager = PackageManager::new_tpm(true);
+        let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::StartInstall("1".to_string()));
         assert_rx(erx, &[
@@ -462,9 +462,14 @@ mod tests {
 
     #[test]
     fn install_update_failed() {
-        let replies    = vec!["[]".to_string(); 10];
-        let pkg_mgr    = PackageManager::new_tpm(false);
-        let (ctx, erx) = new_interpreter(replies, pkg_mgr);
+        let mut ci = CommandInterpreter {
+            mode:   CommandMode::Sota,
+            config: Config::default(),
+            auth:   Auth::None,
+            http:   Box::new(TestClient::from(vec!["[]".to_string(); 10]))
+        };
+        ci.config.device.package_manager = PackageManager::new_tpm(false);
+        let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::StartInstall("1".to_string()));
         assert_rx(erx, &[
