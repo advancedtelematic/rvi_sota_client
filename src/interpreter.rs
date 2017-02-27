@@ -1,5 +1,6 @@
 use chan;
 use chan::{Sender, Receiver, WaitGroup};
+use rustc_serialize::json;
 use std::process;
 use std::fs::File;
 use std::io::Write;
@@ -40,9 +41,10 @@ pub trait Interpreter<I, O> {
 /// The `EventInterpreter` listens for `Event`s and optionally responds with
 /// `Command`s that may be sent to the `CommandInterpreter`.
 pub struct EventInterpreter {
-    pub pacman:  PackageManager,
-    pub auto_dl: bool,
-    pub sysinfo: Option<String>,
+    pub auth_cmd: Command,
+    pub pacman:   PackageManager,
+    pub auto_dl:  bool,
+    pub sysinfo:  Option<String>,
 }
 
 impl Interpreter<Event, Command> for EventInterpreter {
@@ -62,7 +64,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::NotAuthenticated => {
                 info!("Trying to authenticate again...");
-                ctx.send(Command::Authenticate(None));
+                ctx.send(self.auth_cmd.clone());
             }
 
             Event::UpdatesReceived(requests) => {
@@ -109,7 +111,11 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 }
             }
 
-            Event::UptaneMetadataUpdated(snapshot, targets) => {
+            Event::UptaneSnapshotUpdated(snapshot) => {
+                unimplemented!();
+            }
+
+            Event::UptaneTargetsUpdated(targets) => {
                 unimplemented!();
             }
 
@@ -173,7 +179,6 @@ impl Interpreter<Interpret, Event> for CommandInterpreter {
 
             Err(Error::HttpAuth(resp)) => {
                 error!("HTTP authorization failed: {}", resp);
-                self.auth = Auth::None;
                 etx.send(Event::NotAuthenticated);
                 Event::NotAuthenticated
             }
@@ -200,9 +205,10 @@ impl CommandInterpreter {
                 match self.mode {
                     CommandMode::Uptane(None) => {
                         info!("initialising uptane mode");
-                        let uptane = Uptane::new(self.config.uptane.clone(), self.config.device.uuid.clone());
-                        let manifest = self.config.device.package_manager.installed_packages();
-                        // FIXME: uptane.put_manifest(self.http.as_ref(), true, manifest)?;
+                        let mut uptane = Uptane::new(self.config.uptane.clone(), self.config.device.uuid.clone());
+                        let packages = self.config.device.package_manager.installed_packages()?;
+                        let manifest = json::encode(&packages)?;
+                        uptane.put_manifest(self.http.as_ref(), manifest.as_bytes().to_vec())?;
                         self.mode = CommandMode::Uptane(Some(uptane));
                         Event::UptaneInitialised
                     }
@@ -211,11 +217,11 @@ impl CommandInterpreter {
                         let (_, timestamp_new) = uptane.get_timestamp(self.http.as_ref(), true)?;
                         if timestamp_new {
                             let (snapshot, _) = uptane.get_snapshot(self.http.as_ref(), true)?;
+                            etx.send(Event::UptaneSnapshotUpdated(snapshot.meta));
                             let (targets, _)  = uptane.get_targets(self.http.as_ref(), true)?;
-                            Event::UptaneMetadataUpdated(snapshot, targets)
-                        } else {
-                            Event::UptaneTimestampChecked
+                            etx.send(Event::UptaneTargetsUpdated(targets.targets));
                         }
+                        Event::UptaneTimestampUpdated
                     }
 
                     _ => {
@@ -400,10 +406,8 @@ mod tests {
         (ctx, erx)
     }
 
-    extern crate env_logger;
     #[test]
     fn already_authenticated() {
-        env_logger::init().unwrap();
         let vec: Vec<String> = Vec::new();
         let mut ci = CommandInterpreter {
             mode:   CommandMode::Sota,

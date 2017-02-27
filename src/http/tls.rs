@@ -26,7 +26,6 @@ pub struct TlsData<'p> {
 pub fn init_tls_client(tls: Option<TlsData>) {
     match tls {
         Some(ref tls) => {
-            debug!("using preset openssl certificates");
             tls.ca_path.map(|path| info!("Setting CA certificates to {}.", path));
             tls.p12_path.map(|path| info!("Setting PKCS#12 file to {}.", path));
         }
@@ -35,11 +34,6 @@ pub fn init_tls_client(tls: Option<TlsData>) {
     }
 
     *CONNECTOR.lock().unwrap() = Some(Arc::new(TlsConnector::new(tls)));
-}
-
-/// Use the default certificates (for testing).
-pub fn use_default_certificates() {
-    init_tls_client(None);
 }
 
 
@@ -87,17 +81,23 @@ impl TlsConnector {
                 });
 
                 tls.p12_path.map(|path| {
-                    let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open p12 file: {}", err));
+                    let mut file = File::open(path)
+                        .unwrap_or_else(|err| panic!("couldn't open p12 file: {}", err));
                     let mut buf = Vec::new();
-                    let _ = file.read_to_end(&mut buf).map_err(|err| panic!("couldn't read p12 file: {}", err));
-                    let pkcs = Pkcs12::from_der(&buf).unwrap_or_else(|err| panic!("couldn't parse p12 file: {}", err));
-                    let pass = tls.p12_path.expect("p12_pass required");
-                    let parsed = pkcs.parse(pass).unwrap_or_else(|err| panic!("couldn't decode p12 file: {}", err));
+                    let _ = file.read_to_end(&mut buf)
+                        .map_err(|err| panic!("couldn't read p12 file: {}", err));
+                    let pkcs = Pkcs12::from_der(&buf)
+                        .unwrap_or_else(|err| panic!("couldn't parse p12 file: {}", err));
+                    let parsed = pkcs.parse(tls.p12_pass.unwrap_or(""))
+                        .unwrap_or_else(|err| panic!("couldn't decode p12 file: {}", err));
 
                     let context = builder.builder_mut();
-                    let _ = context.set_certificate(&parsed.cert).map_err(|err| panic!("couldn't set pkcs12 certificate: {}", err));
-                    let _ = context.set_private_key(&parsed.pkey).map_err(|err| panic!("couldn't set private key: {}", err));
-                    let _ = context.check_private_key().map_err(|err| panic!("couldn't validate private key: {}", err));
+                    let _ = context.set_certificate(&parsed.cert)
+                        .map_err(|err| panic!("couldn't set pkcs12 certificate: {}", err));
+                    let _ = context.set_private_key(&parsed.pkey)
+                        .map_err(|err| panic!("couldn't set private key: {}", err));
+                    let _ = context.check_private_key()
+                        .map_err(|err| panic!("couldn't validate private key: {}", err));
                 });
 
                 TlsConnector(builder.build())

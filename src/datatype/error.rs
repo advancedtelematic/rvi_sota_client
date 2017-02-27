@@ -1,9 +1,9 @@
-use cjson::Error as CanonicalJsonError;
 use chrono::ParseError as ChronoParseError;
 use hyper::error::Error as HyperError;
 use rustc_serialize::json::{EncoderError as JsonEncoderError,
                             DecoderError as JsonDecoderError,
                             ParserError as JsonParserError};
+use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::Error as IoError;
@@ -22,7 +22,6 @@ use ws::Error as WebsocketError;
 /// System-wide errors that are returned from `Result` type failures.
 #[derive(Debug)]
 pub enum Error {
-    CanonicalJson(CanonicalJsonError),
     ChronoParse(ChronoParseError),
     Client(String),
     Command(String),
@@ -42,6 +41,7 @@ pub enum Error {
     Recv(RecvError),
     SendEvent(SendError<Event>),
     SendInterpret(SendError<Interpret>),
+    SerdeJson(SerdeJsonError),
     Socket(String),
     SystemInfo(String),
     TomlParser(Vec<TomlParserError>),
@@ -87,18 +87,18 @@ macro_rules! derive_from {
 }
 
 derive_from!([
-    CanonicalJsonError => CanonicalJson,
-    ChronoParseError   => ChronoParse,
-    FromUtf8Error      => FromUtf8,
-    HyperError         => Hyper,
-    IoError            => Io,
-    JsonEncoderError   => JsonEncoder,
-    JsonDecoderError   => JsonDecoder,
-    RecvError          => Recv,
-    ResponseData       => Http,
-    TomlDecodeError    => TomlDecode,
-    UrlParseError      => UrlParse,
-    WebsocketError     => Websocket
+    ChronoParseError => ChronoParse,
+    FromUtf8Error    => FromUtf8,
+    HyperError       => Hyper,
+    IoError          => Io,
+    JsonEncoderError => JsonEncoder,
+    JsonDecoderError => JsonDecoder,
+    RecvError        => Recv,
+    ResponseData     => Http,
+    SerdeJsonError   => SerdeJson,
+    TomlDecodeError  => TomlDecode,
+    UrlParseError    => UrlParse,
+    WebsocketError   => Websocket
 ]);
 
 derive_from!([
@@ -110,7 +110,6 @@ derive_from!([
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
         let inner: String = match *self {
-            Error::CanonicalJson(ref e) => format!("Canonical JSON error: {}", e.clone()),
             Error::ChronoParse(ref e)   => format!("DateTime parse error: {}", e.clone()),
             Error::Client(ref s)        => format!("Http client error: {}", s.clone()),
             Error::Command(ref e)       => format!("Unknown Command: {}", e.clone()),
@@ -130,6 +129,7 @@ impl Display for Error {
             Error::Recv(ref s)          => format!("Recv error: {}", s.clone()),
             Error::SendEvent(ref s)     => format!("Send error for Event: {}", s.clone()),
             Error::SendInterpret(ref s) => format!("Send error for Interpret: {}", s.clone()),
+            Error::SerdeJson(ref e)     => format!("Serde JSON error: {}", e.clone()),
             Error::Socket(ref s)        => format!("Unix Domain Socket error: {}", s.clone()),
             Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
             Error::TomlDecode(ref e)    => format!("Toml decode error: {}", e.clone()),

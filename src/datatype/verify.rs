@@ -1,40 +1,29 @@
-use cjson;
+//use canonical_json as cjson;
 use crypto::ed25519;
+use serde_json as json;
 use std::collections::HashMap;
-use std::str::FromStr;
 
-use datatype::{Error, Key, Metadata, Role, RoleData, SignedMeta, UptaneKeys, UptaneRoles};
+use datatype::{Error, Key, Metadata, Role, RoleData, Signed};
 
 
-#[allow(non_camel_case_types)]
 #[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
 pub enum KeyType {
-    ed25519
-}
-
-impl FromStr for KeyType {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "ed25519" => Ok(KeyType::ed25519),
-            _         => Err(Error::UptaneInvalidKeyType)
-        }
-    }
+    #[serde(rename = "ed25519")]
+    Ed25519
 }
 
 impl KeyType {
-    pub fn verify(&self, key: &[u8], msg: &[u8], sig: &[u8]) -> bool {
+    pub fn verify(&self, msg: &[u8], key: &[u8], sig: &[u8]) -> bool {
         match *self {
-            KeyType::ed25519 => ed25519::verify(msg, key, sig),
+            KeyType::Ed25519 => ed25519::verify(msg, key, sig),
         }
     }
 }
 
 
 pub struct Verifier {
-    keys:  UptaneKeys,
-    roles: UptaneRoles,
+    keys:  HashMap<String, Key>,
+    roles: HashMap<Role, RoleData>
 }
 
 impl Verifier {
@@ -45,23 +34,25 @@ impl Verifier {
         }
     }
 
-    pub fn add_key(&mut self, key: Key) {
-        self.keys.insert(key.id.clone(), key);
+    pub fn add_key(&mut self, id: String, key: Key) {
+        debug!("inserting to verifier: {}", id);
+        self.keys.insert(id, key);
     }
 
     pub fn add_role(&mut self, role: Role, data: RoleData) {
+        debug!("inserting role to verifier: {:?}", role);
         self.roles.insert(role, data);
     }
 
-    pub fn verify(&self, role: Role, metadata: Metadata, min_version: u64) -> Result<(), Error> {
-        self.verify_signatures(&role, &metadata)?;
+    pub fn verify(&self, role: &Role, metadata: &Metadata, min_version: u64) -> Result<(), Error> {
+        self.verify_signatures(role, metadata)?;
 
-        let meta = cjson::from_slice::<SignedMeta>(&metadata.signed)?;
-        if meta._type != role {
+        let signed = json::from_value::<Signed>(metadata.signed.clone())?;
+        if signed._type != *role {
             Err(Error::UptaneInvalidRole)
-        } else if meta.expired()? {
+        } else if signed.expired()? {
             Err(Error::UptaneExpired)
-        } else if meta.version < min_version {
+        } else if signed.version < min_version {
             Err(Error::UptaneVersion)
         } else {
             Ok(())
@@ -69,7 +60,7 @@ impl Verifier {
     }
 
     pub fn verify_signatures(&self, role: &Role, metadata: &Metadata) -> Result<(), Error> {
-        if metadata.signatures.len() == 0 {
+        if metadata.signatures.is_empty() {
             return Err(Error::UptaneMissingSignatures);
         }
 
@@ -77,7 +68,10 @@ impl Verifier {
         for sig in &metadata.signatures {
             match self.keys.get(&sig.keyid) {
                 Some(key) => {
-                    if !key.keytype.verify(&key.keyval.public, &metadata.signed, &sig.sig.as_bytes()) {
+                    let signed = json::to_string(&metadata.signed)?;
+                    if ! key.keytype.verify(signed.as_bytes(),
+                                            key.keyval.public.as_bytes(),
+                                            sig.sig.as_bytes()) {
                         return Err(Error::UptaneVerifySignatures);
                     }
                     valid_count += 1;

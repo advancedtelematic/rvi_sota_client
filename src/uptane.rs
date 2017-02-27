@@ -1,8 +1,8 @@
-use cjson;
+use serde_json as json;
 use std::collections::HashMap;
 
-use datatype::{AccessToken, Error, Metadata, Role, Root, Snapshot, Targets, Timestamp,
-               UpdateReport, UptaneConfig, UptaneCustom, UptaneMeta, Url, Verifier};
+use datatype::{AccessToken, Error, Metadata, Role, Root, SignedMeta, SignedCustom,
+               Snapshot, Targets, Timestamp, UpdateReport, UptaneConfig, Url, Verifier};
 use http::{Client, Response};
 use package_manager::PackageManager;
 
@@ -17,12 +17,7 @@ pub struct Version {
 
 impl Version {
     fn new() -> Self {
-        Version {
-            root:      0,
-            targets:   0,
-            snapshot:  0,
-            timestamp: 0
-        }
+        Version { root: 0, targets: 0, snapshot: 0, timestamp: 0 }
     }
 }
 
@@ -63,7 +58,7 @@ impl Uptane {
     /// GET the bytes response from the given endpoint.
     fn get_endpoint(&mut self, client: &Client, director: bool, endpoint: &str) -> Result<Vec<u8>, Error> {
         let resp_rx = client.get(self.endpoint(director, endpoint), None);
-        let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't get bytes from endpoint".to_string())));
+        let resp    = resp_rx.recv().ok_or(Error::Client("couldn't get bytes from endpoint".to_string()))?;
         match resp {
             Response::Success(data) => Ok(data.body),
             Response::Failed(data)  => Err(Error::from(data)),
@@ -74,7 +69,7 @@ impl Uptane {
     /// PUT bytes to endpoint.
     fn put_endpoint(&mut self, client: &Client, director: bool, endpoint: &str, bytes: Vec<u8>) -> Result<(), Error> {
         let resp_rx = client.put(self.endpoint(director, endpoint), Some(bytes));
-        let resp    = try!(resp_rx.recv().ok_or(Error::Client("couldn't put bytes to endpoint".to_string())));
+        let resp    = resp_rx.recv().ok_or(Error::Client("couldn't put bytes to endpoint".to_string()))?;
         match resp {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(Error::from(data)),
@@ -83,100 +78,106 @@ impl Uptane {
     }
 
 
-    /// Post a new manifest file.
-    pub fn put_manifest(&mut self, client: &Client, director: bool, manifest: Vec<u8>) -> Result<(), Error> {
+    /// Put a new manifest file to the Director server.
+    pub fn put_manifest(&mut self, client: &Client, manifest: Vec<u8>) -> Result<(), Error> {
         debug!("put_manifest");
-        self.put_endpoint(client, director, "manifest", manifest)
+        self.put_endpoint(client, true, "manifest", manifest)
     }
 
-    /// Get the root.json metadata.
-    pub fn get_root(&mut self, client: &Client, director: bool, verifier: bool) -> Result<Root, Error> {
+    /// Add the root.json metadata to the verifier and return a new version indicator.
+    pub fn get_root(&mut self, client: &Client, director: bool) -> Result<bool, Error> {
         debug!("get_root");
         let buf  = self.get_endpoint(client, director, "root.json")?;
-        let meta = cjson::from_slice::<Metadata>(&buf)?;
-        let root = cjson::from_slice::<Root>(&meta.signed)?;
-        let out  = root.clone();
+        let meta = json::from_slice::<Metadata>(&buf)?;
+        let root = json::from_value::<Root>(meta.signed.clone())?;
 
-        if verifier {
-            for (_, key) in root.keys {
-                self.verifier.add_key(key);
-            }
-            for (role, data) in root.roles {
-                self.verifier.add_role(role, data);
-            }
+        for (id, key) in root.keys {
+            self.verifier.add_key(id, key);
+        }
+        for (role, data) in root.roles {
+            self.verifier.add_role(role, data);
         }
 
         debug!("checking root keys");
-        self.verifier.verify(Role::Root, meta, 0)?;
-        self.version.root = root.version;
-        Ok(out)
+        self.verifier.verify(&Role::Root, &meta, 0)?;
+        if root.version > self.version.root {
+            debug!("root version increased from {} to {}", self.version.root, root.version);
+            self.version.root = root.version;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 
-    /// Get the targets.json metadata.
-    pub fn get_targets(&mut self, client: &Client, director: bool) -> Result<(UptaneMeta, bool), Error> {
+    /// Get the targets.json metadata and a new version indicator.
+    pub fn get_targets(&mut self, client: &Client, director: bool) -> Result<(Targets, bool), Error> {
         debug!("get_targets");
         let buf  = self.get_endpoint(client, director, "targets.json")?;
-        let meta = cjson::from_slice::<Metadata>(&buf)?;
-        let ts   = cjson::from_slice::<Targets>(&meta.signed)?;
+        let meta = json::from_slice::<Metadata>(&buf)?;
+        let targ = json::from_value::<Targets>(meta.signed.clone())?;
 
         debug!("checking targets keys");
-        self.verifier.verify(Role::Targets, meta, 0)?;
-        if ts.version > self.version.targets {
-            debug!("targets version increased from {} to {}", self.version.targets, ts.version);
-            self.version.targets = ts.version;
-            Ok((ts.targets, true))
+        self.verifier.verify(&Role::Targets, &meta, 0)?;
+        if targ.version > self.version.targets {
+            debug!("targets version increased from {} to {}", self.version.targets, targ.version);
+            self.version.targets = targ.version;
+            Ok((targ, true))
         } else {
-            Ok((ts.targets, false))
+            Ok((targ, false))
         }
     }
 
-    /// Get the snapshot.json metadata.
-    pub fn get_snapshot(&mut self, client: &Client, director: bool) -> Result<(UptaneMeta, bool), Error> {
+    /// Get the snapshot.json metadata and a new version indicator.
+    pub fn get_snapshot(&mut self, client: &Client, director: bool) -> Result<(Snapshot, bool), Error> {
         debug!("get_snapshot");
         let buf  = self.get_endpoint(client, director, "snapshot.json")?;
-        let meta = cjson::from_slice::<Metadata>(&buf)?;
-        let ss   = cjson::from_slice::<Snapshot>(&meta.signed)?;
+        let meta = json::from_slice::<Metadata>(&buf)?;
+        let snap = json::from_value::<Snapshot>(meta.signed.clone())?;
 
         debug!("checking snapshot keys");
-        self.verifier.verify(Role::Snapshot, meta, 0)?;
-        if ss.version > self.version.snapshot {
-            debug!("snapshot version increased from {} to {}", self.version.snapshot, ss.version);
-            self.version.snapshot = ss.version;
-            Ok((ss.meta, true))
+        self.verifier.verify(&Role::Snapshot, &meta, 0)?;
+        if snap.version > self.version.snapshot {
+            debug!("snapshot version increased from {} to {}", self.version.snapshot, snap.version);
+            self.version.snapshot = snap.version;
+            Ok((snap, true))
         } else {
-            Ok((ss.meta, false))
+            Ok((snap, false))
         }
     }
 
-    /// Get the timestamp.json metadata and return a tuple of metadata and a
-    /// boolean indicating whether the timestamp was updated.
-    pub fn get_timestamp(&mut self, client: &Client, director: bool) -> Result<(UptaneMeta, bool), Error> {
+    /// Get the timestamp.json metadata and a new version indicator.
+    pub fn get_timestamp(&mut self, client: &Client, director: bool) -> Result<(Timestamp, bool), Error> {
         debug!("get_timestamp");
         let buf  = self.get_endpoint(client, director, "timestamp.json")?;
-        let meta = cjson::from_slice::<Metadata>(&buf)?;
-        let ts   = cjson::from_slice::<Timestamp>(&meta.signed)?;
+        let meta = json::from_slice::<Metadata>(&buf)?;
+        let time = json::from_value::<Timestamp>(meta.signed.clone())?;
 
         debug!("checking timestamp keys");
-        self.verifier.verify(Role::Timestamp, meta, 0)?;
-        if ts.version > self.version.timestamp {
-            debug!("timestamp version increased from {} to {}", self.version.timestamp, ts.version);
-            self.version.timestamp = ts.version;
-            Ok((ts.meta, true))
+        self.verifier.verify(&Role::Timestamp, &meta, 0)?;
+        if time.version > self.version.timestamp {
+            debug!("timestamp version increased from {} to {}", self.version.timestamp, time.version);
+            self.version.timestamp = time.version;
+            Ok((time, true))
         } else {
-            Ok((ts.meta, false))
+            Ok((time, false))
         }
     }
 
-    pub fn extract_custom(&self, targets: UptaneMeta) -> UptaneCustom {
+
+    pub fn extract_custom(&self, targets: HashMap<String, SignedMeta>) -> HashMap<String, SignedCustom> {
         debug!("extract_custom");
         let mut out = HashMap::new();
         for (file, meta) in targets {
-            out.insert(file, meta.custom);
+            if let Some(custom) = meta.custom {
+                out.insert(file, custom);
+            }
         }
         out
     }
 
-    pub fn install_custom(&mut self, token: Option<&AccessToken>, custom: UptaneCustom) -> Result<UpdateReport, UpdateReport> {
+    pub fn install_custom(&mut self,
+                          token:  Option<&AccessToken>,
+                          custom: HashMap<String, SignedCustom>) -> Result<UpdateReport, UpdateReport> {
         debug!("install_custom");
         let (id, path) = self.custom_path(custom)?;
         match PackageManager::Uptane.install_package(&path, token) {
@@ -185,7 +186,7 @@ impl Uptane {
         }
     }
 
-    pub fn custom_path(&self, custom: UptaneCustom) -> Result<(String, String), UpdateReport> {
+    pub fn custom_path(&self, custom: HashMap<String, SignedCustom>) -> Result<(String, String), UpdateReport> {
         unimplemented!();
     }
 }
@@ -193,59 +194,86 @@ impl Uptane {
 
 #[cfg(test)]
 mod tests {
-    use cjson;
-    use serde_json as sjson;
-    use std::convert::TryFrom;
-    use std::fmt::Write;
+    use std::fs::File;
+    use std::io::Read;
 
     use super::*;
     use http::TestClient;
 
 
-    const TIMESTAMP_JSON: &'static str = r#"{
-        "signatures": [
-            {
-                "keyid": "1a2b4110927d4cba257262f614896179ff85ca1f1353a41b5224ac474ca71cb4",
-                "method": "ed25519",
-                "sig": "90d2a06c7a6c2a6a93a9f5771eb2e5ce0c93dd580bebc2080d10894623cfd6eaedf4df84891d5aa37ace3ae3736a698e082e12c300dfe5aee92ea33a8f461f02"
-            }
-        ],
-        "signed": {
-            "_type": "Timestamp",
-            "expires": "2030-01-01T00:00:00Z",
-            "meta": {
-                "snapshot.json": {
-                    "hashes": {
-                        "sha256": "c14aeb4ac9f4a8fc0d83d12482b9197452f6adf3eb710e3b1e2b79e8d14cb681"
-                    },
-                    "length": 1007
-                }
-            },
-            "version": 1
+    fn read_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
+        let mut replies = Vec::new();
+        for path in paths {
+            let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open path: {}\n{}", path, err));
+            let mut buf = Vec::new();
+            file.read_to_end(&mut buf).unwrap_or_else(|err| panic!("couldn't read path: {}\n{}", path, err));
+            replies.push(buf);
         }
-    }"#;
+        TestClient::from(replies)
+    }
 
+    #[test]
+    fn test_get_targets_director() {
+        let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-targets-director".to_string());
+        let client = read_paths(&[
+            "tests/uptane/root.json",
+            "tests/uptane/targets_director.json",
+        ]);
 
-    #[ignore] // FIXME
+        assert_eq!(true, uptane.get_root(&client, true).expect("couldn't get_root"));
+        match uptane.get_targets(&client, true) {
+            Ok((ts, ts_new)) => {
+                assert_eq!(ts_new, true);
+                {
+                    let meta = ts.targets.get("/file1.img").expect("no /file1.img metadata");
+                    assert_eq!(meta.length, 31);
+                    let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
+                    assert_eq!(hash, "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da");
+                }
+                let custom = uptane.extract_custom(ts.targets);
+                let image = custom.get("/file1.img").expect("couldn't get /file1.img custom");
+                assert_eq!(image.ecuIdentifier, "identifier-file1");
+            }
+
+            Err(err) => panic!("couldn't get_targets_director: {}", err)
+        }
+    }
+
+    #[test]
+    fn test_get_snapshot() {
+        let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-snapshot".to_string());
+        let client = read_paths(&[
+            "tests/uptane/root.json",
+            "tests/uptane/snapshot.json",
+        ]);
+
+        assert_eq!(true, uptane.get_root(&client, true).expect("couldn't get_root"));
+        match uptane.get_snapshot(&client, true) {
+            Ok((ss, ss_new)) => {
+                assert_eq!(ss_new, true);
+                let meta = ss.meta.get("targets.json.gz").expect("no targets.json.gz metadata");
+                assert_eq!(meta.length, 599);
+                let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
+                assert_eq!(hash, "9f8aff5b55ee4b3140360d99b39fa755a3ea640462072b4fd74bdd72e6fe245a");
+            }
+
+            Err(err) => panic!("couldn't get_snapshot: {}", err)
+        }
+    }
+
     #[test]
     fn test_get_timestamp() {
-        let sval = sjson::from_str(TIMESTAMP_JSON).expect("couldn't encode timestamp.json");
-        let cval = cjson::Value::try_from(sval).expect("couldn't canonicalise timestamp.json");
-        let cstr = cjson::to_string(&cval).expect("couldn't serialise timestamp.json");
+        let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-timestamp".to_string());
+        let client = read_paths(&[
+            "tests/uptane/root.json",
+            "tests/uptane/timestamp.json",
+        ]);
 
-        let mut hex = String::new();
-        for &byte in cstr.as_bytes() {
-            write!(&mut hex, "{:x} ", byte).unwrap();
-        }
-        debug!("cstr: {}", hex);
-
-        let mut uptane = Uptane::new(UptaneConfig::default(), "test-uuid".to_string());
-        let client     = TestClient::from(vec![cstr]);
-
+        assert_eq!(true, uptane.get_root(&client, true).expect("get_root failed"));
         match uptane.get_timestamp(&client, true) {
             Ok((ts, ts_new)) => {
                 assert_eq!(ts_new, true);
-                let meta = ts.get("snapshot.json").expect("no snapshot.json metadata");
+                let meta = ts.meta.get("snapshot.json").expect("no snapshot.json metadata");
                 assert_eq!(meta.length, 1007);
             }
 

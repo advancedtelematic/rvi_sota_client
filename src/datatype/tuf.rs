@@ -1,4 +1,6 @@
 use chrono::{DateTime, NaiveDateTime, UTC};
+use serde;
+use serde_json as json;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use time::Duration;
@@ -6,7 +8,11 @@ use time::Duration;
 use datatype::{Error, KeyType};
 
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, Hash, Eq, PartialEq, Debug, Clone)]
+pub type UptaneCustom = HashMap<String, SignedCustom>;
+
+
+#[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
+#[serde(tag = "_type")]
 pub enum Role {
     Root,
     Targets,
@@ -14,21 +20,32 @@ pub enum Role {
     Timestamp
 }
 
+impl serde::Deserialize for Role {
+    fn deserialize<D: serde::Deserializer>(de: D) -> Result<Role, D::Error> {
+        if let json::Value::String(ref s) = serde::Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| serde::de::Error::custom(format!("unknown Role: {}", err)))
+        } else {
+            Err(serde::de::Error::custom("Unknown `Role` from `_type` field"))
+        }
+    }
+}
+
+
 impl FromStr for Role {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "Root"      => Ok(Role::Root),
-            "Snapshot"  => Ok(Role::Snapshot),
-            "Targets"   => Ok(Role::Targets),
-            "Timestamp" => Ok(Role::Timestamp),
-            _           => Err(Error::UptaneInvalidRole)
+            "root"      | "Root"      => Ok(Role::Root),
+            "snapshot"  | "Snapshot"  => Ok(Role::Snapshot),
+            "targets"   | "Targets"   => Ok(Role::Targets),
+            "timestamp" | "Timestamp" => Ok(Role::Timestamp),
+            _ => Err(Error::UptaneInvalidRole)
         }
     }
 }
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct RoleData {
     pub keyids:    HashSet<String>,
     pub threshold: u64,
@@ -45,75 +62,68 @@ impl RoleData {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Metadata {
     pub signatures: Vec<Signature>,
-    pub signed:     Vec<u8>
+    pub signed:     json::Value
 }
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Signature {
     pub keyid:  String,
     pub method: KeyType,
     pub sig:    String,
 }
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct SignedMeta {
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct Signed {
     pub _type:   Role,
     pub expires: String,
     pub version: u64
 }
 
-impl SignedMeta {
+impl Signed {
     pub fn expired(&self) -> Result<bool, Error> {
         let expiry = NaiveDateTime::parse_from_str(&self.expires, "%FT%TZ")?;
         Ok(DateTime::from_utc(expiry, UTC) < UTC::now())
     }
 }
 
-
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct Key {
-    pub keytype: KeyType,
-    pub keyval:  KeyValue,
-    pub id:      String,
-}
-
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct KeyValue {
-    pub public: Vec<u8>
-}
-
-
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct FileMeta {
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+pub struct SignedMeta {
     pub length: u64,
-    pub hashes: HashMap<String, Vec<u8>>,
-    pub custom: FileMetaCustom
+    pub hashes: HashMap<String, String>,
+    pub custom: Option<SignedCustom>
 }
 
 #[allow(non_snake_case)]
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct FileMetaCustom {
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+pub struct SignedCustom {
     pub ecuIdentifier: String,
-    pub uri: String,
+    pub uri: Option<String>,
 }
 
 
-pub type UptaneKeys   = HashMap<String, Key>;
-pub type UptaneRoles  = HashMap<Role, RoleData>;
-pub type UptaneMeta   = HashMap<String, FileMeta>;
-pub type UptaneCustom = HashMap<String, FileMetaCustom>;
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct Key {
+    pub keytype: KeyType,
+    pub keyval:  KeyValue,
+    pub id:      Option<String>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct KeyValue {
+    pub public: String
+}
 
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Root {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub keys:    UptaneKeys,
-    pub roles:   UptaneRoles,
+    pub keys:    HashMap<String, Key>,
+    pub roles:   HashMap<Role, RoleData>,
     pub consistent_snapshot: bool
 }
 
@@ -131,12 +141,12 @@ impl Default for Root {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Targets {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub targets: UptaneMeta,
+    pub targets: HashMap<String, SignedMeta>,
 }
 
 impl Default for Targets {
@@ -151,12 +161,12 @@ impl Default for Targets {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Snapshot {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub meta:    UptaneMeta,
+    pub meta:    HashMap<String, SignedMeta>,
 }
 
 impl Default for Snapshot {
@@ -171,12 +181,12 @@ impl Default for Snapshot {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Timestamp {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub meta:    UptaneMeta
+    pub meta:    HashMap<String, SignedMeta>
 }
 
 impl Default for Timestamp {

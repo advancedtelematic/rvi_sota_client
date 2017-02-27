@@ -4,7 +4,8 @@ use std::io::prelude::*;
 use std::ops::Deref;
 use toml::{Decoder, Parser, Table};
 
-use datatype::{Error, SocketAddr, Url};
+use datatype::{Auth, ClientCredentials, Command, Error, RegistrationCredentials,
+               SocketAddr, Url};
 use http::TlsData;
 use package_manager::PackageManager;
 
@@ -60,6 +61,33 @@ impl Config {
         })
     }
 
+    /// Return the Authenticate Command based on the current Config.
+    pub fn auth_command(&self) -> Result<Command, &'static str> {
+        self.auth.as_ref().map(|auth_cfg| {
+            let id     = auth_cfg.client_secret.clone();
+            let secret = auth_cfg.client_secret.clone();
+
+            let auth_p12   = auth_cfg.p12_path.clone();
+            let device_p12 = self.device.p12_path.clone();
+
+            match (id, secret, auth_p12, device_p12) {
+                (_, None,    None,    _)    => Err("Need one of auth-client-secret or auth-p12-path"),
+                (_, Some(_), Some(_), _)    => Err("Got both auth-client-secret and auth-p12-path"),
+                (_, _,       Some(_), None) => Err("Certificate registration needs auth-p12-path"),
+
+                (Some(id), Some(secret), _, _) => Ok(Command::Authenticate(
+                    Some(Auth::Credentials(ClientCredentials { client_id: id, client_secret: secret })
+                ))),
+
+                (Some(id), _, Some(_), _) => Ok(Command::Authenticate(
+                    Some(Auth::Registration(RegistrationCredentials { client_id: id })
+                ))),
+
+                _ => Ok(Command::Authenticate(None))
+            }
+        }).unwrap_or(Ok(Command::Authenticate(None)))
+    }
+
     /// Return the certificate paths for TLS configuration.
     pub fn tls_data(&self) -> TlsData {
         TlsData {
@@ -72,16 +100,16 @@ impl Config {
     /// Authenticate with PKCS#12 bundle.
     pub fn authenticate_with_certs(&self) -> bool {
         match self.auth {
-            Some(ref auth_cfg) => auth_cfg.p12_path.is_some(),
-            None => false
+            Some(AuthConfig { p12_path: Some(_), .. }) => true,
+            _ => false
         }
     }
 
     /// Authenticate with client id and secret.
     pub fn authenticate_with_creds(&self) -> bool {
         match self.auth {
-            Some(ref auth_cfg) => auth_cfg.client_secret.is_some(),
-            None => false
+            Some(AuthConfig { client_secret: Some(_), .. }) => true,
+            _ => false
         }
     }
 }
