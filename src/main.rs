@@ -45,11 +45,11 @@ fn main() {
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
     let (itx, irx) = chan::async::<Interpret>();
-
     let mut broadcast = Broadcast::new(erx);
     let wg = WaitGroup::new();
 
-    ctx.send(Command::Authenticate(None));
+    let auth_cmd = config.auth_command().unwrap_or_else(|err| exit!(2, "{}", err));
+    ctx.send(auth_cmd.clone());
 
     crossbeam::scope(|scope| {
         // subscribe to signals first
@@ -117,17 +117,18 @@ fn main() {
         // start interpreters
         //
 
-        let event_sub = broadcast.subscribe();
-        let event_ctx = ctx.clone();
-        let event_mgr = config.device.package_manager.clone();
-        let event_dl  = config.device.auto_download.clone();
-        let event_sys = config.device.system_info.clone();
-        let event_wg  = wg.clone();
+        let ev_sub = broadcast.subscribe();
+        let ev_ctx = ctx.clone();
+        let ev_mgr = config.device.package_manager.clone();
+        let ev_dl  = config.device.auto_download.clone();
+        let ev_sys = config.device.system_info.clone();
+        let ev_wg  = wg.clone();
         scope.spawn(move || EventInterpreter {
-            pacman:  event_mgr,
-            auto_dl: event_dl,
-            sysinfo: event_sys
-        }.run(event_sub, event_ctx, event_wg));
+            auth_cmd: auth_cmd,
+            pacman:   ev_mgr,
+            auto_dl:  ev_dl,
+            sysinfo:  ev_sys
+        }.run(ev_sub, ev_ctx, ev_wg));
 
         let int_itx = itx.clone();
         let int_wg  = wg.clone();
@@ -339,19 +340,6 @@ fn build_config(version: &str) -> Config {
 }
 
 fn init_config(config: &Config) -> CommandMode {
-    config.auth.as_ref().map(|auth_cfg| {
-        let ref secret   = auth_cfg.client_secret;
-        let ref auth_p12 = auth_cfg.p12_path;
-        let ref dev_p12  = config.device.p12_path;
-
-        if secret.is_some() == auth_p12.is_some() {
-            exit!(1, "Auth config needs either auth-client-secret or auth-p12-path, found {:?}", auth_cfg);
-        }
-        if auth_p12.is_some() && dev_p12.is_none() {
-            exit!(1, "Certificate registration needs device.p12_path, found {:?}", auth_cfg);
-        }
-    });
-
     init_tls_client(None);
 
     if let PackageManager::Uptane = config.device.package_manager {

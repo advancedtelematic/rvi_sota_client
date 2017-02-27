@@ -1,7 +1,8 @@
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::collections::HashMap;
+use std::fmt::{self, Display, Formatter};
 
-use datatype::{DownloadComplete, Package, UpdateAvailable, UpdateReport,
-               UpdateRequest, UpdateRequestId, UptaneMeta};
+use datatype::{DownloadComplete, Package, SignedMeta, UpdateAvailable, UpdateReport,
+               UpdateRequest, UpdateRequestId};
 
 
 /// System-wide events that are broadcast to all interested parties.
@@ -58,13 +59,15 @@ pub enum Event {
     /// A new Uptane client was created.
     UptaneInitialised,
     /// There are no new Uptane updates.
-    UptaneTimestampChecked,
-    /// The updated snapshot.json and target.json metadata.
-    UptaneMetadataUpdated(UptaneMeta, UptaneMeta)
+    UptaneTimestampUpdated,
+    /// The updated snapshot.json metadata.
+    UptaneSnapshotUpdated(HashMap<String, SignedMeta>),
+    /// The updated target.json metadata.
+    UptaneTargetsUpdated(HashMap<String, SignedMeta>)
 }
 
 impl Display for Event {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{:?}", self)
     }
 }

@@ -9,7 +9,7 @@ pub mod network;
 pub mod report;
 pub mod request;
 pub mod shell;
-pub mod uptane;
+pub mod tuf;
 pub mod verify;
 
 pub use self::auth::{AccessToken, Auth, ClientCredentials, RegistrationCredentials};
@@ -25,7 +25,6 @@ pub use self::report::{DeviceReport, InstalledFirmware, InstalledPackage, Instal
 pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, DownloadStarted, Package,
                         UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
 pub use self::shell::{OstreePackage, ostree_install, ostree_installed_packages, system_info};
-pub use self::uptane::{FileMeta, FileMetaCustom, Key, KeyValue, Metadata, Role, RoleData,
-                       Root, Signature, SignedMeta, Snapshot, Targets, Timestamp,
-                       UptaneKeys, UptaneRoles, UptaneMeta, UptaneCustom};
+pub use self::tuf::{Key, KeyValue, Metadata, Role, RoleData, Root, Signature, Signed,
+                    SignedCustom, SignedMeta, Snapshot, Targets, Timestamp};
 pub use self::verify::{KeyType, Verifier};

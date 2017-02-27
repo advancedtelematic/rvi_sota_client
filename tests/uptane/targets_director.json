@@ -13,9 +13,9 @@
     "targets": {
       "/file1.img": {
         "custom": {
-          "ecuIdentifier": 1234567890,
+          "ecuIdentifier": "identifier-file1",
           "hardwareIdentifier": 906941628,
-          "releaseCounter": 16,
+          "releaseCounter": 16
         },
         "hashes": {
           "sha256": "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
@@ -24,9 +24,9 @@
       },
       "/file2.img": {
         "custom": {
-          "ecuIdentifier": 1234567891,
+          "ecuIdentifier": "identifier-file2",
           "hardwareIdentifier": 906941629,
-          "releaseCounter": 42,
+          "releaseCounter": 42
         },
         "hashes": {
        "sha256": "452ce8308500d83ef44248d8e6062359211992fd837ea9e370e561efb1a4ca99"

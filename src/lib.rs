@@ -1,8 +1,6 @@
-#![feature(try_from)]
-
 #[macro_use] extern crate nom; // use before log to avoid error!() macro conflict
 
-extern crate canonical_json as cjson;
+//extern crate canonical_json;
 extern crate chan;
 extern crate chrono;
 extern crate crossbeam;
@@ -14,6 +12,7 @@ extern crate openssl;
 #[macro_use] extern crate log;
 extern crate rand;
 extern crate rustc_serialize;
+extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
 extern crate time;
