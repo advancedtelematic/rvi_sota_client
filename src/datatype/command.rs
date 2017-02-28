@@ -12,7 +12,7 @@ use datatype::auth::Auth;
 #[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
 pub enum Command {
     /// Authenticate with the auth server.
-    Authenticate(Option<Auth>),
+    Authenticate(Auth),
     /// Shutdown the client immediately.
     Shutdown,
 
@@ -65,7 +65,7 @@ named!(command <(Command, Vec<&str>)>, chain!(
     space?
     ~ cmd: alt!(
         alt_complete!(tag!("Authenticate") | tag!("auth"))
-            => { |_| Command::Authenticate(None) }
+            => { |_| Command::Authenticate(Auth::None) }
         | alt_complete!(tag!("GetUpdateRequests") | tag!("getreq"))
             => { |_| Command::GetUpdateRequests }
         | alt_complete!(tag!("ListInstalledPackages") | tag!("ls"))
@@ -109,14 +109,14 @@ named!(arguments <&[u8], Vec<&str> >, chain!(
 fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
     match cmd {
         Command::Authenticate(_) => match args.len() {
-            0 => Ok(Command::Authenticate(None)),
-            1 => Ok(Command::Authenticate(Some(Auth::Registration(RegistrationCredentials {
+            0 => Ok(Command::Authenticate(Auth::None)),
+            1 => Ok(Command::Authenticate(Auth::Registration(RegistrationCredentials {
                 client_id:     args[0].to_string()
-            })))),
-            2 => Ok(Command::Authenticate(Some(Auth::Credentials(ClientCredentials {
+            }))),
+            2 => Ok(Command::Authenticate(Auth::Credentials(ClientCredentials {
                 client_id:     args[0].to_string(),
                 client_secret: args[1].to_string()
-            })))),
+            }))),
             _ => Err(Error::Command(format!("unexpected Authenticate args: {:?}", args))),
         },
 

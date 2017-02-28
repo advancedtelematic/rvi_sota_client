@@ -4,7 +4,7 @@ use std::io::prelude::*;
 use std::ops::Deref;
 use toml::{Decoder, Parser, Table};
 
-use datatype::{Auth, ClientCredentials, Command, Error, RegistrationCredentials,
+use datatype::{Auth, ClientCredentials, Error, RegistrationCredentials,
                SocketAddr, Url};
 use http::TlsData;
 use package_manager::PackageManager;
@@ -61,10 +61,10 @@ impl Config {
         })
     }
 
-    /// Return the Authenticate Command based on the current Config.
-    pub fn auth_command(&self) -> Result<Command, &'static str> {
+    /// Return the Auth based on the current Config.
+    pub fn auth(&self) -> Result<Auth, &'static str> {
         self.auth.as_ref().map(|auth_cfg| {
-            let id     = auth_cfg.client_secret.clone();
+            let id     = auth_cfg.client_id.clone();
             let secret = auth_cfg.client_secret.clone();
 
             let auth_p12   = auth_cfg.p12_path.clone();
@@ -75,17 +75,13 @@ impl Config {
                 (_, Some(_), Some(_), _)    => Err("Got both auth-client-secret and auth-p12-path"),
                 (_, _,       Some(_), None) => Err("Certificate registration needs auth-p12-path"),
 
-                (Some(id), Some(secret), _, _) => Ok(Command::Authenticate(
-                    Some(Auth::Credentials(ClientCredentials { client_id: id, client_secret: secret })
-                ))),
+                (id, Some(secret), _, _) => Ok(Auth::Credentials(
+                    ClientCredentials { client_id: id, client_secret: secret })),
 
-                (Some(id), _, Some(_), _) => Ok(Command::Authenticate(
-                    Some(Auth::Registration(RegistrationCredentials { client_id: id })
-                ))),
+                (id, _,      Some(_), _) => Ok(Auth::Registration(RegistrationCredentials { client_id: id })),
 
-                _ => Ok(Command::Authenticate(None))
             }
-        }).unwrap_or(Ok(Command::Authenticate(None)))
+        }).unwrap_or(Ok(Auth::None))
     }
 
     /// Return the certificate paths for TLS configuration.
