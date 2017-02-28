@@ -26,5 +26,6 @@ pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, Downloa
                         UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
 pub use self::shell::{OstreePackage, ostree_install, ostree_installed_packages, system_info};
 pub use self::tuf::{Key, KeyValue, Metadata, Role, RoleData, Root, Signature, Signed,
-                    SignedCustom, SignedMeta, Snapshot, Targets, Timestamp};
+                    SignedCustom, SignedImage, SignedManifest, SignedMeta, SignedVersion,
+                    Snapshot, Targets, Timestamp};
 pub use self::verify::{KeyType, Verifier};

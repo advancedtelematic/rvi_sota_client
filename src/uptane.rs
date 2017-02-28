@@ -198,24 +198,43 @@ mod tests {
     use std::io::Read;
 
     use super::*;
+    use datatype::{Metadata, SignedManifest, SignedVersion};
     use http::TestClient;
 
 
-    fn read_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
+    fn read_file(path: &str) -> Vec<u8> {
+        let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open path: {}\n{}", path, err));
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).unwrap_or_else(|err| panic!("couldn't read path: {}\n{}", path, err));
+        buf
+    }
+
+    fn client_from_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
         let mut replies = Vec::new();
         for path in paths {
-            let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open path: {}\n{}", path, err));
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf).unwrap_or_else(|err| panic!("couldn't read path: {}\n{}", path, err));
-            replies.push(buf);
+            replies.push(read_file(path));
         }
         TestClient::from(replies)
     }
 
     #[test]
+    fn test_read_manifest() {
+        let bytes = read_file("tests/uptane/ats/manifest.json");
+        let meta = json::from_slice::<Metadata>(&bytes).expect("couldn't load manifest");
+        let signed = json::from_value::<SignedManifest>(meta.signed).expect("couldn't load signed manifest");
+        assert_eq!(signed.primary_ecu_serial, "{ecu serial}");
+
+        let mut metas = json::from_value::<Vec<Metadata>>(signed.ecu_version_manifest).expect("couldn't load ecu_version_manifest");
+        assert_eq!(metas.len(), 1);
+        let meta1 = metas.pop().unwrap();
+        let version = json::from_value::<SignedVersion>(meta1.signed).expect("couldn't load first manifest");
+        assert_eq!(version.installed_image.filepath, "/file2.txt");
+    }
+
+    #[test]
     fn test_get_targets_director() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-targets-director".to_string());
-        let client = read_paths(&[
+        let client = client_from_paths(&[
             "tests/uptane/ed25519/root.json",
             "tests/uptane/ats/targets_director.json",
         ]);
@@ -242,7 +261,7 @@ mod tests {
     #[test]
     fn test_get_snapshot() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-snapshot".to_string());
-        let client = read_paths(&[
+        let client = client_from_paths(&[
             "tests/uptane/ed25519/root.json",
             "tests/uptane/ed25519/snapshot.json",
         ]);
@@ -264,7 +283,7 @@ mod tests {
     #[test]
     fn test_get_timestamp() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-timestamp".to_string());
-        let client = read_paths(&[
+        let client = client_from_paths(&[
             "tests/uptane/ed25519/root.json",
             "tests/uptane/ed25519/timestamp.json",
         ]);
