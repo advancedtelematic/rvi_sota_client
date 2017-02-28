@@ -63,6 +63,19 @@ impl RoleData {
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct Key {
+    pub keytype: KeyType,
+    pub keyval:  KeyValue,
+    pub id:      Option<String>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct KeyValue {
+    pub public: String
+}
+
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Metadata {
     pub signatures: Vec<Signature>,
     pub signed:     json::Value
@@ -74,6 +87,7 @@ pub struct Signature {
     pub method: KeyType,
     pub sig:    String,
 }
+
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Signed {
@@ -88,6 +102,7 @@ impl Signed {
         Ok(DateTime::from_utc(expiry, UTC) < UTC::now())
     }
 }
+
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
 pub struct SignedMeta {
@@ -105,15 +120,25 @@ pub struct SignedCustom {
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Key {
-    pub keytype: KeyType,
-    pub keyval:  KeyValue,
-    pub id:      Option<String>,
+pub struct SignedManifest {
+    pub vin:                  String,
+    pub primary_ecu_serial:   String,
+    pub ecu_version_manifest: json::Value
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct KeyValue {
-    pub public: String
+pub struct SignedVersion {
+    pub timeserver_time:          String,
+    pub installed_image:          SignedImage,
+    pub previous_timeserver_time: String,
+    pub ecu_serial:               String,
+    pub attacks_detected:         String,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct SignedImage {
+    pub filepath: String,
+    pub fileinfo: SignedMeta
 }
 
 
