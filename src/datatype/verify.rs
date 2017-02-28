@@ -114,19 +114,21 @@ impl Verifier {
             return Err(Error::UptaneMissingSignatures);
         }
 
+        let signed = json::to_string(&metadata.signed)?;
         let mut valid_count = 0;
         for sig in &metadata.signatures {
-            match self.keys.get(&sig.keyid) {
-                Some(key) => {
-                    let signed = json::to_string(&metadata.signed)?;
-                    key.keytype.verify(signed.as_bytes(),
-                                       key.keyval.public.as_bytes(),
-                                       sig.sig.as_bytes())?;
-                    valid_count += 1;
-                },
-
-                None => debug!("couldn't find key: {}", sig.keyid)
-            }
+            self.keys.get(&sig.keyid)
+                .map(|key| {
+                    let ref public = key.keyval.public;
+                    key.keytype
+                        .verify(signed.as_bytes(), public.as_bytes(), sig.sig.as_bytes())
+                        .map(|_| {
+                            trace!("successful verification with: {}", public);
+                            valid_count += 1;
+                        })
+                        .unwrap_or_else(|err| trace!("failed verification for {} with: {}", public, err));
+                })
+                .unwrap_or_else(|| debug!("couldn't find key: {}", sig.keyid));
         }
 
         let role = self.roles.get(role).ok_or(Error::UptaneUnknownRole)?;
@@ -178,7 +180,7 @@ mod tests {
         let msg = b"hello";
         let sig = "/VniTdrxQlEXcx5QJGHqI7ptGwTq1wBThbfflb8SLRrEE4LQMkd5yBh/PWGvsU7cFNN+PNhFUZY4QwVq9p4MAg";
         let sig_raw = sig.from_base64().expect("couldn't parse signed from Base64");
-        KeyType::Ed25519.verify(msg, &ED25519_PUB.from_base64().unwrap(), &sig_raw).expect("coudln't verify message");
+        KeyType::Ed25519.verify(msg, &ED25519_PUB.from_base64().unwrap(), &sig_raw).expect("couldn't verify message");
 
         {
             let mut bad_msg = msg.clone();

@@ -11,7 +11,7 @@
     "expires": "2030-01-01T00:00:00Z",
     "version": 1,
     "targets": {
-      "/ostree-refname": {
+      "/{ostree-refname}": {
         "custom": {
           "ecuIdentifier": "identifier-file1",
           "uri": "http://ostree/pull"
@@ -20,7 +20,7 @@
           "sha256": "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
         },
         "length": 31
-      },
+      }
     }
   }
 }

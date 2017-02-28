@@ -3,10 +3,9 @@ use std::str;
 use std::str::FromStr;
 
 use nom::{IResult, space, eof};
-use datatype::{ClientCredentials, RegistrationCredentials, Error,
-               InstalledSoftware, Package, UpdateReport,
-               UpdateRequestId, UpdateResultCode};
-use datatype::auth::Auth;
+use datatype::{Auth, ClientCredentials, RegistrationCredentials, Error, InstalledSoftware,
+               Package, UpdateReport, UpdateRequestId, UpdateResultCode};
+
 
 /// System-wide commands that are sent to the interpreter.
 #[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]

@@ -29,5 +29,5 @@ pub struct AccessToken {
 
 #[derive(RustcEncodable, RustcDecodable, Debug, Clone, PartialEq, Eq)]
 pub struct RegistrationCredentials {
-    pub client_id:    String,
+    pub client_id: String,
 }

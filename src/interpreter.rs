@@ -7,7 +7,7 @@ use std::io::Write;
 use std::path::Path;
 use time;
 
-use datatype::{Auth, Command, Config, Error, Event, Package, UpdateReport,
+use datatype::{Auth, Command, Config, Error, Event, Ostree, Package, UpdateReport,
                UpdateRequestStatus as Status, UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -206,10 +206,14 @@ impl CommandInterpreter {
                 match self.mode {
                     CommandMode::Uptane(None) => {
                         info!("initialising uptane mode");
-                        let mut uptane = Uptane::new(self.config.uptane.clone(), self.config.device.uuid.clone());
-                        let packages = self.config.device.package_manager.installed_packages()?;
-                        let manifest = json::encode(&packages)?;
+                        let ref uuid = self.config.device.uuid;
+                        let mut uptane = Uptane::new(self.config.uptane.clone(), uuid.clone());
+                        let branch = Ostree::get_current_branch()?;
+                        let signed = branch.signed_version(uuid.clone());
+                        /*
+                        let manifest = json::encode(&branch)?;
                         uptane.put_manifest(self.http.as_ref(), manifest.as_bytes().to_vec())?;
+                        */
                         self.mode = CommandMode::Uptane(Some(uptane));
                         Event::UptaneInitialised
                     }

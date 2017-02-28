@@ -8,7 +8,7 @@ pub mod json_rpc;
 pub mod network;
 pub mod report;
 pub mod request;
-pub mod shell;
+pub mod ostree;
 pub mod tuf;
 pub mod verify;
 
@@ -21,10 +21,10 @@ pub use self::event::Event;
 pub use self::json_rpc::{RpcRequest, RpcOk, RpcErr};
 pub use self::network::{Method, SocketAddr, Url};
 pub use self::report::{DeviceReport, InstalledFirmware, InstalledPackage, InstalledSoftware,
-                       OperationResult, UpdateResultCode, UpdateReport};
+                       OperationResult, UpdateResultCode, UpdateReport, system_info};
 pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, DownloadStarted, Package,
                         UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
-pub use self::shell::{OstreePackage, ostree_install, ostree_installed_packages, system_info};
+pub use self::ostree::{Ostree, OstreeBranch, OstreePackage};
 pub use self::tuf::{Key, KeyValue, Metadata, Role, RoleData, Root, Signature, Signed,
                     SignedCustom, SignedImage, SignedManifest, SignedMeta, SignedVersion,
                     Snapshot, Targets, Timestamp};
