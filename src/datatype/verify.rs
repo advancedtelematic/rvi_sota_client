@@ -10,7 +10,6 @@ use std::str::{self, FromStr};
 
 use datatype::{Error, Key, Metadata, Role, RoleData, Signed};
 
-
 #[derive(Serialize, PartialEq, Eq, Debug, Clone)]
 pub enum KeyType {
     Ed25519,
@@ -147,9 +146,10 @@ impl Verifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use rustc_serialize::base64::FromBase64;
 
+    // signing key: 0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==
+    const ED25519_PUB: &'static [u8; 44] = b"qQi1Q6V7mqZzt12UPYtcFd2oiMYtW+U8VXlXrpW8lMs=";
 
     const RSA_2048_PUB: &'static [u8; 450] = b"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7CADRxUJDe2254+F16rw\nMeI3n0d1My4TRNIKQRY5LttWKgS5hYYyAM4zvokYQlV01x3iyxibrZDDdl4Egm0E\nQPDG6q1NTYG+4LE5VJKYVOtlQXdWWQBXjMv6wP28EfMQcgL5uZ0tUVA8ibw80nAI\ncrNM6ZfFhEMe4ABS3ti3lXWYAL0gNmbZoyxvVUWUnwEpolFQJ75Ubdn1KOSaCAxD\nOCtZaXa6iNiMQEXLsmOADFru8FCkiK4eRs5wdnV4hF01y8wCnVrNq8LrymxEzWxQ\nF8Up4fqosweBwbZrbk/IXofuA4GpDXfoF309BmfW+GVguVs3pPgw1w4Z5f3KOTiv\nBQIDAQAB\n-----END PUBLIC KEY-----";
 
@@ -157,8 +157,16 @@ mod tests {
     fn test_rsa_verify() {
         // signed with openssl using the above key
         let msg = b"hello";
-        let signed = "YCvXXrxeqgSV/KDPyHQHOyKpwcSPi0ZYweVDVkMuvAuEt9v+ujwvGULkfk1JGapN+qwDrekXsgzGXF0uL1rhsGMrh/RMh2+R86Pmyr+UTb/PVVFk1a5HpXk1v+97DkG7hpAcCD3MHqHCf/STXab/YbB2atYXYxNv4oq3ahCa0L/uGYmScPB2AXiAZbB/QJjYC6W02WtIOWhixF8uA5wEvgUmBsEBtDQkjtMfBVpQ3bLeBVvrEJXYHW3bL0GJal860KH6eS//wOLGDtcYZxPxcvZMtsWSrE1zPBrrCedsZByCg2NRqkuF3s/cTJv5unKfPgpop8yU6aCMmVIgfnEKcA==";
-        let signed_raw = signed.from_base64().expect("couldn't parse signed from Base64");
-        KeyType::Rsa.verify(msg, RSA_2048_PUB, &signed_raw).expect("couldn't verify message")
+        let sig = "YCvXXrxeqgSV/KDPyHQHOyKpwcSPi0ZYweVDVkMuvAuEt9v+ujwvGULkfk1JGapN+qwDrekXsgzGXF0uL1rhsGMrh/RMh2+R86Pmyr+UTb/PVVFk1a5HpXk1v+97DkG7hpAcCD3MHqHCf/STXab/YbB2atYXYxNv4oq3ahCa0L/uGYmScPB2AXiAZbB/QJjYC6W02WtIOWhixF8uA5wEvgUmBsEBtDQkjtMfBVpQ3bLeBVvrEJXYHW3bL0GJal860KH6eS//wOLGDtcYZxPxcvZMtsWSrE1zPBrrCedsZByCg2NRqkuF3s/cTJv5unKfPgpop8yU6aCMmVIgfnEKcA==";
+        let sig_raw = sig.from_base64().expect("couldn't parse signed from Base64");
+        KeyType::Rsa.verify(msg, RSA_2048_PUB, &sig_raw).expect("couldn't verify message")
+    }
+
+    #[test]
+    fn test_ed25519_verify() {
+        let msg = b"hello";
+        let sig = "/VniTdrxQlEXcx5QJGHqI7ptGwTq1wBThbfflb8SLRrEE4LQMkd5yBh/PWGvsU7cFNN+PNhFUZY4QwVq9p4MAg";
+        let sig_raw = sig.from_base64().expect("couldn't parse signed from Base64");
+        KeyType::Ed25519.verify(msg, &ED25519_PUB.from_base64().unwrap(), &sig_raw).expect("coudln't verify message");
     }
 }
