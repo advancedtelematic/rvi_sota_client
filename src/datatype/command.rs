@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn parse_command_test() {
         assert_eq!(command(&b"auth foo bar"[..]),
-                   IResult::Done(&b""[..], (Command::Authenticate(None), vec!["foo", "bar"])));
+                   IResult::Done(&b""[..], (Command::Authenticate(Auth::None), vec!["foo", "bar"])));
         assert_eq!(command(&b"dl 1"[..]),
                    IResult::Done(&b""[..], (Command::StartDownload("".to_string()), vec!["1"])));
         assert_eq!(command(&b"ls;\n"[..]),
@@ -223,13 +223,13 @@ mod tests {
 
     #[test]
     fn authenticate_test() {
-        assert_eq!("Authenticate".parse::<Command>().unwrap(), Command::Authenticate(None));
-        assert_eq!("auth".parse::<Command>().unwrap(), Command::Authenticate(None));
+        assert_eq!("Authenticate".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
+        assert_eq!("auth".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
         assert_eq!("auth user pass".parse::<Command>().unwrap(),
-                   Command::Authenticate(Some(Auth::Credentials(ClientCredentials {
+                   Command::Authenticate(Auth::Credentials(ClientCredentials {
                        client_id:     "user".to_string(),
                        client_secret: "pass".to_string(),
-                   }))));
+                   })));
         assert!("auth one two three".parse::<Command>().is_err());
     }
 

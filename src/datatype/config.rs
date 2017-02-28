@@ -61,8 +61,8 @@ impl Config {
         })
     }
 
-    /// Return the Auth based on the current Config.
-    pub fn auth(&self) -> Result<Auth, &'static str> {
+    /// Generate the initial Auth type from the current Config.
+    pub fn initial_auth(&self) -> Result<Auth, &'static str> {
         self.auth.as_ref().map(|auth_cfg| {
             let id     = auth_cfg.client_id.clone();
             let secret = auth_cfg.client_secret.clone();
@@ -71,15 +71,11 @@ impl Config {
             let device_p12 = self.device.p12_path.clone();
 
             match (id, secret, auth_p12, device_p12) {
-                (_, None,    None,    _)    => Err("Need one of auth-client-secret or auth-p12-path"),
-                (_, Some(_), Some(_), _)    => Err("Got both auth-client-secret and auth-p12-path"),
-                (_, _,       Some(_), None) => Err("Certificate registration needs auth-p12-path"),
-
-                (id, Some(secret), _, _) => Ok(Auth::Credentials(
-                    ClientCredentials { client_id: id, client_secret: secret })),
-
-                (id, _,      Some(_), _) => Ok(Auth::Registration(RegistrationCredentials { client_id: id })),
-
+                (_,  None,    None,    _)    => Err("Need one of auth-client-secret or auth-p12-path"),
+                (_,  Some(_), Some(_), _)    => Err("Got both auth-client-secret and auth-p12-path"),
+                (_,  _,       Some(_), None) => Err("Certificate registration needs auth-p12-path"),
+                (id, Some(s), _,       _)    => Ok(Auth::Credentials(ClientCredentials { client_id: id, client_secret: s })),
+                (id, _,       Some(_), _)    => Ok(Auth::Registration(RegistrationCredentials { client_id: id })),
             }
         }).unwrap_or(Ok(Auth::None))
     }
