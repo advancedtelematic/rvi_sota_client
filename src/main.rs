@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sota::datatype::{Command, Config, Event, Auth};
+use sota::datatype::{Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, init_tls_client};
@@ -48,8 +48,8 @@ fn main() {
     let mut broadcast = Broadcast::new(erx);
     let wg = WaitGroup::new();
 
-    let auth_cmd = config.auth_command().unwrap_or_else(|err| exit!(2, "{}", err));
-    ctx.send(auth_cmd.clone());
+    let auth = config.auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    ctx.send(Command::Authenticate(auth.clone()));
 
     crossbeam::scope(|scope| {
         // subscribe to signals first
@@ -123,8 +123,10 @@ fn main() {
         let ev_dl  = config.device.auto_download.clone();
         let ev_sys = config.device.system_info.clone();
         let ev_wg  = wg.clone();
+
+        let ac = auth.clone();
         scope.spawn(move || EventInterpreter {
-            auth_cmd: auth_cmd,
+            auth:     ac,
             pacman:   ev_mgr,
             auto_dl:  ev_dl,
             sysinfo:  ev_sys
@@ -137,7 +139,7 @@ fn main() {
         scope.spawn(move || CommandInterpreter {
             mode:   mode,
             config: config,
-            auth:   Auth::None,
+            auth:   auth.clone(),
             http:   Box::new(AuthClient::default())
         }.run(irx, etx, wg));
 
