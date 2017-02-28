@@ -41,7 +41,7 @@ pub trait Interpreter<I, O> {
 /// The `EventInterpreter` listens for `Event`s and optionally responds with
 /// `Command`s that may be sent to the `CommandInterpreter`.
 pub struct EventInterpreter {
-    pub auth_cmd: Command,
+    pub auth:     Auth,
     pub pacman:   PackageManager,
     pub auto_dl:  bool,
     pub sysinfo:  Option<String>,
@@ -64,7 +64,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::NotAuthenticated => {
                 info!("Trying to authenticate again...");
-                ctx.send(self.auth_cmd.clone());
+                ctx.send(Command::Authenticate(self.auth.clone()));
             }
 
             Event::UpdatesReceived(requests) => {
@@ -159,6 +159,7 @@ impl Interpreter<Interpret, Event> for CommandInterpreter {
         info!("CommandInterpreter received: {}", interpret.command);
         let (events_tx, events_rx) = chan::async::<Event>();
 
+        debug!("current auth: {:?}", self.auth);
         let outcome = match self.auth {
             Auth::None |
             Auth::Token(_) |
@@ -326,7 +327,7 @@ impl CommandInterpreter {
 
     fn unauthenticated(&mut self, cmd: Command, _: Sender<Event>) -> Result<Event, Error> {
         Ok(match cmd {
-            Command::Authenticate(Some(Auth::Credentials(creds))) => {
+            Command::Authenticate(Auth::Credentials(creds)) => {
                 init_tls_client(Some(self.config.tls_data()));
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
@@ -342,7 +343,7 @@ impl CommandInterpreter {
                 Event::Authenticated
             }
 
-            Command::Authenticate(Some(Auth::Registration(reg))) => {
+            Command::Authenticate(Auth::Registration(reg)) => {
                 let auth = self.config.auth.as_ref().expect("auth config required");
                 let p12  = self.config.device.p12_path.as_ref().expect("auth_certificate expects a p12_path");
 
