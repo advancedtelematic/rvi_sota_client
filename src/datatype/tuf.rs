@@ -126,6 +126,12 @@ pub struct SignedManifest {
     pub ecu_version_manifest: json::Value
 }
 
+impl SignedManifest {
+    pub fn from(vin: String, primary_serial: String, version: SignedVersion) -> Self {
+        unimplemented!()
+    }
+}
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct SignedVersion {
     pub timeserver_time:          String,

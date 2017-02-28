@@ -92,9 +92,11 @@ impl Uptane {
         let root = json::from_value::<Root>(meta.signed.clone())?;
 
         for (id, key) in root.keys {
+            trace!("adding key: {:?}", key);
             self.verifier.add_key(id, key);
         }
         for (role, data) in root.roles {
+            trace!("adding roledata: {:?}", data);
             self.verifier.add_role(role, data);
         }
 
@@ -228,7 +230,7 @@ mod tests {
         assert_eq!(metas.len(), 1);
         let meta1 = metas.pop().unwrap();
         let version = json::from_value::<SignedVersion>(meta1.signed).expect("couldn't load first manifest");
-        assert_eq!(version.installed_image.filepath, "/file2.txt");
+        assert_eq!(version.installed_image.filepath, "/{ostree-refname}");
     }
 
     #[test]
@@ -244,13 +246,13 @@ mod tests {
             Ok((ts, ts_new)) => {
                 assert_eq!(ts_new, true);
                 {
-                    let meta = ts.targets.get("/file1.img").expect("no /file1.img metadata");
+                    let meta = ts.targets.get("/{ostree-refname}").expect("no /{ostree-refname} metadata");
                     assert_eq!(meta.length, 31);
                     let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
                     assert_eq!(hash, "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da");
                 }
                 let custom = uptane.extract_custom(ts.targets);
-                let image = custom.get("/file1.img").expect("couldn't get /file1.img custom");
+                let image = custom.get("/{ostree-refname}").expect("couldn't get /{ostree-refname} custom");
                 assert_eq!(image.ecuIdentifier, "identifier-file1");
             }
 
