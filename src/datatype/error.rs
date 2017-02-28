@@ -1,5 +1,6 @@
 use chrono::ParseError as ChronoParseError;
 use hyper::error::Error as HyperError;
+use openssl::error::ErrorStack as OpensslErrors;
 use rustc_serialize::json::{EncoderError as JsonEncoderError,
                             DecoderError as JsonDecoderError,
                             ParserError as JsonParserError};
@@ -34,6 +35,7 @@ pub enum Error {
     JsonDecoder(JsonDecoderError),
     JsonEncoder(JsonEncoderError),
     JsonParser(JsonParserError),
+    Openssl(OpensslErrors),
     OstreeCommand(String),
     Poison(String),
     Package(String),
@@ -93,6 +95,7 @@ derive_from!([
     IoError          => Io,
     JsonEncoderError => JsonEncoder,
     JsonDecoderError => JsonDecoder,
+    OpensslErrors    => Openssl,
     RecvError        => Recv,
     ResponseData     => Http,
     SerdeJsonError   => SerdeJson,
@@ -122,6 +125,7 @@ impl Display for Error {
             Error::JsonDecoder(ref e)   => format!("Failed to decode JSON: {}", e.clone()),
             Error::JsonEncoder(ref e)   => format!("Failed to encode JSON: {}", e.clone()),
             Error::JsonParser(ref e)    => format!("Failed to parse JSON: {}", e.clone()),
+            Error::Openssl(ref e)       => format!("OpenSSL errors: {}", e.clone()),
             Error::OstreeCommand(ref s) => format!("OsTree command failed: {}", s.clone()),
             Error::Poison(ref e)        => format!("Poison error: {}", e.clone()),
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),

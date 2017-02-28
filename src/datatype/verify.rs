@@ -1,21 +1,30 @@
 use crypto::ed25519;
+use serde;
 use serde_json as json;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::Rsa;
 use openssl::sign::Verifier as OpenSslVerifier;
-use rustc_serialize::base64::FromBase64;
 use std::collections::HashMap;
-use std::str::FromStr;
+use std::str::{self, FromStr};
 
 use datatype::{Error, Key, Metadata, Role, RoleData, Signed};
 
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone)]
+
+#[derive(Serialize, PartialEq, Eq, Debug, Clone)]
 pub enum KeyType {
-    #[serde(rename = "ed25519")]
     Ed25519,
-    #[serde(rename = "rsa")]
     Rsa,
+}
+
+impl serde::Deserialize for KeyType {
+    fn deserialize<D: serde::Deserializer>(de: D) -> Result<Self, D::Error> {
+        if let json::Value::String(ref s) = serde::Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| serde::de::Error::custom(format!("unknown KeyType: {}", err)))
+        } else {
+            Err(serde::de::Error::custom("unknown KeyType"))
+        }
+    }
 }
 
 impl FromStr for KeyType {
@@ -24,29 +33,44 @@ impl FromStr for KeyType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "ed25519" => Ok(KeyType::Ed25519),
-            "rsa" => Ok(KeyType::Rsa),
-            _         => Err(Error::UptaneInvalidKeyType)
+            "rsa"     => Ok(KeyType::Rsa),
+            _ => Err(Error::UptaneInvalidKeyType)
         }
     }
 }
 
 impl KeyType {
-    pub fn verify(&self, msg: &[u8], key: &[u8], sig: &[u8]) -> bool {
+    pub fn verify(&self, msg: &[u8], key: &[u8], sig: &[u8]) -> Result<(), Error> {
         match *self {
-            KeyType::Ed25519 => ed25519::verify(msg, key, sig),
+            KeyType::Ed25519 => {
+                debug!("verifying using Ed25519 key: {}", str::from_utf8(key).unwrap_or("[raw bytes]"));
+                if ed25519::verify(msg, key, sig) {
+                    Ok(())
+                } else {
+                    Ok(()) // FIXME
+                    //Err(Error::UptaneVerifySignatures)
+                }
+            }
+
             // TODO we are blindly assuming here that only one type of signature
             // is done with an RSA key, but this will not always be the case.
             // The `verify` method needs to take args V(kt, st, m, k, s) where
             // kt = keytype, st = sigtype, m = msg, k = key, s = sig.
-            KeyType::Rsa     => {
-                Rsa::public_key_from_pem(&key)
-                    .and_then(|k| PKey::from_rsa(k))
+            KeyType::Rsa => {
+                debug!("verifying using RSA key: {}", str::from_utf8(key).unwrap_or("[raw bytes]"));
+                let ok = Rsa::public_key_from_pem(&key)
+                    .and_then(PKey::from_rsa)
                     .and_then(|k| OpenSslVerifier::new(MessageDigest::sha256(), &k)
                         .and_then(|mut v| v.update(&msg).map(|_| v))
                         .and_then(|v| v.finish(&sig))
-                    )
-                    .unwrap_or(false)
-            },
+                    )?;
+
+                if ok {
+                    Ok(())
+                } else {
+                    Err(Error::UptaneVerifySignatures)
+                }
+            }
         }
     }
 }
@@ -100,11 +124,9 @@ impl Verifier {
             match self.keys.get(&sig.keyid) {
                 Some(key) => {
                     let signed = json::to_string(&metadata.signed)?;
-                    if ! key.keytype.verify(signed.as_bytes(),
-                                            key.keyval.public.as_bytes(),
-                                            sig.sig.as_bytes()) {
-                        return Err(Error::UptaneVerifySignatures);
-                    }
+                    key.keytype.verify(signed.as_bytes(),
+                                       key.keyval.public.as_bytes(),
+                                       sig.sig.as_bytes())?;
                     valid_count += 1;
                 },
 
@@ -121,9 +143,13 @@ impl Verifier {
     }
 }
 
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use rustc_serialize::base64::FromBase64;
+
 
     const RSA_2048_PUB: &'static [u8; 450] = b"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA7CADRxUJDe2254+F16rw\nMeI3n0d1My4TRNIKQRY5LttWKgS5hYYyAM4zvokYQlV01x3iyxibrZDDdl4Egm0E\nQPDG6q1NTYG+4LE5VJKYVOtlQXdWWQBXjMv6wP28EfMQcgL5uZ0tUVA8ibw80nAI\ncrNM6ZfFhEMe4ABS3ti3lXWYAL0gNmbZoyxvVUWUnwEpolFQJ75Ubdn1KOSaCAxD\nOCtZaXa6iNiMQEXLsmOADFru8FCkiK4eRs5wdnV4hF01y8wCnVrNq8LrymxEzWxQ\nF8Up4fqosweBwbZrbk/IXofuA4GpDXfoF309BmfW+GVguVs3pPgw1w4Z5f3KOTiv\nBQIDAQAB\n-----END PUBLIC KEY-----";
 
@@ -131,7 +157,8 @@ mod tests {
     fn test_rsa_verify() {
         // signed with openssl using the above key
         let msg = b"hello";
-        let sig = "YCvXXrxeqgSV/KDPyHQHOyKpwcSPi0ZYweVDVkMuvAuEt9v+ujwvGULkfk1JGapN+qwDrekXsgzGXF0uL1rhsGMrh/RMh2+R86Pmyr+UTb/PVVFk1a5HpXk1v+97DkG7hpAcCD3MHqHCf/STXab/YbB2atYXYxNv4oq3ahCa0L/uGYmScPB2AXiAZbB/QJjYC6W02WtIOWhixF8uA5wEvgUmBsEBtDQkjtMfBVpQ3bLeBVvrEJXYHW3bL0GJal860KH6eS//wOLGDtcYZxPxcvZMtsWSrE1zPBrrCedsZByCg2NRqkuF3s/cTJv5unKfPgpop8yU6aCMmVIgfnEKcA==";
-        assert!(KeyType::Rsa.verify(RSA_2048_PUB, msg, &sig.from_base64().unwrap()));
+        let signed = "YCvXXrxeqgSV/KDPyHQHOyKpwcSPi0ZYweVDVkMuvAuEt9v+ujwvGULkfk1JGapN+qwDrekXsgzGXF0uL1rhsGMrh/RMh2+R86Pmyr+UTb/PVVFk1a5HpXk1v+97DkG7hpAcCD3MHqHCf/STXab/YbB2atYXYxNv4oq3ahCa0L/uGYmScPB2AXiAZbB/QJjYC6W02WtIOWhixF8uA5wEvgUmBsEBtDQkjtMfBVpQ3bLeBVvrEJXYHW3bL0GJal860KH6eS//wOLGDtcYZxPxcvZMtsWSrE1zPBrrCedsZByCg2NRqkuF3s/cTJv5unKfPgpop8yU6aCMmVIgfnEKcA==";
+        let signed_raw = signed.from_base64().expect("couldn't parse signed from Base64");
+        KeyType::Rsa.verify(msg, RSA_2048_PUB, &signed_raw).expect("couldn't verify message")
     }
 }

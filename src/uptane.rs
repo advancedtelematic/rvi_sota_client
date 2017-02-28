@@ -216,8 +216,8 @@ mod tests {
     fn test_get_targets_director() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-targets-director".to_string());
         let client = read_paths(&[
-            "tests/uptane/root.json",
-            "tests/uptane/targets_director.json",
+            "tests/uptane/ed25519/root.json",
+            "tests/uptane/ats/targets_director.json",
         ]);
 
         assert_eq!(true, uptane.get_root(&client, true).expect("couldn't get_root"));
@@ -243,8 +243,8 @@ mod tests {
     fn test_get_snapshot() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-snapshot".to_string());
         let client = read_paths(&[
-            "tests/uptane/root.json",
-            "tests/uptane/snapshot.json",
+            "tests/uptane/ed25519/root.json",
+            "tests/uptane/ed25519/snapshot.json",
         ]);
 
         assert_eq!(true, uptane.get_root(&client, true).expect("couldn't get_root"));
@@ -265,8 +265,8 @@ mod tests {
     fn test_get_timestamp() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-timestamp".to_string());
         let client = read_paths(&[
-            "tests/uptane/root.json",
-            "tests/uptane/timestamp.json",
+            "tests/uptane/ed25519/root.json",
+            "tests/uptane/ed25519/timestamp.json",
         ]);
 
         assert_eq!(true, uptane.get_root(&client, true).expect("get_root failed"));
