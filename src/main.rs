@@ -48,7 +48,7 @@ fn main() {
     let mut broadcast = Broadcast::new(erx);
     let wg = WaitGroup::new();
 
-    let auth = config.auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
     ctx.send(Command::Authenticate(auth.clone()));
 
     crossbeam::scope(|scope| {
@@ -117,19 +117,18 @@ fn main() {
         // start interpreters
         //
 
-        let ev_sub = broadcast.subscribe();
-        let ev_ctx = ctx.clone();
-        let ev_mgr = config.device.package_manager.clone();
-        let ev_dl  = config.device.auto_download.clone();
-        let ev_sys = config.device.system_info.clone();
-        let ev_wg  = wg.clone();
-
-        let ac = auth.clone();
+        let ev_sub  = broadcast.subscribe();
+        let ev_ctx  = ctx.clone();
+        let ev_mgr  = config.device.package_manager.clone();
+        let ev_dl   = config.device.auto_download.clone();
+        let ev_sys  = config.device.system_info.clone();
+        let ev_auth = auth.clone();
+        let ev_wg   = wg.clone();
         scope.spawn(move || EventInterpreter {
-            auth:     ac,
-            pacman:   ev_mgr,
-            auto_dl:  ev_dl,
-            sysinfo:  ev_sys
+            auth:    ev_auth,
+            pacman:  ev_mgr,
+            auto_dl: ev_dl,
+            sysinfo: ev_sys
         }.run(ev_sub, ev_ctx, ev_wg));
 
         let int_itx = itx.clone();

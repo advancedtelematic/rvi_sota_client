@@ -419,7 +419,7 @@ mod tests {
         ci.config.device.package_manager = PackageManager::new_tpm(true);
         let (ctx, erx) = new_interpreter(ci);
 
-        ctx.send(Command::Authenticate(None));
+        ctx.send(Command::Authenticate(Auth::None));
         assert_rx(erx, &[Event::AlreadyAuthenticated]);
     }
 
