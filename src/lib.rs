@@ -1,6 +1,5 @@
 #[macro_use] extern crate nom; // use before log to avoid error!() macro conflict
 
-//extern crate canonical_json;
 extern crate chan;
 extern crate chrono;
 extern crate crossbeam;
