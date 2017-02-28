@@ -21,6 +21,7 @@ DOCKER_RUN := \
 		--env CORE_SERVER=$(CORE_SERVER) \
 		--env REGISTRY_SERVER=$(REGISTRY_SERVER) \
 		--env DEVICE_UUID=$(DEVICE_UUID) \
+		--env RUST_BACKTRACE=1 \
 		--volume ~/.cargo/git:/root/.cargo/git \
 		--volume ~/.cargo/registry:/root/.cargo/registry \
 		--volume $(CURDIR):/src \
@@ -29,11 +30,14 @@ DOCKER_RUN := \
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
 
-.PHONY: help new old clean test doc client image deb rpm sota-version package-version
+.PHONY: help build new old clean test doc doc-dev client image deb rpm sota-version package-version
 .DEFAULT_GOAL := help
 
 help:
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%16s\033[0m : %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+build: ## Build the app (dev)
+	$(CARGO) build --target=$(TARGET)
 
 new: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
@@ -46,6 +50,9 @@ test: ## Run all unit tests.
 
 doc: ## Generate documentation for the sota crate.
 	$(CARGO) doc --lib --no-deps --release
+
+doc-dev: ## Generate development documentation for the sota crate.
+	$(CARGO) doc --lib
 
 clean: ## Remove all compiled libraries, builds and temporary files.
 	$(CARGO) clean
