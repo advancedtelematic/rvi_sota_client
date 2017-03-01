@@ -88,10 +88,9 @@ impl Handler for WebsocketHandler {
 impl WebsocketHandler {
     fn forward_command(&self, cmd: Command) {
         let (etx, erx) = chan::sync::<Event>(0);
-        let etx        = Arc::new(Mutex::new(etx.clone()));
-        self.itx.send(Interpret { command: cmd, response_tx: Some(etx) });
-
-        let e = erx.recv().expect("websocket response_tx is closed");
+        let etx = Arc::new(Mutex::new(etx.clone()));
+        self.itx.send(Interpret { command: cmd, resp_tx: Some(etx) });
+        let e = erx.recv().expect("websocket resp_tx is closed");
         let _ = self.out.send(Message::Text(encode(e)));
     }
 }
@@ -138,7 +137,7 @@ mod tests {
                 let interpret = irx.recv().expect("gtx is closed");
                 match interpret.command {
                     Command::StartDownload(id) => {
-                        let tx = interpret.response_tx.unwrap();
+                        let tx = interpret.resp_tx.unwrap();
                         tx.lock().unwrap().send(Event::FoundSystemInfo(id));
                     }
                     _ => panic!("expected AcceptUpdates"),

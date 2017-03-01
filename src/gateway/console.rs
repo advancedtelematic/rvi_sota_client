@@ -20,7 +20,7 @@ impl Gateway for Console {
         thread::spawn(move || {
             loop {
                 match get_input() {
-                    Ok(cmd)  => itx.send(Interpret { command: cmd, response_tx: Some(etx.clone()) }),
+                    Ok(cmd)  => itx.send(Interpret { command: cmd, resp_tx: Some(etx.clone()) }),
                     Err(err) => error!("Console Error: {:?}", err)
                 }
             }

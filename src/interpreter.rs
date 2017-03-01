@@ -1,12 +1,13 @@
 use chan::{Sender, Receiver, WaitGroup};
-use std::process;
+use std;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 use time;
 
-use datatype::{Auth, Command, Config, Error, Event, Ostree, Package, UpdateReport,
-               UpdateRequestStatus as Status, UpdateResultCode, system_info};
+use datatype::{Auth, Command, Config, Error, Event, Ostree, OstreePackage, Package,
+               UpdateReport, SignedManifest, UpdateRequestStatus as Status,
+               UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use authenticate::{pkcs12, oauth2};
@@ -24,9 +25,10 @@ pub trait Interpreter<I, O> {
 
     fn run(&mut self, irx: Receiver<I>, otx: Sender<O>, wg: WaitGroup) {
         loop {
-            wg.add(1);
-            let input = irx.recv().expect("interpreter sender closed");
+            let input   = irx.recv().expect("interpreter sender closed");
             let started = time::precise_time_ns();
+
+            wg.add(1);
             trace!("interpreter starting: {}", started);
             self.interpret(input, &otx);
             trace!("interpreter stopping: {}", started);
@@ -111,13 +113,21 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::UptaneTargetsUpdated(targets) => {
                 for (refname, meta) in targets {
-                    match (meta.hashes.get("sha256"), meta.custom) {
-                        (Some(commit), Some(custom)) => {
-
-                            // refname, commit, meta.length, custom.ecuIdentifier, custom.uri
+                    if let Some(custom) = meta.custom {
+                        match (meta.hashes.get("sha256"), custom.uri) {
+                            (Some(commit), Some(uri)) => {
+                                ctx.send(Command::OstreeInstall(OstreePackage {
+                                    commit:      commit.clone(),
+                                    refName:     refname,
+                                    description: custom.ecuIdentifier,
+                                    pullUri:     uri
+                                }));
+                            }
+                            (_, None) => error!("no custom.uri field for target: {}", refname),
+                            (None, _) => error!("couldn't get sha256 hash for target: {}", refname)
                         }
-                        (Some(_), _) => error!("couldn't get custom field for target: {}", refname),
-                        _            => error!("couldn't get sha256 hash for target: {}", refname),
+                    } else {
+                        error!("couldn't get custom field for target: {}", refname);
                     }
                 }
             }
@@ -135,7 +145,7 @@ pub struct IntermediateInterpreter;
 impl Interpreter<Command, Interpret> for IntermediateInterpreter {
     fn interpret(&mut self, cmd: Command, itx: &Sender<Interpret>) {
         info!("IntermediateInterpreter received: {}", cmd);
-        itx.send(Interpret { command: cmd, response_tx: None });
+        itx.send(Interpret { command: cmd, resp_tx: None });
     }
 }
 
@@ -160,7 +170,6 @@ pub struct CommandInterpreter {
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
         info!("CommandInterpreter received: {}", interpret.command);
-        debug!("current auth: {:?}", self.auth);
         let outcome = match self.auth {
             Auth::None        |
             Auth::Token(_)    |
@@ -181,7 +190,7 @@ impl Interpreter<Interpret, Event> for CommandInterpreter {
             Err(err) => Event::Error(format!("{}", err))
         };
         etx.send(final_ev.clone());
-        interpret.response_tx.map(|tx| tx.lock().unwrap().send(final_ev));
+        interpret.resp_tx.map(|tx| tx.lock().unwrap().send(final_ev));
     }
 }
 
@@ -196,14 +205,12 @@ impl CommandInterpreter {
                 match self.mode {
                     CommandMode::Uptane(None) => {
                         info!("initialising uptane mode");
-                        let ref uuid = self.config.device.uuid;
+                        let ref uuid   = self.config.device.uuid;
                         let mut uptane = Uptane::new(self.config.uptane.clone(), uuid.clone());
-                        let branch = Ostree::get_current_branch()?;
-                        let signed = branch.signed_version(uuid.clone());
-                        /*
-                        let manifest = json::encode(&branch)?;
-                        uptane.put_manifest(self.http.as_ref(), manifest.as_bytes().to_vec())?;
-                        */
+                        let branch     = Ostree::get_current_branch()?;
+                        let signed     = branch.signed_version(uuid.clone());
+                        let manifest   = SignedManifest::from(uuid.clone(), uuid.clone(), signed);
+                        uptane.put_manifest(self.http.as_ref(), manifest)?;
                         self.mode = CommandMode::Uptane(Some(uptane));
                         Event::UptaneInitialised
                     }
@@ -323,7 +330,7 @@ impl CommandInterpreter {
                 }
             }
 
-            Command::Shutdown => process::exit(0),
+            Command::Shutdown => std::process::exit(0),
         })
     }
 
@@ -366,7 +373,7 @@ impl CommandInterpreter {
                 Event::Authenticated
             }
 
-            Command::Shutdown => process::exit(0),
+            Command::Shutdown => std::process::exit(0),
 
             _ => Event::NotAuthenticated
         })
@@ -395,7 +402,7 @@ mod tests {
         thread::spawn(move || {
             loop {
                 match crx.recv() {
-                    Some(cmd) => ci.interpret(Interpret { command: cmd, response_tx: None }, &etx),
+                    Some(cmd) => ci.interpret(Interpret { command: cmd, resp_tx: None }, &etx),
                     None      => break
                 }
             }

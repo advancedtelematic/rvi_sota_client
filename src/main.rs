@@ -178,8 +178,8 @@ fn start_update_poller(interval: u64, itx: Sender<Interpret>, wg: WaitGroup) {
         thread::sleep(Duration::from_secs(interval));
         wg.wait(); // ensure we're still not busy
         itx.send(Interpret {
-            command:     Command::GetUpdateRequests,
-            response_tx: Some(Arc::new(Mutex::new(etx.clone())))
+            command: Command::GetUpdateRequests,
+            resp_tx: Some(Arc::new(Mutex::new(etx.clone())))
         }); // request new updates
         let _ = erx.recv(); // wait for the response
     }

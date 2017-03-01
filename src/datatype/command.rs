@@ -1,4 +1,4 @@
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{self, Display, Formatter};
 use std::str;
 use std::str::FromStr;
 
@@ -42,10 +42,11 @@ pub enum Command {
 }
 
 impl Display for Command {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let text = match *self {
-            Command::SendInstalledPackages(_) => "SendInstalledPackages(...)".to_string(),
-            _                                 => format!("{:?}", self)
+            //Command::Authenticate(_) => format!("Authenticate ({})", self),
+            Command::SendInstalledPackages(_) => format!("{}", "SendInstalledPackages"),
+            _ => format!("{:?}", self)
         };
         write!(f, "{}", text)
     }
@@ -272,7 +273,7 @@ mod tests {
 
     #[test]
     fn ostree_install_test() {
-        assert_eq!("OstreeInstall uri commit ref".parse::<Command>().unwrap(),
+        assert_eq!("OstreeInstall uri ref commit".parse::<Command>().unwrap(),
                    Command::OstreeInstall(OstreePackage {
                        commit:      "commit".to_string(),
                        refName:     "ref".to_string(),
@@ -281,8 +282,8 @@ mod tests {
                    }));
         assert_eq!("osti 123 456 789".parse::<Command>().unwrap(),
                    Command::OstreeInstall(OstreePackage {
-                       commit:      "456".to_string(),
-                       refName:     "789".to_string(),
+                       commit:      "789".to_string(),
+                       refName:     "456".to_string(),
                        description: "".to_string(),
                        pullUri:     "123".to_string()
                    }));

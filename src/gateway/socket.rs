@@ -91,10 +91,7 @@ fn handle_client(stream: &mut UnixStream, itx: Arc<Mutex<Sender<Interpret>>>) ->
 
     let cmd = try!(input.parse::<Command>());
     let (etx, erx) = chan::async::<Event>();
-    itx.lock().unwrap().send(Interpret {
-        command:     cmd,
-        response_tx: Some(Arc::new(Mutex::new(etx))),
-    });
+    itx.lock().unwrap().send(Interpret { command: cmd, resp_tx: Some(Arc::new(Mutex::new(etx))) });
     erx.recv().ok_or(Error::Socket("internal receiver error".to_string()))
 }
 
@@ -160,7 +157,7 @@ mod tests {
                 let interpret = irx.recv().expect("gtx is closed");
                 match interpret.command {
                     Command::StartDownload(id) => {
-                        let tx = interpret.response_tx.unwrap();
+                        let tx = interpret.resp_tx.unwrap();
                         tx.lock().unwrap().send(Event::FoundSystemInfo(id));
                     }
                     _ => panic!("expected AcceptUpdates"),

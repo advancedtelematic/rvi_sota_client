@@ -8,9 +8,6 @@ use time::Duration;
 use datatype::{Error, KeyType};
 
 
-pub type UptaneCustom = HashMap<String, SignedCustom>;
-
-
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
 #[serde(tag = "_type")]
 pub enum Role {
@@ -128,6 +125,7 @@ pub struct SignedManifest {
 
 impl SignedManifest {
     pub fn from(vin: String, primary_serial: String, version: SignedVersion) -> Self {
+        // FIXME: shell out to python for signing
         unimplemented!()
     }
 }
