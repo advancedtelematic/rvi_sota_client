@@ -1,6 +1,4 @@
-use chan;
 use chan::{Sender, Receiver, WaitGroup};
-use rustc_serialize::json;
 use std::process;
 use std::fs::File;
 use std::io::Write;
@@ -111,12 +109,17 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 }
             }
 
-            Event::UptaneSnapshotUpdated(snapshot) => {
-                unimplemented!();
-            }
-
             Event::UptaneTargetsUpdated(targets) => {
-                unimplemented!();
+                for (refname, meta) in targets {
+                    match (meta.hashes.get("sha256"), meta.custom) {
+                        (Some(commit), Some(custom)) => {
+
+                            // refname, commit, meta.length, custom.ecuIdentifier, custom.uri
+                        }
+                        (Some(_), _) => error!("couldn't get custom field for target: {}", refname),
+                        _            => error!("couldn't get sha256 hash for target: {}", refname),
+                    }
+                }
             }
 
             _ => ()
@@ -139,9 +142,9 @@ impl Interpreter<Command, Interpret> for IntermediateInterpreter {
 
 /// The `CommandMode` toggles the `Command` handling procedure.
 pub enum CommandMode {
+    Sota,
     Rvi(Box<Services>),
-    Uptane(Option<Uptane>),
-    Sota
+    Uptane(Option<Uptane>)
 }
 
 /// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
@@ -157,46 +160,33 @@ pub struct CommandInterpreter {
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
         info!("CommandInterpreter received: {}", interpret.command);
-        let (events_tx, events_rx) = chan::async::<Event>();
-
         debug!("current auth: {:?}", self.auth);
         let outcome = match self.auth {
-            Auth::None |
-            Auth::Token(_) |
-            Auth::Certificate => self.authenticated(interpret.command, events_tx),
+            Auth::None        |
+            Auth::Token(_)    |
+            Auth::Certificate => self.process_command(interpret.command, etx),
 
-            Auth::Registration(_) |
-            Auth::Credentials(_) => self.unauthenticated(interpret.command, events_tx),
+            Auth::Credentials(_)  |
+            Auth::Registration(_) => self.authenticate(interpret.command)
         };
 
-        let response_ev = match outcome {
-            Ok(final_ev) => {
-                for ev in events_rx {
-                    etx.send(ev);
-                }
-                etx.send(final_ev.clone());
-                final_ev
-            }
+        let final_ev = match outcome {
+            Ok(ev) => ev,
 
             Err(Error::HttpAuth(resp)) => {
                 error!("HTTP authorization failed: {}", resp);
-                etx.send(Event::NotAuthenticated);
                 Event::NotAuthenticated
-            }
+            },
 
-            Err(err) => {
-                let ev = Event::Error(format!("{}", err));
-                etx.send(ev.clone());
-                ev
-            }
+            Err(err) => Event::Error(format!("{}", err))
         };
-
-        interpret.response_tx.map(|tx| tx.lock().unwrap().send(response_ev));
+        etx.send(final_ev.clone());
+        interpret.response_tx.map(|tx| tx.lock().unwrap().send(final_ev));
     }
 }
 
 impl CommandInterpreter {
-    fn authenticated(&mut self, cmd: Command, etx: Sender<Event>) -> Result<Event, Error> {
+    fn process_command(&mut self, cmd: Command, etx: &Sender<Event>) -> Result<Event, Error> {
         let mut sota = Sota::new(&self.config, self.http.as_ref());
 
         Ok(match cmd {
@@ -219,18 +209,17 @@ impl CommandInterpreter {
                     }
 
                     CommandMode::Uptane(Some(ref mut uptane)) => {
-                        let (_, timestamp_new) = uptane.get_timestamp(self.http.as_ref(), true)?;
-                        if timestamp_new {
-                            let (snapshot, _) = uptane.get_snapshot(self.http.as_ref(), true)?;
-                            etx.send(Event::UptaneSnapshotUpdated(snapshot.meta));
-                            let (targets, _)  = uptane.get_targets(self.http.as_ref(), true)?;
-                            etx.send(Event::UptaneTargetsUpdated(targets.targets));
+                        let (_, ts_new) = uptane.get_timestamp(self.http.as_ref(), true)?;
+                        if ts_new {
+                            let (targets, _) = uptane.get_targets(self.http.as_ref(), true)?;
+                            Event::UptaneTargetsUpdated(targets.targets)
+                        } else {
+                            Event::UptaneTimestampUpdated
                         }
-                        Event::UptaneTimestampUpdated
                     }
 
                     _ => {
-                        let mut updates = try!(sota.get_update_requests());
+                        let mut updates = sota.get_update_requests()?;
                         if updates.is_empty() {
                             Event::NoUpdateRequests
                         } else {
@@ -252,6 +241,15 @@ impl CommandInterpreter {
             Command::ListSystemInfo => {
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
                 Event::FoundSystemInfo(try!(system_info(&cmd)))
+            }
+
+            Command::OstreeInstall(pkg) => {
+                let id = pkg.commit.clone();
+                let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
+                match pkg.install(token) {
+                    Ok((code, out))  => Event::InstallComplete(UpdateReport::single(id, code, out)),
+                    Err((code, out)) => Event::InstallFailed(UpdateReport::single(id, code, out))
+                }
             }
 
             Command::SendInstalledPackages(packages) => {
@@ -329,48 +327,44 @@ impl CommandInterpreter {
         })
     }
 
-    fn unauthenticated(&mut self, cmd: Command, _: Sender<Event>) -> Result<Event, Error> {
+    fn authenticate(&mut self, cmd: Command) -> Result<Event, Error> {
         Ok(match cmd {
+            Command::Authenticate(Auth::None)        |
+            Command::Authenticate(Auth::Token(_))    |
+            Command::Authenticate(Auth::Certificate) => Event::Authenticated,
+
             Command::Authenticate(Auth::Credentials(creds)) => {
+                let cfg = self.config.auth.as_ref().expect("auth config required");
                 init_tls_client(Some(self.config.tls_data()));
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
                 }
-
-                let server = self.config.auth.as_ref().expect("auth config required").server.join("/token");
-                let token  = oauth2(server, self.http.as_ref())?;
-                self.auth  = Auth::Token(token.clone());
+                let token = oauth2(cfg.server.join("/token"), self.http.as_ref())?;
+                self.auth = Auth::Token(token.clone());
                 if !self.http.is_testing() {
-                    self.http = Box::new(AuthClient::from(Auth::Token(token.clone())));
+                    self.http = Box::new(AuthClient::from(Auth::Token(token)));
                 }
-
                 Event::Authenticated
             }
 
             Command::Authenticate(Auth::Registration(reg)) => {
-                let auth = self.config.auth.as_ref().expect("auth config required");
-                let p12  = self.config.device.p12_path.as_ref().expect("auth_certificate expects a p12_path");
-
-                if !Path::new(&p12).exists() {
-                    // no access certificate, need to get it
-                    let endpoint = auth.server.join("/devices");
-                    let expires  = auth.expiry_days.expect("need auth.expiry_days");
-                    let bundle   = pkcs12(endpoint, auth.client_id.clone(), expires, self.http.as_ref())?;
+                let cfg = self.config.auth.as_ref().expect("auth config required");
+                let p12 = self.config.device.p12_path.as_ref().expect("auth_certificate expects a p12_path");
+                if !Path::new(&p12).exists() { // no access certificate, need to get it
+                    let url    = cfg.server.join("/devices");
+                    let expiry = cfg.expiry_days.expect("need auth.expiry_days");
+                    let bundle = pkcs12(url, cfg.client_id.clone(), expiry, self.http.as_ref())?;
                     let _ = File::create(p12)
                         .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
-                        .map_err(|err| panic!("couldn't open auth.p12_path for writing: {}", err));
+                        .map_err(|err| panic!("couldn't open device.p12_path for writing: {}", err));
                 }
                 init_tls_client(Some(self.config.tls_data()));
-
                 self.auth = Auth::Certificate;
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Registration(reg)));
                 }
-
                 Event::Authenticated
             }
-
-            Command::Authenticate(_) => Event::Authenticated,
 
             Command::Shutdown => process::exit(0),
 
@@ -391,8 +385,7 @@ mod tests {
                    UpdateReport, UpdateResultCode};
     use gateway::Interpret;
     use http::test_client::TestClient;
-    use package_manager::PackageManager;
-    use package_manager::tpm::assert_rx;
+    use package_manager::{PackageManager, assert_rx};
 
 
     fn new_interpreter(mut ci: CommandInterpreter) -> (Sender<Command>, Receiver<Event>) {

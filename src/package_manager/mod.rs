@@ -1,10 +1,8 @@
 pub mod deb;
+pub mod ostree;
 pub mod package_manager;
 pub mod rpm;
-pub mod tpm;
-pub mod otb;
-pub mod thm;
-pub mod uptane;
+pub mod test;
 
 pub use self::package_manager::PackageManager;
-pub use self::tpm::{assert_rx, TestDir};
+pub use self::test::{assert_rx, TestDir};

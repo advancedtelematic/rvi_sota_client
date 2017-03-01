@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use nom::{IResult, space, eof};
 use datatype::{Auth, ClientCredentials, RegistrationCredentials, Error, InstalledSoftware,
-               Package, UpdateReport, UpdateRequestId, UpdateResultCode};
+               OstreePackage, Package, UpdateReport, UpdateRequestId, UpdateResultCode};
 
 
 /// System-wide commands that are sent to the interpreter.
@@ -27,6 +27,9 @@ pub enum Command {
     StartDownload(UpdateRequestId),
     /// Start installing an update.
     StartInstall(UpdateRequestId),
+
+    /// Install an OSTree package.
+    OstreeInstall(OstreePackage),
 
     /// Send a list of packages to the Core server.
     SendInstalledPackages(Vec<Package>),
@@ -71,6 +74,8 @@ named!(command <(Command, Vec<&str>)>, chain!(
             => { |_| Command::ListInstalledPackages }
         | alt_complete!(tag!("ListSystemInfo") | tag!("info"))
             => { |_| Command::ListSystemInfo }
+        | alt_complete!(tag!("OstreeInstall") | tag!("osti"))
+            => { |_| Command::OstreeInstall(OstreePackage::default()) }
         | alt_complete!(tag!("Shutdown") | tag!("shutdown"))
             => { |_| Command::Shutdown }
         | alt_complete!(tag!("SendInstalledPackages") | tag!("sendpack"))
@@ -134,6 +139,17 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
             _ => Err(Error::Command(format!("unexpected ListSystemInfo args: {:?}", args))),
         },
 
+        Command::OstreeInstall(_) => match args.len() {
+            0 | 1 | 2 => Err(Error::Command("usage: osti <uri> <refname> <commit>".to_string())),
+            3 => Ok(Command::OstreeInstall(OstreePackage {
+                commit:      args[2].to_string(),
+                refName:     args[1].to_string(),
+                description: "".to_string(),
+                pullUri:     args[0].to_string(),
+            })),
+            _ => Err(Error::Command(format!("unexpected OstreeInstall args: {:?}", args))),
+        },
+
         Command::SendInstalledPackages(_) => match args.len() {
             0 | 1 => Err(Error::Command("usage: sendpack (<name> <version> )+".to_string())),
             n if n % 2 == 0 => {
@@ -179,7 +195,7 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
         Command::StartDownload(_) => match args.len() {
             0 => Err(Error::Command("usage: dl <id>".to_string())),
             1 => Ok(Command::StartDownload(args[0].to_string())),
-            _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
+            _ => Err(Error::Command(format!("unexpected StartDownload args: {:?}", args))),
         },
 
         Command::StartInstall(_) => match args.len() {
@@ -187,7 +203,6 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
             1 => Ok(Command::StartInstall(args[0].to_string())),
             _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
         },
-
     }
 }
 
@@ -195,7 +210,8 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
 #[cfg(test)]
 mod tests {
     use super::{command, arguments};
-    use datatype::{Auth, Command, ClientCredentials, Package, UpdateReport, UpdateResultCode};
+    use datatype::{Auth, Command, ClientCredentials, OstreePackage, Package,
+                   UpdateReport, UpdateResultCode};
     use nom::IResult;
 
 
@@ -252,6 +268,26 @@ mod tests {
         assert_eq!("info".parse::<Command>().unwrap(), Command::ListSystemInfo);
         assert!("ListSystemInfo 1 2".parse::<Command>().is_err());
         assert!("info please".parse::<Command>().is_err());
+    }
+
+    #[test]
+    fn ostree_install_test() {
+        assert_eq!("OstreeInstall uri commit ref".parse::<Command>().unwrap(),
+                   Command::OstreeInstall(OstreePackage {
+                       commit:      "commit".to_string(),
+                       refName:     "ref".to_string(),
+                       description: "".to_string(),
+                       pullUri:     "uri".to_string()
+                   }));
+        assert_eq!("osti 123 456 789".parse::<Command>().unwrap(),
+                   Command::OstreeInstall(OstreePackage {
+                       commit:      "456".to_string(),
+                       refName:     "789".to_string(),
+                       description: "".to_string(),
+                       pullUri:     "123".to_string()
+                   }));
+        assert!("OstreeInstall this".parse::<Command>().is_err());
+        assert!("osti this that".parse::<Command>().is_err());
     }
 
     #[test]

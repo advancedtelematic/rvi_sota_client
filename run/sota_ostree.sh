@@ -35,7 +35,7 @@ fi
 
 if [ "$COMMIT" == "$CUR_COMMIT" ]; then
     echo "already installed"
-    exit 0
+    exit 99
 fi
 
 rm -f /etc/ostree/remotes.d/agl-remote.conf
