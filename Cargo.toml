@@ -3,7 +3,9 @@ name = "sota_client"
 version = "0.1.0"
 authors = ["Jerry Trieu <jerry@advancedtelematic.com",
            "Shaun Taheri <shaun@advancedtelematic.com>",
-           "Stevan Andjelkovic <steven@advancedtelematic.com"]
+           "Stevan Andjelkovic <steven@advancedtelematic.com>",
+           "Eric Hartsuyker <eric.hartsuyker@advancedtelematic.com>",
+          ]
 
 [lib]
 name = "sota"
