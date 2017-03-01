@@ -81,8 +81,10 @@ impl FromStr for PackageManager {
             "off" => Ok(PackageManager::Off),
             "deb" => Ok(PackageManager::Deb),
             "rpm" => Ok(PackageManager::Rpm),
-            "ostree" => Ok(PackageManager::Ostree),
             "uptane" => Ok(PackageManager::Uptane),
+
+            // old treehub-manager alias and current ostree one.
+            "thm" | "ostree" => Ok(PackageManager::Ostree),
 
             test if test.len() > 5 && test[..5].as_bytes() == b"test:" => {
                 Ok(PackageManager::Test { filename: test[5..].to_string(), succeeds: true })

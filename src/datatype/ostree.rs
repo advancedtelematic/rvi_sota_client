@@ -122,6 +122,7 @@ impl Ostree {
 
     /// Run `ostree admin status` to get a list of branches.
     pub fn get_branches() -> Result<Vec<OstreeBranch>, Error> {
+        debug!("getting ostree branches with `ostree admin status`");
         let output = Command::new("ostree").arg("admin").arg("status").output()?;
         let stdout = String::from_utf8(output.stdout)?;
         Self::parse_branches(&stdout)
