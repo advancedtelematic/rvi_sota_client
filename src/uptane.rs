@@ -57,9 +57,8 @@ impl Uptane {
 
     /// GET the bytes response from the given endpoint.
     fn get_endpoint(&mut self, client: &Client, director: bool, endpoint: &str) -> Result<Vec<u8>, Error> {
-        let resp_rx = client.get(self.endpoint(director, endpoint), None);
-        let resp    = resp_rx.recv().ok_or(Error::Client("couldn't get bytes from endpoint".to_string()))?;
-        match resp {
+        let rx = client.get(self.endpoint(director, endpoint), None);
+        match rx.recv().ok_or(Error::Client("couldn't get bytes from endpoint".to_string()))? {
             Response::Success(data) => Ok(data.body),
             Response::Failed(data)  => Err(Error::from(data)),
             Response::Error(err)    => Err(err)
@@ -68,9 +67,8 @@ impl Uptane {
 
     /// PUT bytes to endpoint.
     fn put_endpoint(&mut self, client: &Client, director: bool, endpoint: &str, bytes: Vec<u8>) -> Result<(), Error> {
-        let resp_rx = client.put(self.endpoint(director, endpoint), Some(bytes));
-        let resp    = resp_rx.recv().ok_or(Error::Client("couldn't put bytes to endpoint".to_string()))?;
-        match resp {
+        let rx = client.put(self.endpoint(director, endpoint), Some(bytes));
+        match rx.recv().ok_or(Error::Client("couldn't put bytes to endpoint".to_string()))? {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(Error::from(data)),
             Response::Error(err)   => Err(err)

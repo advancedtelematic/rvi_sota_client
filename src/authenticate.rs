@@ -15,8 +15,8 @@ struct RegistrationPayload {
 pub fn pkcs12(server: Url, device_id: String, ttl: u32, client: &Client) -> Result<Vec<u8>, Error> {
     debug!("registering at {}", server);
     let body = try!(json::encode(&RegistrationPayload { deviceId: device_id, ttl: ttl }));
-    let resp_rx = client.post(server, Some(body.into_bytes()));
-    let resp    = resp_rx.recv().expect("no authenticate response received");
+    let rx   = client.post(server, Some(body.into_bytes()));
+    let resp = rx.recv().expect("no authenticate response received");
     match resp {
         Response::Success(data) => return Ok(data.body),
         Response::Failed(data)  => return Err(Error::from(data)),
@@ -28,9 +28,9 @@ pub fn pkcs12(server: Url, device_id: String, ttl: u32, client: &Client) -> Resu
 /// Authenticate with the specified OAuth2 server to retrieve a new `AccessToken`.
 pub fn oauth2(server: Url, client: &Client) -> Result<AccessToken, Error> {
     debug!("authenticating at {}", server);
-    let resp_rx = client.post(server, Some(br#"grant_type=client_credentials"#.to_vec()));
-    let resp    = resp_rx.recv().expect("no authenticate response received");
-    let body    = match resp {
+    let rx   = client.post(server, Some(br#"grant_type =client_credentials"#.to_vec()));
+    let resp = rx.recv().expect("no authenticate response received");
+    let body = match resp {
         Response::Success(data) => try!(String::from_utf8(data.body)),
         Response::Failed(data)  => return Err(Error::from(data)),
         Response::Error(err)    => return Err(err)

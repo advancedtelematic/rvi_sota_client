@@ -126,7 +126,7 @@ impl Display for Error {
             Error::JsonEncoder(ref e)   => format!("Failed to encode JSON: {}", e.clone()),
             Error::JsonParser(ref e)    => format!("Failed to parse JSON: {}", e.clone()),
             Error::Openssl(ref e)       => format!("OpenSSL errors: {}", e.clone()),
-            Error::OstreeCommand(ref s) => format!("OsTree command failed: {}", s.clone()),
+            Error::OstreeCommand(ref s) => format!("OSTree command failed: {}", s.clone()),
             Error::Poison(ref e)        => format!("Poison error: {}", e.clone()),
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),
             Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),

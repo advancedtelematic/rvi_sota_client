@@ -18,7 +18,7 @@ impl PackageManager {
         if succeeds {
             let _ = File::create(name.clone()).expect("couldn't create Test Package Manager file");
         }
-        PackageManager::File { filename: name, succeeds: succeeds }
+        PackageManager::Test { filename: name, succeeds: succeeds }
     }
 }
 

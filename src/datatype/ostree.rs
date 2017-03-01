@@ -1,11 +1,12 @@
 use std::collections::HashMap;
-use std::process::{Command, Output};
+use std::process::Command;
 
-use datatype::{AccessToken, Error, Package, SignedImage, SignedMeta, SignedVersion};
-use package_manager::package_manager::parse_package;
+use datatype::{AccessToken, Error, Package, SignedImage, SignedMeta, SignedVersion,
+               UpdateResultCode as Code};
+use package_manager::package_manager::{InstallOutcome, parse_package};
 
 
-/// Details of an OsTree branch.
+/// Details of an OSTree branch.
 #[derive(RustcDecodable, Debug)]
 #[allow(non_snake_case)]
 pub struct OstreeBranch {
@@ -38,8 +39,9 @@ impl OstreeBranch {
     }
 }
 
-/// Details of a remote OsTree package.
-#[derive(RustcDecodable, Debug)]
+
+/// Details of a remote OSTree package.
+#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
 #[allow(non_snake_case)]
 pub struct OstreePackage {
     pub commit:      String,
@@ -48,24 +50,47 @@ pub struct OstreePackage {
     pub pullUri:     String
 }
 
+impl Default for OstreePackage {
+    fn default() -> Self {
+        OstreePackage {
+            commit:      "".to_string(),
+            refName:     "".to_string(),
+            description: "".to_string(),
+            pullUri:     "".to_string()
+        }
+    }
+}
 
-/// Static functions for working with OsTree data.
+impl OstreePackage {
+    /// Shell out to the ostree command to install this package.
+    pub fn install(self, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
+        debug!("installing ostree package: {:?}", self);
+
+        let mut command = Command::new("sota_ostree.sh");
+        command
+            .env("COMMIT",      self.commit)
+            .env("REF_NAME",    self.refName)
+            .env("DESCRIPTION", self.description)
+            .env("PULL_URI",    self.pullUri);
+        token.map(|t| command.env("AUTHPLUS_ACCESS_TOKEN", t.access_token.clone()));
+
+        let output = command.output().map_err(|err| (Code::GENERAL_ERROR, format!("ostree install: {}", err)))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+        match output.status.code() {
+            Some(0)  => Ok((Code::OK, stdout)),
+            Some(99) => Ok((Code::ALREADY_PROCESSED, stdout)),
+            _ => Err((Code::INSTALL_FAILED, format!("stdout: {}\nstderr: {}", stdout, stderr)))
+        }
+    }
+}
+
+
+/// Static functions for working with OSTree data.
 pub struct Ostree;
 
 impl Ostree {
-    /// Shell out to the ostree command to install this package.
-    pub fn install(pkg: OstreePackage, token: Option<&AccessToken>) -> Result<Output, Error> {
-        let mut command = Command::new("sota_ostree.sh");
-        command
-            .env("COMMIT",      pkg.commit)
-            .env("REF_NAME",    pkg.refName)
-            .env("DESCRIPTION", pkg.description)
-            .env("PULL_URI",    pkg.pullUri);
-        token.map(|t| command.env("AUTHPLUS_ACCESS_TOKEN", t.access_token.clone()));
-
-        command.output().map_err(|err| Error::OstreeCommand(err.to_string()))
-    }
-
     /// Return a list of installed ostree packages from `/usr/package.manifest`.
     pub fn get_installed() -> Result<Vec<Package>, Error> {
         Command::new("cat")
@@ -85,7 +110,7 @@ impl Ostree {
             })
     }
 
-    /// Get the current OsTree branch.
+    /// Get the current OSTree branch.
     pub fn get_current_branch() -> Result<OstreeBranch, Error> {
         for branch in Self::get_branches()? {
             if branch.current {
@@ -137,6 +162,7 @@ impl Ostree {
 #[cfg(test)]
 mod tests {
     use super::*;
+
 
     const OSTREE_ADMIN_STATUS: &'static str = r#"
         * gnome-ostree 67e382b11d213a402a5313e61cbc69dfd5ab93cb07.0
