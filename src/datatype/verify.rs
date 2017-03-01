@@ -6,6 +6,8 @@ use openssl::pkey::PKey;
 use openssl::rsa::{Rsa, Padding};
 use openssl::sign::Verifier as OpenSslVerifier;
 use std::collections::HashMap;
+use std::io::Write;
+use std::process::{Command, Stdio};
 use std::str::{self, FromStr};
 
 use datatype::{Error, Key, Metadata, Role, RoleData, Signed};
@@ -77,6 +79,33 @@ pub struct Verifier {
     roles: HashMap<Role, RoleData>
 }
 
+
+/// Shell exec out to Python to get canonical json bytes
+fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+	let mut child = Command::new("canonical_json.py")
+			.stdin(Stdio::piped())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
+			.spawn()?;
+
+    match child.stdin.as_mut() {
+        Some(mut stdin) => {
+            stdin.write(bytes)?;
+            stdin.flush()?;
+        }
+        None => return Err(Error::Command(String::from("unable to write to stdin"))),
+    }
+
+    let output = child.wait_with_output()?;
+
+	if !output.status.success() {
+        Err(Error::Command(format!("Error with canonical_json.py: exit: {}", output.status)))
+	} else {
+        Ok(output.stdout)
+    }
+}
+
+
 impl Verifier {
     pub fn new() -> Self {
         Verifier {
@@ -116,13 +145,14 @@ impl Verifier {
         }
 
         let signed = json::to_string(&metadata.signed)?;
+        let signed = canonicalize_json(signed.as_bytes())?;
         let mut valid_count = 0;
         for sig in &metadata.signatures {
             self.keys.get(&sig.keyid)
                 .map(|key| {
                     let ref public = key.keyval.public;
                     key.keytype
-                        .verify(signed.as_bytes(), public.as_bytes(), sig.sig.as_bytes())
+                        .verify(&signed, public.as_bytes(), sig.sig.as_bytes())
                         .map(|_| {
                             trace!("successful verification with: {}", public);
                             valid_count += 1;

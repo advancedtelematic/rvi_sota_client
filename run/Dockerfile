@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
 ARG bin_dir=/usr/local/bin
 ARG conf_dir=/usr/local/etc
 
+COPY canonical_json.py $bin_dir
 COPY sota_client $bin_dir
 COPY sota_start.sh $bin_dir
 COPY sota_sysinfo.sh $bin_dir
