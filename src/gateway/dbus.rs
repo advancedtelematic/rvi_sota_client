@@ -135,7 +135,7 @@ fn default_interface<'i>(itx: Sender<Interpret>) -> Interface<'i> {
 }
 
 fn send(itx: &Sender<Interpret>, cmd: Command) {
-    itx.send(Interpret { command: cmd, response_tx: None });
+    itx.send(Interpret { command: cmd, resp_tx: None });
 }
 
 fn handle_initiate_download(itx: &Sender<Interpret>, msg: &mut Message) -> MethodResult {

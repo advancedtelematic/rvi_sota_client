@@ -1,10 +1,9 @@
 use serde_json as json;
 use std::collections::HashMap;
 
-use datatype::{AccessToken, Error, Metadata, Role, Root, SignedMeta, SignedCustom,
-               Snapshot, Targets, Timestamp, UpdateReport, UptaneConfig, Url, Verifier};
+use datatype::{Error, Metadata, Role, Root, SignedManifest, SignedMeta, SignedCustom,
+               Snapshot, Targets, Timestamp, UptaneConfig, Url, Verifier};
 use http::{Client, Response};
-use package_manager::PackageManager;
 
 
 /// Last known version of each metadata file.
@@ -78,9 +77,9 @@ impl Uptane {
 
 
     /// Put a new manifest file to the Director server.
-    pub fn put_manifest(&mut self, client: &Client, manifest: Vec<u8>) -> Result<(), Error> {
+    pub fn put_manifest(&mut self, client: &Client, manifest: SignedManifest) -> Result<(), Error> {
         debug!("put_manifest");
-        self.put_endpoint(client, true, "manifest", manifest)
+        self.put_endpoint(client, true, "manifest", json::to_vec(&manifest)?)
     }
 
     /// Add the root.json metadata to the verifier and return a new version indicator.
@@ -164,31 +163,13 @@ impl Uptane {
         }
     }
 
-
     pub fn extract_custom(&self, targets: HashMap<String, SignedMeta>) -> HashMap<String, SignedCustom> {
         debug!("extract_custom");
         let mut out = HashMap::new();
         for (file, meta) in targets {
-            if let Some(custom) = meta.custom {
-                out.insert(file, custom);
-            }
+            let _ = meta.custom.map(|c| out.insert(file, c));
         }
         out
-    }
-
-    pub fn install_custom(&mut self,
-                          token:  Option<&AccessToken>,
-                          custom: HashMap<String, SignedCustom>) -> Result<UpdateReport, UpdateReport> {
-        debug!("install_custom");
-        let (id, path) = self.custom_path(custom)?;
-        match PackageManager::Uptane.install_package(&path, token) {
-            Ok( (code, output)) => Ok(UpdateReport::single(id, code, output)),
-            Err((code, output)) => Err(UpdateReport::single(id, code, output))
-        }
-    }
-
-    pub fn custom_path(&self, custom: HashMap<String, SignedCustom>) -> Result<(String, String), UpdateReport> {
-        unimplemented!();
     }
 }
 

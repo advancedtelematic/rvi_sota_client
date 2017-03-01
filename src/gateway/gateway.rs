@@ -8,8 +8,8 @@ use datatype::{Command, Event};
 /// Encapsulates a `Command` to be sent to the `CommandInterpreter` for processing,
 /// with an optional channel to receive the outcome `Event`.
 pub struct Interpret {
-    pub command:     Command,
-    pub response_tx: Option<Arc<Mutex<Sender<Event>>>>,
+    pub command: Command,
+    pub resp_tx: Option<Arc<Mutex<Sender<Event>>>>,
 }
 
 /// A `Gateway` may send `Command`s to the `CommandInterpreter`, as well as listen

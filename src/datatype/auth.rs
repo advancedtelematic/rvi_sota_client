@@ -1,12 +1,36 @@
+use std::fmt::{self, Display, Formatter};
+
 
 /// The available authentication types for communicating with the Auth server.
 #[derive(Clone, PartialEq, Eq, Debug, RustcEncodable, RustcDecodable)]
 pub enum Auth {
+    // ready for interpreter
     None,
-    Credentials(ClientCredentials),
     Token(AccessToken),
-    Registration(RegistrationCredentials),
     Certificate,
+
+    // need to authenticate
+    Credentials(ClientCredentials),
+    Registration(RegistrationCredentials),
+}
+
+/// Display should not include any sensitive data for log output.
+impl Display for Auth {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            Auth::None => write!(f, "{}", "No authentication"),
+            Auth::Token(AccessToken { token_type: ref typ, .. }) => {
+                write!(f, "Token type: {}", typ)
+            }
+            Auth::Certificate => write!(f, "{}", "Certificate authentication"),
+            Auth::Credentials(ClientCredentials { client_id: ref id, .. }) => {
+                write!(f, "Getting new token for client id: {}", id)
+            }
+            Auth::Registration(RegistrationCredentials { client_id: ref id }) => {
+                write!(f, "Getting new certificate for client id: {}", id)
+            }
+        }
+    }
 }
 
 
