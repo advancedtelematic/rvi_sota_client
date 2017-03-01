@@ -13,7 +13,6 @@ TARGET := x86_64-unknown-linux-gnu
 DOCKER_RUN := \
 	@docker run --rm \
 		--env RUST_LOG=$(RUST_LOG) \
-		--env RUST_BACKTRACE=1 \
 		--env SOTA_VERSION=$(SOTA_VERSION) \
 		--env PACKAGE_VERSION=$(PACKAGE_VERSION) \
 		--env CONFIG_PATH=$(CONFIG_PATH) \

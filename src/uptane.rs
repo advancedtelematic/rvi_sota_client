@@ -30,6 +30,7 @@ pub struct Uptane {
     verifier:    Verifier,
 }
 
+
 impl Uptane {
     pub fn new(cfg: UptaneConfig, device_uuid: String) -> Self {
         Uptane {
@@ -239,7 +240,7 @@ mod tests {
             "tests/uptane/ats/targets_director.json",
         ]);
 
-        assert_eq!(true, uptane.get_root(&client, true).expect("couldn't get_root"));
+        assert!(uptane.get_root(&client, true).expect("couldn't get_root"));
         match uptane.get_targets(&client, true) {
             Ok((ts, ts_new)) => {
                 assert_eq!(ts_new, true);
@@ -266,7 +267,7 @@ mod tests {
             "tests/uptane/ed25519/snapshot.json",
         ]);
 
-        assert_eq!(true, uptane.get_root(&client, true).expect("couldn't get_root"));
+        assert!(uptane.get_root(&client, true).expect("couldn't get_root"));
         match uptane.get_snapshot(&client, true) {
             Ok((ss, ss_new)) => {
                 assert_eq!(ss_new, true);
@@ -288,7 +289,7 @@ mod tests {
             "tests/uptane/ed25519/timestamp.json",
         ]);
 
-        assert_eq!(true, uptane.get_root(&client, true).expect("get_root failed"));
+        assert!(uptane.get_root(&client, true).expect("get_root failed"));
         match uptane.get_timestamp(&client, true) {
             Ok((ts, ts_new)) => {
                 assert_eq!(ts_new, true);
