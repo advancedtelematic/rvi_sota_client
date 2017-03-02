@@ -12,18 +12,13 @@ fn test_config(path: &str, is_ok: bool) {
 }
 
 #[test]
-fn default_config() {
-    test_config("tests/config/default.toml", true);
+fn template_config() {
+    test_config("tests/config/template.toml", true);
 }
 
 #[test]
 fn genivi_config() {
     test_config("tests/config/genivi.toml", true);
-}
-
-#[test]
-fn certificate_config() {
-    test_config("tests/config/certificate.toml", true);
 }
 
 #[test]
@@ -34,4 +29,9 @@ fn old_config() {
 #[test]
 fn polling_config() {
     test_config("tests/config/polling.toml", false);
+}
+
+#[test]
+fn provision_config() {
+    test_config("tests/config/provision.toml", true);
 }

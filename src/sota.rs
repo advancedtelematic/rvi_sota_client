@@ -24,8 +24,8 @@ impl<'c, 'h> Sota<'c, 'h> {
     /// When using cert authentication returns an endpoint of: `<server>/core/<path>`
     /// otherwise returns an endpoint of: `<server>/api/v1/mydevice/<device-id>/<path>`.
     fn endpoint(&self, path: &str) -> Url {
-        if self.config.authenticate_with_certs() {
-            self.config.auth.as_ref().unwrap().server.join(&format!("/core/{}", path))
+        if self.config.tls.is_some() {
+            self.config.tls.as_ref().unwrap().server.join(&format!("/core/{}", path))
         } else {
             self.config.core.server.join(&format!("/api/v1/mydevice/{}/{}", self.config.device.uuid, path))
         }

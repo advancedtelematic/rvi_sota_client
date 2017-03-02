@@ -35,14 +35,11 @@ CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 help:
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%16s\033[0m : %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-build: ## Build the app (dev)
-	$(CARGO) build --target=$(TARGET)
-
 new: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
-old: image ## Use a config file at `/usr/local/etc/sota.toml` to run the client.
-	$(DOCKER_RUN) --net=host --volume /usr/local/etc/sota.toml:/usr/local/etc/sota.toml $(IMAGE_SOTA)
+old: image ## Use a local `sota.toml` config file to run the client.
+	$(DOCKER_RUN) --net=host --volume sota.toml:/usr/local/etc/sota.toml $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
 	$(CARGO) test --target=$(TARGET)
@@ -60,6 +57,9 @@ clean: ## Remove all compiled libraries, builds and temporary files.
 client: src/ ## Compile a new release build of the client.
 	$(CARGO) build --release --target=$(TARGET)
 	@cp target/$(TARGET)/release/sota_client run/
+
+client-dev: ## Compile a new development build of the client
+	$(CARGO) build --target=$(TARGET)
 
 image: client ## Build a Docker image for running the client.
 	@docker build --tag advancedtelematic/sota-client run

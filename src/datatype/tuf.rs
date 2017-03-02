@@ -1,5 +1,5 @@
 use chrono::{DateTime, NaiveDateTime, UTC};
-use rustc_serialize::base64::{ToBase64, STANDARD};
+use rustc_serialize::base64::{self, ToBase64};
 use serde;
 use serde_json as json;
 use serde_json::value::ToJson;
@@ -127,11 +127,10 @@ pub struct SignedManifest {
 
 impl SignedManifest {
     pub fn new(vin: String, primary_ecu_serial: String, version: SignedVersion) -> Result<Self, Error> {
-        let version_json = version.to_json()?;
         Ok(SignedManifest {
             vin: vin,
             primary_ecu_serial: primary_ecu_serial,
-            ecu_version_manifest: version_json,
+            ecu_version_manifest: version.to_json()?
         })
     }
 
@@ -143,7 +142,7 @@ impl SignedManifest {
         let sig = Signature {
            keyid: priv_key.keyid,
            method: key_type,
-           sig: sig.to_base64(STANDARD),
+           sig: sig.to_base64(base64::STANDARD),
         };
 
         Ok(Metadata {
@@ -251,4 +250,3 @@ impl Default for Timestamp {
         }
     }
 }
-

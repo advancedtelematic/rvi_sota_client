@@ -11,24 +11,18 @@ pub enum Auth {
 
     // need to authenticate
     Credentials(ClientCredentials),
-    Registration(RegistrationCredentials),
+    Provision
 }
 
 /// Display should not include any sensitive data for log output.
 impl Display for Auth {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            Auth::None => write!(f, "{}", "No authentication"),
-            Auth::Token(AccessToken { token_type: ref typ, .. }) => {
-                write!(f, "Token type: {}", typ)
-            }
-            Auth::Certificate => write!(f, "{}", "Certificate authentication"),
-            Auth::Credentials(ClientCredentials { client_id: ref id, .. }) => {
-                write!(f, "Getting new token for client id: {}", id)
-            }
-            Auth::Registration(RegistrationCredentials { client_id: ref id }) => {
-                write!(f, "Getting new certificate for client id: {}", id)
-            }
+            Auth::None           => write!(f, "{}", "Auth: None"),
+            Auth::Token(_)       => write!(f, "{}", "Auth: Token"),
+            Auth::Certificate    => write!(f, "{}", "Auth: Certificate"),
+            Auth::Credentials(_) => write!(f, "{}", "Auth: Credentials"),
+            Auth::Provision      => write!(f, "{}", "Auth: Provision"),
         }
     }
 }
@@ -49,9 +43,4 @@ pub struct AccessToken {
     pub token_type:   String,
     pub expires_in:   i32,
     pub scope:        String
-}
-
-#[derive(RustcEncodable, RustcDecodable, Debug, Clone, PartialEq, Eq)]
-pub struct RegistrationCredentials {
-    pub client_id: String,
 }

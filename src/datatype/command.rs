@@ -3,8 +3,8 @@ use std::str;
 use std::str::FromStr;
 
 use nom::{IResult, space, eof};
-use datatype::{Auth, ClientCredentials, RegistrationCredentials, Error, InstalledSoftware,
-               OstreePackage, Package, UpdateReport, UpdateRequestId, UpdateResultCode};
+use datatype::{Auth, ClientCredentials, Error, InstalledSoftware, OstreePackage,
+               Package, UpdateReport, UpdateRequestId, UpdateResultCode};
 
 
 /// System-wide commands that are sent to the interpreter.
@@ -44,7 +44,7 @@ pub enum Command {
 impl Display for Command {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let text = match *self {
-            //Command::Authenticate(_) => format!("Authenticate ({})", self),
+            Command::Authenticate(_) => format!("Authenticate ({})", self),
             Command::SendInstalledPackages(_) => format!("{}", "SendInstalledPackages"),
             _ => format!("{:?}", self)
         };
@@ -115,9 +115,8 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
     match cmd {
         Command::Authenticate(_) => match args.len() {
             0 => Ok(Command::Authenticate(Auth::None)),
-            1 => Ok(Command::Authenticate(Auth::Registration(RegistrationCredentials {
-                client_id:     args[0].to_string()
-            }))),
+            1 if args[0] == "cert" => Ok(Command::Authenticate(Auth::Certificate)),
+            1 if args[0] == "prov" => Ok(Command::Authenticate(Auth::Provision)),
             2 => Ok(Command::Authenticate(Auth::Credentials(ClientCredentials {
                 client_id:     args[0].to_string(),
                 client_secret: args[1].to_string()
@@ -241,6 +240,9 @@ mod tests {
     fn authenticate_test() {
         assert_eq!("Authenticate".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
         assert_eq!("auth".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
+        assert!("auth one".parse::<Command>().is_err());
+        assert_eq!("auth cert".parse::<Command>().unwrap(), Command::Authenticate(Auth::Certificate));
+        assert_eq!("auth prov".parse::<Command>().unwrap(), Command::Authenticate(Auth::Provision));
         assert_eq!("auth user pass".parse::<Command>().unwrap(),
                    Command::Authenticate(Auth::Credentials(ClientCredentials {
                        client_id:     "user".to_string(),

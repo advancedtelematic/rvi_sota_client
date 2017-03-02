@@ -175,8 +175,8 @@ impl Interpreter<Interpret, Event> for CommandInterpreter {
             Auth::Token(_)    |
             Auth::Certificate => self.process_command(interpret.command, etx),
 
-            Auth::Credentials(_)  |
-            Auth::Registration(_) => self.authenticate(interpret.command)
+            Auth::Provision      |
+            Auth::Credentials(_) => self.authenticate(interpret.command)
         };
 
         let final_ev = match outcome {
@@ -342,34 +342,39 @@ impl CommandInterpreter {
 
             Command::Authenticate(Auth::Credentials(creds)) => {
                 let cfg = self.config.auth.as_ref().expect("auth config required");
-                init_tls_client(Some(self.config.tls_data()));
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
                 }
+
                 let token = oauth2(cfg.server.join("/token"), self.http.as_ref())?;
                 self.auth = Auth::Token(token.clone());
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Token(token)));
                 }
+
                 Event::Authenticated
             }
 
-            Command::Authenticate(Auth::Registration(reg)) => {
-                let cfg = self.config.auth.as_ref().expect("auth config required");
-                let p12 = self.config.device.p12_path.as_ref().expect("auth_certificate expects a p12_path");
-                if !Path::new(&p12).exists() { // no access certificate, need to get it
-                    let url    = cfg.server.join("/devices");
-                    let expiry = cfg.expiry_days.expect("need auth.expiry_days");
-                    let bundle = pkcs12(url, cfg.client_id.clone(), expiry, self.http.as_ref())?;
-                    let _ = File::create(p12)
-                        .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
-                        .map_err(|err| panic!("couldn't open device.p12_path for writing: {}", err));
+            Command::Authenticate(Auth::Provision) => {
+                let tls  = self.config.tls.as_ref().expect("tls config required");
+                let prov = self.config.provision.as_ref().expect("provision config required");
+                if Path::new(&tls.p12_path).exists() {
+                    panic!("tls.p12_path already exists: {}", tls.p12_path);
                 }
-                init_tls_client(Some(self.config.tls_data()));
+
+                let url = tls.server.join("/devices");
+                let id  = prov.device_id.as_ref().unwrap_or(&self.config.device.uuid);
+                let bundle = pkcs12(url, id.clone(), prov.expiry_days, self.http.as_ref())?;
+                let _ = File::create(&tls.p12_path)
+                    .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
+                    .map_err(|err| panic!("couldn't open tls.p12_path for writing: {}", err));
+
+                init_tls_client(self.config.tls_data(false));
                 self.auth = Auth::Certificate;
                 if !self.http.is_testing() {
-                    self.http = Box::new(AuthClient::from(Auth::Registration(reg)));
+                    self.http = Box::new(AuthClient::from(Auth::Certificate));
                 }
+
                 Event::Authenticated
             }
 

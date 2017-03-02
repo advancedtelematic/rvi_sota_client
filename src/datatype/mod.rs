@@ -12,7 +12,7 @@ pub mod ostree;
 pub mod tuf;
 pub mod verify;
 
-pub use self::auth::{AccessToken, Auth, ClientCredentials, RegistrationCredentials};
+pub use self::auth::{AccessToken, Auth, ClientCredentials};
 pub use self::command::Command;
 pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
                        GatewayConfig, RviConfig, UptaneConfig};
@@ -58,4 +58,3 @@ pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
         Ok(output.stdout)
     }
 }
-

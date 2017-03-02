@@ -19,7 +19,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sota::datatype::{Command, Config, Event};
+use sota::datatype::{Auth, Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, init_tls_client};
@@ -38,17 +38,20 @@ macro_rules! exit {
 
 
 fn main() {
-    let version  = start_logging();
-    let config   = build_config(&version);
-    let mut mode = init_config(&config);
+    let version = start_logging();
+    let config  = build_config(&version);
+
+    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let mut mode = init_config(&config, &auth);
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
     let (itx, irx) = chan::async::<Interpret>();
+
     let mut broadcast = Broadcast::new(erx);
     let wg = WaitGroup::new();
 
-    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    // send initial interpreter command
     ctx.send(Command::Authenticate(auth.clone()));
 
     crossbeam::scope(|scope| {
@@ -174,14 +177,14 @@ fn start_update_poller(interval: u64, itx: Sender<Interpret>, wg: WaitGroup) {
     info!("Polling for new updates every {} seconds.", interval);
     let (etx, erx) = chan::async::<Event>();
     loop {
-        wg.wait(); // wait until not busy
+        wg.wait(); // wait until interpreters have finished processing
         thread::sleep(Duration::from_secs(interval));
-        wg.wait(); // ensure we're still not busy
+        wg.wait(); // ensure they have not started other tasks
         itx.send(Interpret {
             command: Command::GetUpdateRequests,
             resp_tx: Some(Arc::new(Mutex::new(etx.clone())))
-        }); // request new updates
-        let _ = erx.recv(); // wait for the response
+        }); // then request new updates
+        let _ = erx.recv(); // and wait for the response
     }
 }
 
@@ -198,9 +201,6 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "auth-server", "change the auth server", "URL");
     opts.optopt("", "auth-client-id", "change the auth client id", "ID");
     opts.optopt("", "auth-client-secret", "change the auth client secret", "SECRET");
-    opts.optopt("", "auth-p12-path", "change the auth credentials file", "PATH");
-    opts.optopt("", "auth-p12-password", "change the PKCS12 file password", "PASSWORD");
-    opts.optopt("", "auth-expiry-days", "change the certificate access duration", "INT");
 
     opts.optopt("", "core-server", "change the core server", "URL");
     opts.optopt("", "core-polling", "toggle polling the core server for updates", "BOOL");
@@ -234,9 +234,17 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "network-socket-events-path", "change the socket path for sending events", "PATH");
     opts.optopt("", "network-websocket-server", "change the websocket gateway address", "ADDR");
 
+    opts.optopt("", "provision-p12-path", "change the TLS PKCS#12 credentials file", "PATH");
+    opts.optopt("", "provision-p12-password", "change the TLS PKCS#12 file password", "PASSWORD");
+    opts.optopt("", "provision-expiry-days", "change the TLS certificate validity duration", "INT");
+
     opts.optopt("", "rvi-client", "change the rvi client URL", "URL");
     opts.optopt("", "rvi-storage-dir", "change the rvi storage directory", "PATH");
     opts.optopt("", "rvi-timeout", "change the rvi timeout", "TIMEOUT");
+
+    opts.optopt("", "tls-server", "change the TLS server", "PATH");
+    opts.optopt("", "tls-p12-path", "change the TLS PKCS#12 credentials file", "PATH");
+    opts.optopt("", "tls-p12-password", "change the TLS PKCS#12 file password", "PASSWORD");
 
     let matches = opts.parse(&args[1..]).unwrap_or_else(|err| panic!(err.to_string()));
 
@@ -255,16 +263,11 @@ fn build_config(version: &str) -> Config {
     };
 
     config.auth.as_mut().map(|auth_cfg| {
-        matches.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
-        matches.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = Some(secret));
-        matches.opt_str("auth-p12-path").map(|path| auth_cfg.p12_path = Some(path));
-        matches.opt_str("auth-p12-password").map(|password| auth_cfg.p12_password = Some(password));
-        matches.opt_str("auth-expiry-days").map(|text| {
-            auth_cfg.expiry_days = Some(text.parse().unwrap_or_else(|err| exit!(1, "Invalid auth-expiry-days: {}", err)));
-        });
         matches.opt_str("auth-server").map(|text| {
             auth_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid auth-server URL: {}", err));
         });
+        matches.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
+        matches.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = secret);
     });
 
     matches.opt_str("core-server").map(|text| {
@@ -292,8 +295,6 @@ fn build_config(version: &str) -> Config {
         config.device.package_manager = text.parse().unwrap_or_else(|err| exit!(1, "Invalid device-package-manager: {}", err));
     });
     matches.opt_str("device-certificates-path").map(|path| config.device.certificates_path = Some(path));
-    matches.opt_str("device-p12-path").map(|path| config.device.p12_path = Some(path));
-    matches.opt_str("device-p12-password").map(|pw| config.device.p12_password = pw);
     matches.opt_str("device-system-info").map(|cmd| config.device.system_info = Some(cmd));
 
     matches.opt_str("gateway-console").map(|console| {
@@ -325,12 +326,28 @@ fn build_config(version: &str) -> Config {
     matches.opt_str("network-socket-events-path").map(|path| config.network.socket_events_path = path);
     matches.opt_str("network-websocket-server").map(|server| config.network.websocket_server = server);
 
+    config.provision.as_mut().map(|prov_cfg| {
+        matches.opt_str("provision-p12-path").map(|path| prov_cfg.p12_path = path);
+        matches.opt_str("provision-p12-password").map(|password| prov_cfg.p12_password = password);
+        matches.opt_str("provision-expiry-days").map(|text| {
+            prov_cfg.expiry_days = text.parse().unwrap_or_else(|err| exit!(1, "Invalid provision-expiry-days: {}", err));
+        });
+    });
+
     matches.opt_str("rvi-client").map(|url| {
         config.rvi.client = url.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-client URL: {}", err));
     });
     matches.opt_str("rvi-storage-dir").map(|dir| config.rvi.storage_dir = dir);
     matches.opt_str("rvi-timeout").map(|timeout| {
         config.rvi.timeout = Some(timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-timeout: {}", err)));
+    });
+
+    config.tls.as_mut().map(|tls_cfg| {
+        matches.opt_str("tls-server").map(|text| {
+            tls_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid tls-server URL: {}", err));
+        });
+        matches.opt_str("tls-p12-path").map(|path| tls_cfg.p12_path = path);
+        matches.opt_str("tls-p12-password").map(|password| tls_cfg.p12_password = password);
     });
 
     if matches.opt_present("print") {
@@ -340,8 +357,12 @@ fn build_config(version: &str) -> Config {
     config
 }
 
-fn init_config(config: &Config) -> CommandMode {
-    init_tls_client(None);
+fn init_config(config: &Config, auth: &Auth) -> CommandMode {
+    if auth == &Auth::Provision {
+        init_tls_client(config.tls_data(true));
+    } else {
+        init_tls_client(config.tls_data(false));
+    }
 
     if let PackageManager::Uptane = config.device.package_manager {
         CommandMode::Uptane(None)
