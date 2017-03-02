@@ -12,8 +12,8 @@ fn test_config(path: &str, is_ok: bool) {
 }
 
 #[test]
-fn template_config() {
-    test_config("tests/config/template.toml", true);
+fn default_config() {
+    test_config("tests/config/default.toml", true);
 }
 
 #[test]
@@ -32,6 +32,6 @@ fn polling_config() {
 }
 
 #[test]
-fn provision_config() {
-    test_config("tests/config/provision.toml", true);
+fn auth_config() {
+    test_config("tests/config/auth.toml", true);
 }

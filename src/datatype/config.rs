@@ -752,7 +752,6 @@ mod tests {
         [rvi]
         client = "http://127.0.0.1:8901"
         storage_dir = "/var/sota"
-        timeout = 20
         "#;
 
     const TLS_CONFIG: &'static str =
@@ -779,34 +778,29 @@ mod tests {
 
     #[test]
     fn default_config() {
-        let config = String::new()
-            + CORE_CONFIG
-            + DEVICE_CONFIG
-            + GATEWAY_CONFIG
-            + NETWORK_CONFIG;
-        assert_eq!(Config::parse(&config).unwrap(), Config::default());
+        assert_eq!(Config::load("tests/config/default.toml").unwrap(), Config::default());
     }
 
     #[test]
-    fn template_config() {
-        let config = String::new()
-            + AUTH_CONFIG
+    fn default_configs() {
+        let configs = String::new()
             + CORE_CONFIG
             + DBUS_CONFIG
             + DEVICE_CONFIG
             + GATEWAY_CONFIG
             + NETWORK_CONFIG
             + RVI_CONFIG
-            + TLS_CONFIG
             + UPTANE_CONFIG;
-        assert_eq!(Config::load("tests/config/template.toml").unwrap(), Config::parse(&config).unwrap());
+        assert_eq!(Config::parse(&configs).unwrap(), Config::default());
     }
 
     #[test]
-    fn provision_config() {
-        let config = String::new()
-            + PROVISION_CONFIG;
-        assert_eq!(Config::load("tests/config/provision.toml").unwrap(), Config::parse(&config).unwrap());
+    fn auth_configs() {
+        let configs = String::new()
+            + AUTH_CONFIG
+            + PROVISION_CONFIG
+            + TLS_CONFIG;
+        assert_eq!(Config::load("tests/config/auth.toml").unwrap(), Config::parse(&configs).unwrap());
     }
 
     #[test]

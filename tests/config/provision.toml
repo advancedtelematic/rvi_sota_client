@@ -1,5 +1,0 @@
-[provision]
-server = "http://127.0.0.1:9001"
-p12_path = "/usr/local/etc/sota_registration.p12"
-p12_password = ""
-expires_in = 365
