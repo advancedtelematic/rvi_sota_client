@@ -7,7 +7,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use time::Duration;
 
-use datatype::{Error, KeyType, PrivateKey, canonicalize_json};
+use datatype::{Error, SignatureType, KeyType, PrivateKey, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
@@ -83,7 +83,7 @@ pub struct Metadata {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Signature {
     pub keyid:  String,
-    pub method: KeyType,
+    pub method: SignatureType,
     pub sig:    String,
 }
 
@@ -135,13 +135,13 @@ impl SignedManifest {
     }
 
     /// Consumes `self` because once we start signing, we should not modify the data
-    pub fn sign(self, priv_key: PrivateKey, key_type: KeyType) -> Result<Metadata, Error> {
+    pub fn sign(self, priv_key: PrivateKey, signature_type: SignatureType) -> Result<Metadata, Error> {
         let self_json = self.to_json()?;
         let canonical_json = canonicalize_json(self_json.to_string().as_bytes())?;
-        let sig = key_type.sign(&priv_key.priv_key, &canonical_json)?;
+        let sig = signature_type.sign(&priv_key.priv_key, &canonical_json)?;
         let sig = Signature {
            keyid: priv_key.keyid,
-           method: key_type,
+           method: signature_type,
            sig: sig.to_base64(base64::STANDARD),
         };
 

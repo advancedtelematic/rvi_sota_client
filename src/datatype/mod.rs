@@ -28,7 +28,7 @@ pub use self::ostree::{Ostree, OstreeBranch, OstreePackage};
 pub use self::tuf::{Key, KeyValue, Metadata, Role, RoleData, Root, Signature, Signed,
                     SignedCustom, SignedImage, SignedManifest, SignedMeta, SignedVersion,
                     Snapshot, Targets, Timestamp};
-pub use self::verify::{KeyType, Verifier, PrivateKey};
+pub use self::verify::{KeyType, SignatureType, Verifier, PrivateKey};
 
 
 // TODO remove this ugly hack ASAP

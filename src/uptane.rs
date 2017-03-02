@@ -242,12 +242,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore] /// FIXME: Must fix.
     fn test_get_snapshot() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-snapshot".to_string());
         let client = client_from_paths(&[
-            "tests/uptane/ed25519/root.json",
-            "tests/uptane/ed25519/snapshot.json",
+            "tests/uptane/repo_1/root.json",
+            "tests/uptane/repo_1/snapshot.json",
         ]);
 
         assert!(uptane.get_root(&client, true).expect("couldn't get_root"));
@@ -265,12 +264,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore] /// FIXME: Must fix.
     fn test_get_timestamp() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-timestamp".to_string());
         let client = client_from_paths(&[
-            "tests/uptane/ed25519/root.json",
-            "tests/uptane/ed25519/timestamp.json",
+            "tests/uptane/repo_1/root.json",
+            "tests/uptane/repo_1/timestamp.json",
         ]);
 
         assert!(uptane.get_root(&client, true).expect("get_root failed"));

@@ -21,7 +21,7 @@ pub struct PrivateKey {
 #[derive(Serialize, PartialEq, Eq, Debug, Clone)]
 pub enum KeyType {
     Ed25519,
-    RsaSsaPss,
+    Rsa,
 }
 
 impl serde::Deserialize for KeyType {
@@ -39,17 +39,45 @@ impl FromStr for KeyType {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "ed25519"    => Ok(KeyType::Ed25519),
-            "rsassa-pss" => Ok(KeyType::RsaSsaPss),
-            _ => Err(Error::UptaneInvalidKeyType)
+            "ed25519" | "Ed25519"  => Ok(KeyType::Ed25519),
+            "rsa"     | "RSA"      => Ok(KeyType::Rsa),
+            _ => Err(Error::UptaneInvalidKeyType(s.to_string()))
         }
     }
 }
 
-impl KeyType {
+#[derive(Serialize, PartialEq, Eq, Debug, Clone)]
+pub enum SignatureType {
+    Ed25519,
+    RsaSsaPss,
+}
+
+impl serde::Deserialize for SignatureType {
+    fn deserialize<D: serde::Deserializer>(de: D) -> Result<Self, D::Error> {
+        if let json::Value::String(ref s) = serde::Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| serde::de::Error::custom(format!("unknown SignatureType: {}", err)))
+        } else {
+            Err(serde::de::Error::custom("unknown SignatureType"))
+        }
+    }
+}
+
+impl FromStr for SignatureType {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ed25519"    => Ok(SignatureType::Ed25519),
+            "rsassa-pss" => Ok(SignatureType::RsaSsaPss),
+            _ => Err(Error::UptaneInvalidSignatureType(s.to_string()))
+        }
+    }
+}
+
+impl SignatureType {
     pub fn sign(&self, msg: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
-            KeyType::RsaSsaPss => {
+            SignatureType::RsaSsaPss => {
                 let rsa = Rsa::private_key_from_der(&key)?;
                 let priv_key = PKey::from_rsa(rsa)?;
                 let mut signer = Signer::new(MessageDigest::sha256(), &priv_key)?;
@@ -65,7 +93,7 @@ impl KeyType {
 
     pub fn verify(&self, msg: &[u8], key: &[u8], sig: &[u8]) -> Result<(), Error> {
         match *self {
-            KeyType::Ed25519 => {
+            SignatureType::Ed25519 => {
                 debug!("verifying using Ed25519: {}", str::from_utf8(key).unwrap_or("[raw bytes]"));
                 if ed25519::verify(msg, key, sig) {
                     Ok(())
@@ -74,7 +102,7 @@ impl KeyType {
                 }
             }
 
-            KeyType::RsaSsaPss => {
+            SignatureType::RsaSsaPss => {
                 debug!("verifying using RSA SSA-PPS: {}", str::from_utf8(key).unwrap_or("[raw bytes]"));
                 let rsa_key = Rsa::public_key_from_pem(&key)?;
                 let pub_key = PKey::from_rsa(rsa_key)?;
@@ -143,13 +171,17 @@ impl Verifier {
             self.keys.get(&sig.keyid)
                 .map(|key| {
                     let ref public = key.keyval.public;
-                    key.keytype
-                        .verify(&signed, public.as_bytes(), sig.sig.as_bytes())
-                        .map(|_| {
-                            trace!("successful verification with: {}", public);
-                            valid_count += 1;
-                        })
-                        .unwrap_or_else(|err| trace!("failed verification for {} with: {}", public, err));
+                    // TODO this is a bit ugly
+                    (match key.keytype {
+                        KeyType::Rsa => SignatureType::RsaSsaPss,
+                        KeyType::Ed25519 => SignatureType::Ed25519,
+                    })
+                    .verify(&signed, public.as_bytes(), sig.sig.as_bytes())
+                    .map(|_| {
+                        trace!("successful verification with: {}", public);
+                        valid_count += 1;
+                    })
+                    .unwrap_or_else(|err| trace!("failed verification for {} with: {}", public, err));
                 })
                 .unwrap_or_else(|| debug!("couldn't find key: {}", sig.keyid));
         }
@@ -180,19 +212,19 @@ mod tests {
         let msg = b"hello";
         let sig = "BusPdTkDUUG6ISM83snpKt0U8W3cKT8itiTXzJmWLHYBTytwCgW70gTY7z876cj6pELil9nBNC0YIdR4jhy4mu0cEiIIXqN3YWaEzMXAXt+QyjNBzm9POY6y3NF/jvpbZY3wgu5GbOkC6opRPoVARR3K79D9vRIEp6KDLbytqrFuDYd2rSRVfKkbdmt2kCJ17fV6NUWQocseil0kOtKZUI6jz/wt6M3pm5ni1I94Y+mjbwhw6LYEa9qQ++hwg875daaJSkb5jDJ0jkvwb28gsHLjZd1ldX0fuN3alV0RAb91m6klJbxu1ZC1QAfBsK2plkPKH+E4sOhu7NgneHqgFQ==";
         let sig_raw = sig.from_base64().expect("couldn't parse signed from Base64");
-        KeyType::RsaSsaPss.verify(msg, RSA_2048_PUB, &sig_raw).expect("couldn't verify message");
+        SignatureType::RsaSsaPss.verify(msg, RSA_2048_PUB, &sig_raw).expect("couldn't verify message");
 
         {
             let mut bad_msg = msg.clone();
             bad_msg[0] = msg[0] ^ 0x01;
-            if KeyType::RsaSsaPss.verify(&bad_msg, RSA_2048_PUB, &sig_raw).is_ok() {
+            if SignatureType::RsaSsaPss.verify(&bad_msg, RSA_2048_PUB, &sig_raw).is_ok() {
                 panic!("Expected signature verification to fail");
             };
         }
         {
             let mut bad_sig = sig_raw.clone();
             bad_sig[0] = sig_raw[0] ^ 0x01;
-            if KeyType::RsaSsaPss.verify(msg, RSA_2048_PUB, &bad_sig).is_ok() {
+            if SignatureType::RsaSsaPss.verify(msg, RSA_2048_PUB, &bad_sig).is_ok() {
                 panic!("Expected signature verification to fail");
             };
         }
@@ -203,19 +235,19 @@ mod tests {
         let msg = b"hello";
         let sig = "/VniTdrxQlEXcx5QJGHqI7ptGwTq1wBThbfflb8SLRrEE4LQMkd5yBh/PWGvsU7cFNN+PNhFUZY4QwVq9p4MAg";
         let sig_raw = sig.from_base64().expect("couldn't parse signed from Base64");
-        KeyType::Ed25519.verify(msg, &ED25519_PUB.from_base64().unwrap(), &sig_raw).expect("couldn't verify message");
+        SignatureType::Ed25519.verify(msg, &ED25519_PUB.from_base64().unwrap(), &sig_raw).expect("couldn't verify message");
 
         {
             let mut bad_msg = msg.clone();
             bad_msg[0] = msg[0] ^ 0x01;
-            if KeyType::Ed25519.verify(&bad_msg, ED25519_PUB, &sig_raw).is_ok() {
+            if SignatureType::Ed25519.verify(&bad_msg, ED25519_PUB, &sig_raw).is_ok() {
                 panic!("Expected signature verification to fail");
             };
         }
         {
             let mut bad_sig = sig_raw.clone();
             bad_sig[0] = sig_raw[0] ^ 0x01;
-            if KeyType::Ed25519.verify(msg, ED25519_PUB, &bad_sig).is_ok() {
+            if SignatureType::Ed25519.verify(msg, ED25519_PUB, &bad_sig).is_ok() {
                 panic!("Expected signature verification to fail");
             };
         }
