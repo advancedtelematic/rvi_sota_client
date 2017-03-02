@@ -4,13 +4,18 @@ use serde_json as json;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::{Rsa, Padding};
-use openssl::sign::Verifier as OpenSslVerifier;
+use openssl::sign::{Signer, Verifier as OpensslVerifier};
 use std::collections::HashMap;
-use std::io::Write;
-use std::process::{Command, Stdio};
 use std::str::{self, FromStr};
 
-use datatype::{Error, Key, Metadata, Role, RoleData, Signed};
+use datatype::{Error, Key, Metadata, Role, RoleData, Signed, canonicalize_json};
+
+
+pub struct PrivateKey {
+    pub keyid: String,
+    /// DER encoded private key
+    pub priv_key: Vec<u8>,
+}
 
 
 #[derive(Serialize, PartialEq, Eq, Debug, Clone)]
@@ -42,6 +47,22 @@ impl FromStr for KeyType {
 }
 
 impl KeyType {
+    pub fn sign(&self, msg: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
+        match *self {
+            KeyType::RsaSsaPss => {
+                let rsa = Rsa::private_key_from_der(&key)?;
+                let priv_key = PKey::from_rsa(rsa)?;
+                let mut signer = Signer::new(MessageDigest::sha256(), &priv_key)?;
+                // magic number 6 taken from rsa.h in openssl
+                signer.pkey_ctx_mut().set_rsa_padding(Padding::from_raw(6))?;
+                signer.update(msg)?;
+                let sig = signer.finish()?;
+                Ok(sig)
+            }
+            _ => unimplemented!(),
+        }
+    }
+
     pub fn verify(&self, msg: &[u8], key: &[u8], sig: &[u8]) -> Result<(), Error> {
         match *self {
             KeyType::Ed25519 => {
@@ -55,16 +76,13 @@ impl KeyType {
 
             KeyType::RsaSsaPss => {
                 debug!("verifying using RSA SSA-PPS: {}", str::from_utf8(key).unwrap_or("[raw bytes]"));
-                let verify = Rsa::public_key_from_pem(&key)
-                    .and_then(PKey::from_rsa)
-                    .and_then(|k| OpenSslVerifier::new(MessageDigest::sha256(), &k)
-                        // magic number 6 taken from rsa.h in openssl
-                        .and_then(|mut v| v.pkey_ctx_mut().set_rsa_padding(Padding::from_raw(6)).map(|_| v))
-                        .and_then(|mut v| v.update(&msg).map(|_| v))
-                        .and_then(|v| v.finish(&sig))
-                    )?;
-
-                if verify {
+                let rsa_key = Rsa::public_key_from_pem(&key)?;
+                let pub_key = PKey::from_rsa(rsa_key)?;
+                let mut verifier = OpensslVerifier::new(MessageDigest::sha256(), &pub_key)?;
+                // magic number 6 taken from rsa.h in openssl
+                verifier.pkey_ctx_mut().set_rsa_padding(Padding::from_raw(6))?;
+                verifier.update(&msg)?;
+                if verifier.finish(&sig)? {
                     Ok(())
                 } else {
                     Err(Error::UptaneVerifySignatures)
@@ -74,37 +92,11 @@ impl KeyType {
     }
 }
 
+
 pub struct Verifier {
     keys:  HashMap<String, Key>,
     roles: HashMap<Role, RoleData>
 }
-
-
-/// Shell exec out to Python to get canonical json bytes
-fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
-	let mut child = Command::new("canonical_json.py")
-			.stdin(Stdio::piped())
-			.stdout(Stdio::piped())
-			.stderr(Stdio::piped())
-			.spawn()?;
-
-    match child.stdin.as_mut() {
-        Some(mut stdin) => {
-            stdin.write(bytes)?;
-            stdin.flush()?;
-        }
-        None => return Err(Error::Command(String::from("unable to write to stdin"))),
-    }
-
-    let output = child.wait_with_output()?;
-
-	if !output.status.success() {
-        Err(Error::Command(format!("Error with canonical_json.py: exit: {}", output.status)))
-	} else {
-        Ok(output.stdout)
-    }
-}
-
 
 impl Verifier {
     pub fn new() -> Self {

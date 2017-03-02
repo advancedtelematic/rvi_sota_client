@@ -28,4 +28,34 @@ pub use self::ostree::{Ostree, OstreeBranch, OstreePackage};
 pub use self::tuf::{Key, KeyValue, Metadata, Role, RoleData, Root, Signature, Signed,
                     SignedCustom, SignedImage, SignedManifest, SignedMeta, SignedVersion,
                     Snapshot, Targets, Timestamp};
-pub use self::verify::{KeyType, Verifier};
+pub use self::verify::{KeyType, Verifier, PrivateKey};
+
+
+// TODO remove this ugly hack ASAP
+use std::process::{Command as ShellCommand, Stdio};
+use std::io::Write;
+/// Shell exec out to Python to get canonical json bytes
+pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
+	let mut child = ShellCommand::new("canonical_json.py")
+			.stdin(Stdio::piped())
+			.stdout(Stdio::piped())
+			.stderr(Stdio::piped())
+			.spawn()?;
+
+    match child.stdin.as_mut() {
+        Some(mut stdin) => {
+            stdin.write(bytes)?;
+            stdin.flush()?;
+        }
+        None => return Err(Error::Command(String::from("unable to write to stdin"))),
+    }
+
+    let output = child.wait_with_output()?;
+
+	if !output.status.success() {
+        Err(Error::Command(format!("Error with canonical_json.py: exit: {}", output.status)))
+	} else {
+        Ok(output.stdout)
+    }
+}
+
