@@ -170,11 +170,11 @@ mod tests {
     use rustc_serialize::json::Json;
 
     use super::*;
-    use http::{Client, Response, init_tls_client};
+    use http::{Client, Response, TlsData, init_tls_client};
 
 
     fn get_client() -> AuthClient {
-        init_tls_client(None);
+        init_tls_client(TlsData::default());
         AuthClient::default()
     }
 

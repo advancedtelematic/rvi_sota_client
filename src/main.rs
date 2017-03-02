@@ -9,7 +9,7 @@ extern crate rustc_serialize;
 extern crate sota;
 extern crate time;
 
-use chan::{Sender, Receiver, WaitGroup};
+use chan::{Sender, Receiver};
 use chan_signal::Signal;
 use env_logger::LogBuilder;
 use getopts::Options;
@@ -49,7 +49,6 @@ fn main() {
     let (itx, irx) = chan::async::<Interpret>();
 
     let mut broadcast = Broadcast::new(erx);
-    let wg = WaitGroup::new();
 
     // send initial interpreter command
     ctx.send(Command::Authenticate(auth.clone()));
@@ -62,8 +61,7 @@ fn main() {
         if config.core.polling {
             let poll_tick = config.core.polling_sec;
             let poll_itx  = itx.clone();
-            let poll_wg   = wg.clone();
-            scope.spawn(move || start_update_poller(poll_tick, poll_itx, poll_wg));
+            scope.spawn(move || start_update_poller(poll_tick, poll_itx));
         }
 
         //
@@ -126,24 +124,22 @@ fn main() {
         let ev_dl   = config.device.auto_download.clone();
         let ev_sys  = config.device.system_info.clone();
         let ev_auth = auth.clone();
-        let ev_wg   = wg.clone();
         scope.spawn(move || EventInterpreter {
             auth:    ev_auth,
             pacman:  ev_mgr,
             auto_dl: ev_dl,
             sysinfo: ev_sys
-        }.run(ev_sub, ev_ctx, ev_wg));
+        }.run(ev_sub, ev_ctx));
 
         let int_itx = itx.clone();
-        let int_wg  = wg.clone();
-        scope.spawn(move || IntermediateInterpreter.run(crx, int_itx, int_wg));
+        scope.spawn(move || IntermediateInterpreter.run(crx, int_itx));
 
         scope.spawn(move || CommandInterpreter {
             mode:   mode,
             config: config,
             auth:   auth.clone(),
             http:   Box::new(AuthClient::default())
-        }.run(irx, etx, wg));
+        }.run(irx, etx));
 
         scope.spawn(move || broadcast.start());
     });
@@ -173,17 +169,15 @@ fn start_signal_handler(signals: Receiver<Signal>) {
     }
 }
 
-fn start_update_poller(interval: u64, itx: Sender<Interpret>, wg: WaitGroup) {
+fn start_update_poller(interval: u64, itx: Sender<Interpret>) {
     info!("Polling for new updates every {} seconds.", interval);
     let (etx, erx) = chan::async::<Event>();
     loop {
-        wg.wait(); // wait until interpreters have finished processing
         thread::sleep(Duration::from_secs(interval));
-        wg.wait(); // ensure they have not started other tasks
         itx.send(Interpret {
             command: Command::GetUpdateRequests,
             resp_tx: Some(Arc::new(Mutex::new(etx.clone())))
-        }); // then request new updates
+        });                 // request new updates
         let _ = erx.recv(); // and wait for the response
     }
 }

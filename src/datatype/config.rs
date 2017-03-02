@@ -83,19 +83,20 @@ impl Config {
     }
 
     /// Return the certificate paths used for TLS configuration.
-    pub fn tls_data(&self, provisioning: bool) -> Option<TlsData> {
+    pub fn tls_data(&self, provisioning: bool) -> TlsData {
         let ca_path = self.device.certificates_path.as_ref().map(Deref::deref);
+        let mut tls = TlsData { ca_path: ca_path, p12_path: None, p12_pass: None };
 
         match (provisioning, self.tls.as_ref()) {
             (false, Some(&TlsConfig { p12_path: ref path, p12_password: ref pass, .. })) => {
-                Some(TlsData { ca_path: ca_path, p12_path: Some(path), p12_pass: Some(pass) })
+                tls.p12_path = Some(path);
+                tls.p12_pass = Some(pass);
             }
 
-            _ => match ca_path {
-                Some(_) => Some(TlsData { ca_path: ca_path, p12_path: None, p12_pass: None }),
-                None    => None
-            }
+            _ => ()
         }
+
+        tls
     }
 }
 

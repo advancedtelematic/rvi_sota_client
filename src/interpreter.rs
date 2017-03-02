@@ -1,4 +1,4 @@
-use chan::{Sender, Receiver, WaitGroup};
+use chan::{Sender, Receiver};
 use std;
 use std::fs::File;
 use std::io::Write;
@@ -23,16 +23,14 @@ use uptane::Uptane;
 pub trait Interpreter<I, O> {
     fn interpret(&mut self, input: I, otx: &Sender<O>);
 
-    fn run(&mut self, irx: Receiver<I>, otx: Sender<O>, wg: WaitGroup) {
+    fn run(&mut self, irx: Receiver<I>, otx: Sender<O>) {
         loop {
             let input   = irx.recv().expect("interpreter sender closed");
             let started = time::precise_time_ns();
 
-            wg.add(1);
             trace!("interpreter starting: {}", started);
             self.interpret(input, &otx);
             trace!("interpreter stopping: {}", started);
-            wg.done();
         }
     }
 }

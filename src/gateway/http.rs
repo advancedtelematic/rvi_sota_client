@@ -91,12 +91,12 @@ mod tests {
     use super::*;
     use gateway::{Gateway, Interpret};
     use datatype::{Command, Event};
-    use http::{AuthClient, Client, Response, init_tls_client};
+    use http::{AuthClient, Client, Response, TlsData, init_tls_client};
 
 
     #[test]
     fn http_connections() {
-        init_tls_client(None);
+        init_tls_client(TlsData::default());
 
         let (etx, erx) = chan::sync::<Event>(0);
         let (itx, irx) = chan::sync::<Interpret>(0);
