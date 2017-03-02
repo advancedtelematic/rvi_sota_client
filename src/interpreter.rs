@@ -209,7 +209,7 @@ impl CommandInterpreter {
                         let mut uptane = Uptane::new(self.config.uptane.clone(), uuid.clone());
                         let branch     = Ostree::get_current_branch()?;
                         let signed     = branch.signed_version(uuid.clone());
-                        let manifest   = SignedManifest::from(uuid.clone(), uuid.clone(), signed);
+                        let manifest   = SignedManifest::new(uuid.clone(), uuid.clone(), signed)?;
                         uptane.put_manifest(self.http.as_ref(), manifest)?;
                         self.mode = CommandMode::Uptane(Some(uptane));
                         Event::UptaneInitialised

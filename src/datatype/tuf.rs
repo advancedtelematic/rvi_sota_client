@@ -1,11 +1,13 @@
 use chrono::{DateTime, NaiveDateTime, UTC};
+use rustc_serialize::base64::{ToBase64, STANDARD};
 use serde;
 use serde_json as json;
+use serde_json::value::ToJson;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use time::Duration;
 
-use datatype::{Error, KeyType};
+use datatype::{Error, KeyType, PrivateKey, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
@@ -68,14 +70,14 @@ pub struct Key {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct KeyValue {
-    pub public: String
+    pub public: String,
 }
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Metadata {
     pub signatures: Vec<Signature>,
-    pub signed:     json::Value
+    pub signed:     json::Value,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -90,7 +92,7 @@ pub struct Signature {
 pub struct Signed {
     pub _type:   Role,
     pub expires: String,
-    pub version: u64
+    pub version: u64,
 }
 
 impl Signed {
@@ -105,7 +107,7 @@ impl Signed {
 pub struct SignedMeta {
     pub length: u64,
     pub hashes: HashMap<String, String>,
-    pub custom: Option<SignedCustom>
+    pub custom: Option<SignedCustom>,
 }
 
 #[allow(non_snake_case)]
@@ -120,13 +122,34 @@ pub struct SignedCustom {
 pub struct SignedManifest {
     pub vin:                  String,
     pub primary_ecu_serial:   String,
-    pub ecu_version_manifest: json::Value
+    pub ecu_version_manifest: json::Value,
 }
 
 impl SignedManifest {
-    pub fn from(vin: String, primary_serial: String, version: SignedVersion) -> Self {
-        // FIXME: shell out to python for signing
-        unimplemented!()
+    pub fn new(vin: String, primary_ecu_serial: String, version: SignedVersion) -> Result<Self, Error> {
+        let version_json = version.to_json()?;
+        Ok(SignedManifest {
+            vin: vin,
+            primary_ecu_serial: primary_ecu_serial,
+            ecu_version_manifest: version_json,
+        })
+    }
+
+    /// Consumes `self` because once we start signing, we should not modify the data
+    pub fn sign(self, priv_key: PrivateKey, key_type: KeyType) -> Result<Metadata, Error> {
+        let self_json = self.to_json()?;
+        let canonical_json = canonicalize_json(self_json.to_string().as_bytes())?;
+        let sig = key_type.sign(&priv_key.priv_key, &canonical_json)?;
+        let sig = Signature {
+           keyid: priv_key.keyid,
+           method: key_type,
+           sig: sig.to_base64(STANDARD),
+        };
+
+        Ok(Metadata {
+            signatures: vec![sig],
+            signed: self_json,
+        })
     }
 }
 
@@ -228,3 +251,4 @@ impl Default for Timestamp {
         }
     }
 }
+
