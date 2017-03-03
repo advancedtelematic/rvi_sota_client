@@ -1,4 +1,5 @@
 use chan::{Sender, Receiver};
+use serde_json as json;
 use std;
 use std::fmt::{self, Display, Formatter};
 use std::fs::File;
@@ -6,8 +7,8 @@ use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
-use datatype::{Auth, Command, Config, Error, Event, Ostree, OstreePackage, Package,
-               UpdateReport, SignedManifest, UpdateRequestStatus as Status,
+use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, OstreePackage,
+               Package, SignatureType, TufSigned, UpdateReport, UpdateRequestStatus as Status,
                UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -206,12 +207,27 @@ impl CommandInterpreter {
                 match self.mode {
                     CommandMode::Uptane(None) => {
                         info!("initialising uptane mode");
-                        let ref uuid   = self.config.device.uuid;
-                        let mut uptane = Uptane::new(self.config.uptane.clone(), uuid.clone());
-                        let branch     = Ostree::get_current_branch()?;
-                        let signed     = branch.signed_version(uuid.clone());
-                        let manifest   = SignedManifest::new(uuid.clone(), signed)?;
-                        uptane.put_manifest(self.http.as_ref(), manifest)?;
+                        let ref tlscfg = self.config.tls.as_ref().expect("Uptane mode expects [tls] config");
+                        let ref serial = self.config.uptane.primary_ecu_serial;
+                        let mut uptane = Uptane::new(self.config.uptane.clone(),
+                                                     tlscfg.server.clone(),
+                                                     self.config.device.uuid.clone());
+
+                        let branch  = Ostree::get_current_branch()?;
+                        let ecuver  = branch.ecu_version(serial.clone());
+                        let ecujson = json::to_value(ecuver)?;
+                        // FIXME: get actual private key
+                        use datatype::PrivateKey;
+                        let pkey = PrivateKey {
+                            keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
+                            der_key: Uptane::read_file(&self.config.uptane.private_key_path)
+                        };
+                        let signed  = TufSigned::sign(ecujson, pkey, SignatureType::RsaSsaPss)?;
+
+                        uptane.put_manifest(self.http.as_ref(), EcuManifests {
+                            primary_ecu_serial:   serial.clone(),
+                            ecu_version_manifest: vec![signed],
+                        })?;
                         self.mode = CommandMode::Uptane(Some(uptane));
                         Event::UptaneInitialised
                     }

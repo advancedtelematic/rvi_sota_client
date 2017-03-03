@@ -25,10 +25,10 @@ pub use self::report::{DeviceReport, InstalledFirmware, InstalledPackage, Instal
 pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, DownloadStarted, Package,
                         UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
 pub use self::ostree::{Ostree, OstreeBranch, OstreePackage};
-pub use self::tuf::{Key, KeyValue, Metadata, Role, RoleData, Root, Signature, Signed,
-                    SignedCustom, SignedImage, SignedManifest, SignedMeta, SignedVersion,
-                    Snapshot, Targets, Timestamp};
-pub use self::verify::{KeyType, SignatureType, Verifier, PrivateKey};
+pub use self::tuf::{EcuManifests, EcuVersion, Key, KeyValue, PrivateKey, Role, RoleData,
+                    Root, Signature, Snapshot, Targets, Timestamp, TufCustom, TufImage,
+                    TufMeta, TufRole, TufSigned};
+pub use self::verify::{KeyType, SignatureType, Verifier};
 
 
 // TODO remove this ugly hack ASAP

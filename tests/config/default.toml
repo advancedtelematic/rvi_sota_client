@@ -48,7 +48,7 @@ websocket_server = "127.0.0.1:3012"
 [rvi]
 client = "http://127.0.0.1:8901"
 storage_dir = "/usr/local/etc/sota/rvi"
-#timeout = 20
+#timeout = None
 
 #[tls]
 #server = "http://127.0.0.1:9001"
@@ -56,6 +56,7 @@ storage_dir = "/usr/local/etc/sota/rvi"
 #p12_password = ""
 
 [uptane]
-director_server = "http://localhost:5555/director"
-images_server = "http://localhost:5555/repo"
-metadata_path = "/usr/local/etc/sota/uptane"
+primary_ecu_serial = "primary-serial"
+metadata_path = "/usr/local/etc/sota/metadata"
+private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
+public_key_path = "/usr/local/etc/sota/ecuprimary.pub"

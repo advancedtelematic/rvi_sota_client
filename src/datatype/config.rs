@@ -635,42 +635,38 @@ impl Defaultify<TlsConfig> for ParsedTlsConfig {
 /// The [uptane] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct UptaneConfig {
-    pub director_server:  Url,
-    pub images_server:    Url,
-    pub metadata_path:    String,
-    pub private_key_path: String,
-    pub public_key_path:  String,
+    pub primary_ecu_serial: String,
+    pub metadata_path:      String,
+    pub private_key_path:   String,
+    pub public_key_path:    String,
 }
 
 impl Default for UptaneConfig {
     fn default() -> UptaneConfig {
         UptaneConfig {
-            director_server:  "http://localhost:5555/director".parse().unwrap(),
-            images_server:    "http://localhost:5555/repo".parse().unwrap(),
-            metadata_path:    "/usr/local/etc/sota/uptane".to_string(),
-            private_key_path: "/usr/local/etc/sota/uptane".to_string(),
-            public_key_path:  "/usr/local/etc/sota/uptane".to_string(),
+            primary_ecu_serial: "primary-serial".to_string(),
+            metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
+            private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
+            public_key_path:    "/usr/local/etc/sota/ecuprimary.pub".to_string(),
         }
     }
 }
 
 #[derive(RustcDecodable)]
 struct ParsedUptaneConfig {
-    director_server:  Option<Url>,
-    images_server:    Option<Url>,
-    metadata_path:    Option<String>,
-    private_key_path: Option<String>,
-    public_key_path: Option<String>,
+    primary_ecu_serial: Option<String>,
+    metadata_path:      Option<String>,
+    private_key_path:   Option<String>,
+    public_key_path:    Option<String>,
 }
 
 impl Default for ParsedUptaneConfig {
     fn default() -> ParsedUptaneConfig {
         ParsedUptaneConfig {
-            director_server:  None,
-            images_server:    None,
-            metadata_path:    None,
-            private_key_path: None,
-            public_key_path:  None,
+            primary_ecu_serial: None,
+            metadata_path:      None,
+            private_key_path:   None,
+            public_key_path:    None,
         }
     }
 }
@@ -679,11 +675,10 @@ impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
     fn defaultify(&mut self) -> UptaneConfig {
         let default = UptaneConfig::default();
         UptaneConfig {
-            director_server:  self.director_server.take().unwrap_or(default.director_server),
-            images_server:    self.images_server.take().unwrap_or(default.images_server),
-            metadata_path:    self.metadata_path.take().unwrap_or(default.metadata_path),
-            private_key_path: self.private_key_path.take().unwrap_or(default.private_key_path),
-            public_key_path:  self.public_key_path.take().unwrap_or(default.public_key_path),
+            primary_ecu_serial: self.primary_ecu_serial.take().unwrap_or(default.primary_ecu_serial),
+            metadata_path:      self.metadata_path.take().unwrap_or(default.metadata_path),
+            private_key_path:   self.private_key_path.take().unwrap_or(default.private_key_path),
+            public_key_path:    self.public_key_path.take().unwrap_or(default.public_key_path),
         }
     }
 }
@@ -776,9 +771,10 @@ mod tests {
     const UPTANE_CONFIG: &'static str =
         r#"
         [uptane]
-        director_server = "http://localhost:5555/director"
-        images_server = "http://localhost:5555/repo"
-        metadata_path = "/usr/local/etc/sota/uptane"
+        primary_ecu_serial = "primary-serial"
+        metadata_path = "/usr/local/etc/sota/metadata"
+        private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
+        public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
         "#;
 
 

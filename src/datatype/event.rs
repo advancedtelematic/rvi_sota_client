@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
-use datatype::{DownloadComplete, Package, SignedMeta, UpdateAvailable, UpdateReport,
+use datatype::{DownloadComplete, Package, TufMeta, UpdateAvailable, UpdateReport,
                UpdateRequest, UpdateRequestId};
 
 
@@ -61,9 +61,9 @@ pub enum Event {
     /// There are no new Uptane updates.
     UptaneTimestampUpdated,
     /// The updated snapshot.json metadata.
-    UptaneSnapshotUpdated(HashMap<String, SignedMeta>),
+    UptaneSnapshotUpdated(HashMap<String, TufMeta>),
     /// The updated target.json metadata.
-    UptaneTargetsUpdated(HashMap<String, SignedMeta>)
+    UptaneTargetsUpdated(HashMap<String, TufMeta>)
 }
 
 impl Display for Event {
