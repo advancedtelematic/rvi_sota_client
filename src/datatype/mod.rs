@@ -53,7 +53,10 @@ pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
     let output = child.wait_with_output()?;
 
 	if !output.status.success() {
-        Err(Error::Command(format!("Error with canonical_json.py: exit: {}", output.status)))
+        Err(Error::Command(format!("Error with canonical_json.py: exit: {} out: {} err: {}",
+                                   output.status,
+                                   String::from_utf8(output.stdout).unwrap_or("<stdout not utf8>".to_string()),
+                                   String::from_utf8(output.stderr).unwrap_or("<stderr not utf8>".to_string()))))
 	} else {
         Ok(output.stdout)
     }
