@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-use datatype::{AccessToken, Error, Package, SignedImage, SignedMeta, SignedVersion,
-               UpdateResultCode as Code};
+use datatype::{AccessToken, Error, Package, SignedCustom, SignedImage, SignedMeta,
+               SignedVersion, UpdateResultCode as Code};
 use package_manager::package_manager::{InstallOutcome, parse_package};
 
 
@@ -62,6 +62,25 @@ impl Default for OstreePackage {
 }
 
 impl OstreePackage {
+    /// Convert from SignedMeta to an OstreePackage.
+    pub fn from(refname: String, hash: &str, meta: SignedMeta) -> Result<Self, String> {
+        let (id, uri) = match meta.custom {
+            Some(SignedCustom { ecuIdentifier: id, uri: Some(uri), .. }) => Ok((id, uri)),
+            _ => Err(format!("couldn't get custom for target: {}", refname))
+        }?;
+
+        match meta.hashes.get(hash) {
+            Some(commit) => Ok(OstreePackage {
+                commit:      commit.clone(),
+                refName:     refname,
+                description: id,
+                pullUri:     uri
+            }),
+
+            None => Err(format!("couldn't get sha256 hash for target: {}", refname))
+        }
+    }
+
     /// Shell out to the ostree command to install this package.
     pub fn install(self, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
         debug!("installing ostree package: {:?}", self);

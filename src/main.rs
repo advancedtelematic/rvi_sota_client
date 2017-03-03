@@ -38,20 +38,15 @@ macro_rules! exit {
 
 
 fn main() {
-    let version = start_logging();
-    let config  = build_config(&version);
-
-    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let version  = start_logging();
+    let config   = build_config(&version);
+    let auth     = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
     let mut mode = init_config(&config, &auth);
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
     let (itx, irx) = chan::async::<Interpret>();
-
     let mut broadcast = Broadcast::new(erx);
-
-    // send initial interpreter command
-    ctx.send(Command::Authenticate(auth.clone()));
 
     crossbeam::scope(|scope| {
         // subscribe to signals first
@@ -107,10 +102,10 @@ fn main() {
         }
 
         if config.gateway.websocket {
-            let ws_server = config.network.websocket_server.clone();
-            let ws_itx    = itx.clone();
-            let ws_sub    = broadcast.subscribe();
-            let mut ws    = Websocket { server: ws_server, clients: Arc::new(Mutex::new(HashMap::new())) };
+            let ws_srv = config.network.websocket_server.clone();
+            let ws_itx = itx.clone();
+            let ws_sub = broadcast.subscribe();
+            let mut ws = Websocket { server: ws_srv, clients: Arc::new(Mutex::new(HashMap::new())) };
             scope.spawn(move || ws.start(ws_itx, ws_sub));
         }
 
@@ -118,26 +113,28 @@ fn main() {
         // start interpreters
         //
 
-        let ev_sub  = broadcast.subscribe();
-        let ev_ctx  = ctx.clone();
-        let ev_mgr  = config.device.package_manager.clone();
-        let ev_dl   = config.device.auto_download.clone();
-        let ev_sys  = config.device.system_info.clone();
-        let ev_auth = auth.clone();
+        let ei_sub  = broadcast.subscribe();
+        let ei_ctx  = ctx.clone();
+        let ei_mgr  = config.device.package_manager.clone();
+        let ei_dl   = config.device.auto_download.clone();
+        let ei_sys  = config.device.system_info.clone();
+        let ei_auth = auth.clone();
         scope.spawn(move || EventInterpreter {
-            auth:    ev_auth,
-            pacman:  ev_mgr,
-            auto_dl: ev_dl,
-            sysinfo: ev_sys
-        }.run(ev_sub, ev_ctx));
+            initial: ei_auth,
+            pacman:  ei_mgr,
+            auto_dl: ei_dl,
+            sysinfo: ei_sys
+        }.run(ei_sub, ei_ctx));
 
-        let int_itx = itx.clone();
-        scope.spawn(move || IntermediateInterpreter.run(crx, int_itx));
+        let ii_itx = itx.clone();
+        scope.spawn(move || IntermediateInterpreter {
+            resp_tx: None
+        }.run(crx, ii_itx));
 
         scope.spawn(move || CommandInterpreter {
             mode:   mode,
             config: config,
-            auth:   auth.clone(),
+            auth:   auth,
             http:   Box::new(AuthClient::default())
         }.run(irx, etx));
 
@@ -173,12 +170,12 @@ fn start_update_poller(interval: u64, itx: Sender<Interpret>) {
     info!("Polling for new updates every {} seconds.", interval);
     let (etx, erx) = chan::async::<Event>();
     loop {
-        thread::sleep(Duration::from_secs(interval));
         itx.send(Interpret {
             command: Command::GetUpdateRequests,
             resp_tx: Some(Arc::new(Mutex::new(etx.clone())))
-        });                 // request new updates
-        let _ = erx.recv(); // and wait for the response
+        });
+        let _ = erx.recv(); // wait for the response
+        thread::sleep(Duration::from_secs(interval));
     }
 }
 

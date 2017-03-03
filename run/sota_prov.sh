@@ -34,7 +34,6 @@ function device_registration() {
     -o $devpkcs
 
   openssl pkcs12 -in $devpkcs -out $devpkcs.pem -nodes -passin pass:""
-  rm -f $regpkcs $regpkcs.pem
 }
 
 function ecu_registration() {

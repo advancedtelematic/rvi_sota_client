@@ -44,7 +44,7 @@ pub enum Command {
 impl Display for Command {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let text = match *self {
-            Command::Authenticate(_) => format!("Authenticate ({})", self),
+            Command::Authenticate(ref auth)   => format!("Authenticate ({})", auth),
             Command::SendInstalledPackages(_) => format!("{}", "SendInstalledPackages"),
             _ => format!("{:?}", self)
         };

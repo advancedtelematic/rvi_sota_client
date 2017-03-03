@@ -1,9 +1,10 @@
 use chan::{Sender, Receiver};
 use std;
+use std::fmt::{self, Display, Formatter};
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
-use time;
+use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, Error, Event, Ostree, OstreePackage, Package,
                UpdateReport, SignedManifest, UpdateRequestStatus as Status,
@@ -20,29 +21,30 @@ use uptane::Uptane;
 
 /// An `Interpreter` loops over any incoming values, on receipt of which it
 /// delegates to the `interpret` function which will respond with output values.
-pub trait Interpreter<I, O> {
+pub trait Interpreter<I, O>: Display {
     fn interpret(&mut self, input: I, otx: &Sender<O>);
 
     fn run(&mut self, irx: Receiver<I>, otx: Sender<O>) {
+        debug!("starting {}", self);
         loop {
-            let input   = irx.recv().expect("interpreter sender closed");
-            let started = time::precise_time_ns();
-
-            trace!("interpreter starting: {}", started);
-            self.interpret(input, &otx);
-            trace!("interpreter stopping: {}", started);
+            self.interpret(irx.recv().expect("interpreter sender closed"), &otx);
         }
     }
 }
 
 
-/// The `EventInterpreter` listens for `Event`s and optionally responds with
-/// `Command`s that may be sent to the `CommandInterpreter`.
+/// The `EventInterpreter` listens for `Event`s and may respond `Command`s.
 pub struct EventInterpreter {
-    pub auth:     Auth,
-    pub pacman:   PackageManager,
-    pub auto_dl:  bool,
-    pub sysinfo:  Option<String>,
+    pub initial: Auth,
+    pub pacman:  PackageManager,
+    pub auto_dl: bool,
+    pub sysinfo: Option<String>,
+}
+
+impl Display for EventInterpreter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", "EventInterpreter")
+    }
 }
 
 impl Interpreter<Event, Command> for EventInterpreter {
@@ -52,9 +54,9 @@ impl Interpreter<Event, Command> for EventInterpreter {
         match event {
             Event::Authenticated => {
                 if self.pacman != PackageManager::Off {
-                    self.pacman.installed_packages().map(|packages| {
-                        ctx.send(Command::SendInstalledPackages(packages));
-                    }).unwrap_or_else(|err| error!("couldn't send a list of packages: {}", err));
+                    self.pacman.installed_packages()
+                        .map(|pkgs| ctx.send(Command::SendInstalledPackages(pkgs)))
+                        .unwrap_or_else(|err| error!("couldn't send a list of packages: {}", err));
                 }
 
                 self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo));
@@ -62,7 +64,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::NotAuthenticated => {
                 info!("Trying to authenticate again...");
-                ctx.send(Command::Authenticate(self.auth.clone()));
+                ctx.send(Command::Authenticate(self.initial.clone()));
             }
 
             Event::UpdatesReceived(requests) => {
@@ -111,22 +113,9 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::UptaneTargetsUpdated(targets) => {
                 for (refname, meta) in targets {
-                    if let Some(custom) = meta.custom {
-                        match (meta.hashes.get("sha256"), custom.uri) {
-                            (Some(commit), Some(uri)) => {
-                                ctx.send(Command::OstreeInstall(OstreePackage {
-                                    commit:      commit.clone(),
-                                    refName:     refname,
-                                    description: custom.ecuIdentifier,
-                                    pullUri:     uri
-                                }));
-                            }
-                            (_, None) => error!("no custom.uri field for target: {}", refname),
-                            (None, _) => error!("couldn't get sha256 hash for target: {}", refname)
-                        }
-                    } else {
-                        error!("couldn't get custom field for target: {}", refname);
-                    }
+                    let _ = OstreePackage::from(refname, "sha256", meta)
+                        .map(|package| ctx.send(Command::OstreeInstall(package)))
+                        .map_err(|err| error!("{}", err));
                 }
             }
 
@@ -136,14 +125,22 @@ impl Interpreter<Event, Command> for EventInterpreter {
 }
 
 
-/// The `IntermediateInterpreter` wraps each incoming `Command` inside an
-/// `Interpret` type with no response channel for sending to the `CommandInterpreter`.
-pub struct IntermediateInterpreter;
+/// The `IntermediateInterpreter` listens for `Command`s and wraps them with a
+/// response channel for sending to the `CommandInterpreter`.
+pub struct IntermediateInterpreter {
+    pub resp_tx: Option<Arc<Mutex<Sender<Event>>>>
+}
+
+impl Display for IntermediateInterpreter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", "IntermediateInterpreter")
+    }
+}
 
 impl Interpreter<Command, Interpret> for IntermediateInterpreter {
     fn interpret(&mut self, cmd: Command, itx: &Sender<Interpret>) {
-        info!("IntermediateInterpreter received: {}", cmd);
-        itx.send(Interpret { command: cmd, resp_tx: None });
+        info!("IntermediateInterpreter received: {}", &cmd);
+        itx.send(Interpret { command: cmd, resp_tx: self.resp_tx.clone() });
     }
 }
 
@@ -165,9 +162,15 @@ pub struct CommandInterpreter {
     pub http:   Box<Client>
 }
 
+impl Display for CommandInterpreter {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", "CommandInterpreter")
+    }
+}
+
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
-        info!("CommandInterpreter received: {}", interpret.command);
+        info!("CommandInterpreter received: {}", &interpret.command);
         let outcome = match self.auth {
             Auth::None        |
             Auth::Token(_)    |
@@ -223,7 +226,8 @@ impl CommandInterpreter {
                         }
                     }
 
-                    _ => {
+                    CommandMode::Rvi(_) |
+                    CommandMode::Sota   => {
                         let mut updates = sota.get_update_requests()?;
                         if updates.is_empty() {
                             Event::NoUpdateRequests
