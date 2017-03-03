@@ -635,34 +635,42 @@ impl Defaultify<TlsConfig> for ParsedTlsConfig {
 /// The [uptane] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct UptaneConfig {
-    pub director_server: Url,
-    pub images_server:   Url,
-    pub metadata_path:   String,
+    pub director_server:  Url,
+    pub images_server:    Url,
+    pub metadata_path:    String,
+    pub private_key_path: String,
+    pub public_key_path:  String,
 }
 
 impl Default for UptaneConfig {
     fn default() -> UptaneConfig {
         UptaneConfig {
-            director_server: "http://localhost:5555/director".parse().unwrap(),
-            images_server:   "http://localhost:5555/repo".parse().unwrap(),
-            metadata_path:   "/usr/local/etc/sota/uptane".to_string(),
+            director_server:  "http://localhost:5555/director".parse().unwrap(),
+            images_server:    "http://localhost:5555/repo".parse().unwrap(),
+            metadata_path:    "/usr/local/etc/sota/uptane".to_string(),
+            private_key_path: "/usr/local/etc/sota/uptane".to_string(),
+            public_key_path:  "/usr/local/etc/sota/uptane".to_string(),
         }
     }
 }
 
 #[derive(RustcDecodable)]
 struct ParsedUptaneConfig {
-    director_server: Option<Url>,
-    images_server:   Option<Url>,
-    metadata_path:   Option<String>,
+    director_server:  Option<Url>,
+    images_server:    Option<Url>,
+    metadata_path:    Option<String>,
+    private_key_path: Option<String>,
+    public_key_path: Option<String>,
 }
 
 impl Default for ParsedUptaneConfig {
     fn default() -> ParsedUptaneConfig {
         ParsedUptaneConfig {
-            director_server: None,
-            images_server:   None,
-            metadata_path:   None
+            director_server:  None,
+            images_server:    None,
+            metadata_path:    None,
+            private_key_path: None,
+            public_key_path:  None,
         }
     }
 }
@@ -671,9 +679,11 @@ impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
     fn defaultify(&mut self) -> UptaneConfig {
         let default = UptaneConfig::default();
         UptaneConfig {
-            director_server: self.director_server.take().unwrap_or(default.director_server),
-            images_server:   self.images_server.take().unwrap_or(default.images_server),
-            metadata_path:   self.metadata_path.take().unwrap_or(default.metadata_path),
+            director_server:  self.director_server.take().unwrap_or(default.director_server),
+            images_server:    self.images_server.take().unwrap_or(default.images_server),
+            metadata_path:    self.metadata_path.take().unwrap_or(default.metadata_path),
+            private_key_path: self.private_key_path.take().unwrap_or(default.private_key_path),
+            public_key_path:  self.public_key_path.take().unwrap_or(default.public_key_path),
         }
     }
 }
