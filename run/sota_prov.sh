@@ -28,7 +28,7 @@ function device_registration() {
 
   openssl pkcs12 -in $regpkcs -out $regpkcs.pem -nodes -passin pass:""
   openssl pkcs12 -in $regpkcs -cacerts -nokeys -passin pass:"" 2>/dev/null \
-    | openssl x509 -outform PEM > $srvcrt
+    | sed --quiet '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > $srvcrt
 
   curl --cacert $srvcrt --cert $regpkcs.pem \
     -X POST $SOTA_GATEWAY_URI/devices \
@@ -37,6 +37,8 @@ function device_registration() {
     -o $devpkcs
 
   openssl pkcs12 -in $devpkcs -out $devpkcs.pem -nodes -passin pass:""
+  openssl pkcs12 -in $devpkcs -cacerts -nokeys -passin pass:"" 2>/dev/null \
+    | sed --quiet '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > $srvcrt
 }
 
 function ecu_registration() {
@@ -70,21 +72,19 @@ director_metadata
 repo_metadata
 
 cat > /sysroot/boot/sota.toml <<EOF
-[pkcs]
+[tls]
 cn = $SOTA_DEVICE_ID
 cacert = $SOTA_CERT_DIR/$srvcrt
 p12_path = $SOTA_CERT_DIR/$devpkcs
 p12_password = ""
 
-[ecu]
-primary_ecu_serial = $SOTA_DEVICE_ID
-ecu_serial = $SOTA_DEVICE_ID
-ecu_key = $SOTA_CERT_DIR/$ecukey
-
 [uptane]
 director_server = "$SOTA_GATEWAY_URI/director"
 images_server = "$SOTA_GATEWAY_URI/repo"
 metadata_path = "$SOTA_CERT_DIR/director/metadata"
+ecu_serial = "$SOTA_DEVICE_ID"
+private_key_path = $SOTA_CERT_DIR/$ecukey.pem
+public_key_path = $SOTA_CERT_DIR/$ecukey.pub
 
 [device]
 packages_dir = "/tmp/"
