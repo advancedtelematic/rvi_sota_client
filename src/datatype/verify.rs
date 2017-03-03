@@ -5,6 +5,7 @@ use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::{Rsa, Padding};
 use openssl::sign::{Signer, Verifier as OpensslVerifier};
+use rustc_serialize::hex::FromHex;
 use std::collections::HashMap;
 use std::str::{self, FromStr};
 
@@ -171,17 +172,20 @@ impl Verifier {
             self.keys.get(&sig.keyid)
                 .map(|key| {
                     let ref public = key.keyval.public;
-                    // TODO this is a bit ugly
-                    (match key.keytype {
-                        KeyType::Rsa => SignatureType::RsaSsaPss,
-                        KeyType::Ed25519 => SignatureType::Ed25519,
-                    })
-                    .verify(&signed, public.as_bytes(), sig.sig.as_bytes())
-                    .map(|_| {
-                        trace!("successful verification with: {}", public);
-                        valid_count += 1;
-                    })
-                    .unwrap_or_else(|err| trace!("failed verification for {} with: {}", public, err));
+                    if let Ok(decoded_sig) = sig.sig.from_hex() {
+                        // TODO this is a bit ugly
+                        (match key.keytype {
+                            KeyType::Rsa => SignatureType::RsaSsaPss,
+                            KeyType::Ed25519 => SignatureType::Ed25519,
+                        })
+                        // TODO right now the signatures are hex encoded instead of base64 :(
+                        .verify(&signed, public.as_bytes(), &decoded_sig)
+                        .map(|_| {
+                            trace!("successful verification with: {}", public);
+                            valid_count += 1;
+                        })
+                        .unwrap_or_else(|err| trace!("failed verification for {} with: {}", public, err));
+                    }
                 })
                 .unwrap_or_else(|| debug!("couldn't find key: {}", sig.keyid));
         }

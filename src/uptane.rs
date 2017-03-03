@@ -214,12 +214,11 @@ mod tests {
     }
 
     #[test]
-    #[ignore] /// FIXME: Must fix.
     fn test_get_targets_director() {
         let mut uptane = Uptane::new(UptaneConfig::default(), "test-get-targets-director".to_string());
         let client = client_from_paths(&[
-            "tests/uptane/ed25519/root.json",
-            "tests/uptane/ats/targets_director.json",
+            "tests/uptane/repo_1/root.json",
+            "tests/uptane/repo_1/targets.json",
         ]);
 
         assert!(uptane.get_root(&client, true).expect("couldn't get_root"));
@@ -227,14 +226,14 @@ mod tests {
             Ok((ts, ts_new)) => {
                 assert_eq!(ts_new, true);
                 {
-                    let meta = ts.targets.get("/{ostree-refname}").expect("no /{ostree-refname} metadata");
-                    assert_eq!(meta.length, 31);
+                    let meta = ts.targets.get("/file.img").expect("no /file.img metadata");
+                    assert_eq!(meta.length, 1337);
                     let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
-                    assert_eq!(hash, "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da");
+                    assert_eq!(hash, "dd250ea90b872a4a9f439027ac49d853c753426f71f61ae44c2f360a16179fb9");
                 }
                 let custom = uptane.extract_custom(ts.targets);
-                let image = custom.get("/{ostree-refname}").expect("couldn't get /{ostree-refname} custom");
-                assert_eq!(image.ecuIdentifier, "identifier-file1");
+                let image = custom.get("/file.img").expect("couldn't get /file.img custom");
+                assert_eq!(image.ecuIdentifier, "some-ecu-id");
             }
 
             Err(err) => panic!("couldn't get_targets_director: {}", err)
@@ -253,10 +252,10 @@ mod tests {
         match uptane.get_snapshot(&client, true) {
             Ok((ss, ss_new)) => {
                 assert_eq!(ss_new, true);
-                let meta = ss.meta.get("targets.json.gz").expect("no targets.json.gz metadata");
-                assert_eq!(meta.length, 599);
+                let meta = ss.meta.get("targets.json").expect("no targets.json metadata");
+                assert_eq!(meta.length, 653);
                 let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
-                assert_eq!(hash, "9f8aff5b55ee4b3140360d99b39fa755a3ea640462072b4fd74bdd72e6fe245a");
+                assert_eq!(hash, "086b26f2ea32d51543533b2a150de619d08f45a151c1f59c07eaa8a18a4a9548");
             }
 
             Err(err) => panic!("couldn't get_snapshot: {}", err)
@@ -276,7 +275,7 @@ mod tests {
             Ok((ts, ts_new)) => {
                 assert_eq!(ts_new, true);
                 let meta = ts.meta.get("snapshot.json").expect("no snapshot.json metadata");
-                assert_eq!(meta.length, 1007);
+                assert_eq!(meta.length, 696);
             }
 
             Err(err) => panic!("couldn't get_timestamp: {}", err)
