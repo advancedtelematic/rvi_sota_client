@@ -17,6 +17,7 @@ pub struct Config {
     pub gateway: GatewayConfig,
     pub network: NetworkConfig,
     pub rvi:     RviConfig,
+    pub uptane:  UptaneConfig,
 }
 
 impl Config {
@@ -41,6 +42,7 @@ impl Config {
         let mut gateway: ParsedGatewayConfig      = try!(parse_section(&table, "gateway"));
         let mut network: ParsedNetworkConfig      = try!(parse_section(&table, "network"));
         let mut rvi:     ParsedRviConfig          = try!(parse_section(&table, "rvi"));
+        let mut uptane:  ParsedUptaneConfig       = try!(parse_section(&table, "uptane"));
 
         try!(backwards_compatibility(&mut core, &mut device));
 
@@ -52,6 +54,7 @@ impl Config {
             gateway: gateway.defaultify(),
             network: network.defaultify(),
             rvi:     rvi.defaultify(),
+            uptane:  uptane.defaultify(),
         })
     }
 }
@@ -280,7 +283,9 @@ pub struct DeviceConfig {
     pub packages_dir:      String,
     pub package_manager:   PackageManager,
     pub auto_download:     bool,
+    // TODO this should be made mandatory canonical/absolute with fs::canonicalize
     pub certificates_path: Option<String>,
+    // TODO this should be made mandatory canonical/absolute with fs::canonicalize
     pub p12_path:          Option<String>,
     pub p12_password:      String,
     pub system_info:       Option<String>,
@@ -414,7 +419,9 @@ impl Defaultify<GatewayConfig> for ParsedGatewayConfig {
 pub struct NetworkConfig {
     pub http_server:          SocketAddr,
     pub rvi_edge_server:      SocketAddr,
+    // TODO this should be made mandatory canonical/absolute with fs::canonicalize
     pub socket_commands_path: String,
+    // TODO this should be made mandatory canonical/absolute with fs::canonicalize
     pub socket_events_path:   String,
     pub websocket_server:     String
 }
@@ -508,6 +515,43 @@ impl Defaultify<RviConfig> for ParsedRviConfig {
             client:      self.client.take().unwrap_or(default.client),
             storage_dir: self.storage_dir.take().unwrap_or(default.storage_dir),
             timeout:     self.timeout.take().or(default.timeout)
+        }
+    }
+}
+
+/// The [uptane] configuration section.
+#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+pub struct UptaneConfig {
+    // TODO this should be made mandatory canonical/absolute with fs::canonicalize
+    pub repo_path: String,
+}
+
+impl Default for UptaneConfig {
+    fn default() -> UptaneConfig {
+        UptaneConfig {
+            repo_path: "/var/lib/uptane".to_string(), // TODO
+        }
+    }
+}
+
+#[derive(RustcDecodable)]
+struct ParsedUptaneConfig {
+    repo_path: Option<String>,
+}
+
+impl Default for ParsedUptaneConfig {
+    fn default() -> ParsedUptaneConfig {
+        ParsedUptaneConfig {
+            repo_path: None,
+        }
+    }
+}
+
+impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
+    fn defaultify(&mut self) -> UptaneConfig {
+        let default = UptaneConfig::default();
+        UptaneConfig {
+            repo_path: self.repo_path.take().unwrap_or(default.repo_path),
         }
     }
 }

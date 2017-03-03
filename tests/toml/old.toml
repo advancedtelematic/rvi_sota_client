@@ -43,3 +43,5 @@ websocket_server = "127.0.0.1:3012"
 client = "http://127.0.0.1:8901"
 storage_dir = "/var/sota"
 timeout = 20
+
+[uptane]

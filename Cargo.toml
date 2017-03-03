@@ -3,7 +3,9 @@ name = "sota_client"
 version = "0.1.0"
 authors = ["Jerry Trieu <jerry@advancedtelematic.com",
            "Shaun Taheri <shaun@advancedtelematic.com>",
-           "Stevan Andjelkovic <steven@advancedtelematic.com"]
+           "Stevan Andjelkovic <steven@advancedtelematic.com>",
+           "Eric Hartsuyker <eric.hartsuyker@advancedtelematic.com>",
+          ]
 
 [lib]
 name = "sota"
@@ -12,6 +14,11 @@ path = "src/lib.rs"
 [[bin]]
 name = "sota_client"
 path = "src/main.rs"
+doc = false
+
+[[bin]]
+name = "sota_provisioner"
+path = "src/bin/sota_provisioner.rs"
 doc = false
 
 [dependencies]
