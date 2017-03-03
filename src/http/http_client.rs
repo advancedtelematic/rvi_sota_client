@@ -8,7 +8,7 @@ use datatype::{Error, Method, Url};
 
 /// Abstracts a particular HTTP Client implementation with methods for sending
 /// `Request`s and receiving asynchronous `Response`s.
-pub trait Client {
+pub trait Client: Send {
     fn chan_request(&self, req: Request, resp_tx: Sender<Response>);
 
     fn send_request(&self, req: Request) -> Receiver<Response> {

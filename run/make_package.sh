@@ -51,6 +51,7 @@ function make_pkg {
     --version "${PACKAGE_VERSION}" \
     --package NAME-VERSION.TYPE \
     ${pac_flags} \
+    "${cwd}/canonical_json.py=${bin_dir}/canonical_json.py" \
     "${cwd}/sota_client=${bin_dir}/sota_client" \
     "${cwd}/sota_sysinfo.sh=${bin_dir}/sota_sysinfo.sh" \
     "${cwd}/sota_ostree.sh=${bin_dir}/sota_ostree.sh" \

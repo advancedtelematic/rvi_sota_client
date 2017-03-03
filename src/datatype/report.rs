@@ -1,4 +1,5 @@
 use rustc_serialize::{Encodable, Encoder};
+use std::process::Command;
 use std::str::FromStr;
 
 use datatype::{Error, UpdateRequestId};
@@ -179,4 +180,13 @@ impl Default for InstalledSoftware {
     fn default() -> Self {
         InstalledSoftware { packages: Vec::new(), firmwares: Vec::new() }
     }
+}
+
+
+/// Generate a new system information report.
+pub fn system_info(cmd: &str) -> Result<String, Error> {
+    Command::new(cmd)
+        .output()
+        .map_err(|err| Error::SystemInfo(err.to_string()))
+        .and_then(|info| String::from_utf8(info.stdout).map_err(Error::FromUtf8))
 }

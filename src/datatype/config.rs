@@ -1,74 +1,119 @@
 use rustc_serialize::Decodable;
 use std::fs::File;
 use std::io::prelude::*;
+use std::ops::Deref;
 use toml::{Decoder, Parser, Table};
 
-use datatype::{Error, SocketAddr, Url};
+use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
+use http::TlsData;
 use package_manager::PackageManager;
 
 
 /// A container for all parsed configs.
 #[derive(Default, PartialEq, Eq, Debug, Clone)]
 pub struct Config {
-    pub auth:    Option<AuthConfig>,
-    pub core:    CoreConfig,
-    pub dbus:    DBusConfig,
-    pub device:  DeviceConfig,
-    pub gateway: GatewayConfig,
-    pub network: NetworkConfig,
-    pub rvi:     RviConfig,
+    pub auth:      Option<AuthConfig>,
+    pub core:      CoreConfig,
+    pub dbus:      DBusConfig,
+    pub device:    DeviceConfig,
+    pub gateway:   GatewayConfig,
+    pub network:   NetworkConfig,
+    pub provision: Option<ProvisionConfig>,
+    pub rvi:       RviConfig,
+    pub tls:       Option<TlsConfig>,
+    pub uptane:    UptaneConfig,
 }
 
 impl Config {
     /// Read a toml config file using default values for missing sections or fields.
     pub fn load(path: &str) -> Result<Config, Error> {
         info!("Loading config file: {}", path);
-        let mut file = try!(File::open(path).map_err(Error::Io));
+        let mut file = File::open(path).map_err(Error::Io)?;
         let mut toml = String::new();
-        try!(file.read_to_string(&mut toml));
+        file.read_to_string(&mut toml)?;
         Config::parse(&toml)
     }
 
     /// Parse a toml config using default values for missing sections or fields.
     #[allow(unused_mut)]
     pub fn parse(toml: &str) -> Result<Config, Error> {
-        let table = try!(parse_table(&toml));
+        let table = parse_table(&toml)?;
 
-        let mut auth:    Option<ParsedAuthConfig> = try!(maybe_parse_section(&table, "auth"));
-        let mut core:    ParsedCoreConfig         = try!(parse_section(&table, "core"));
-        let mut dbus:    ParsedDBusConfig         = try!(parse_section(&table, "dbus"));
-        let mut device:  ParsedDeviceConfig       = try!(parse_section(&table, "device"));
-        let mut gateway: ParsedGatewayConfig      = try!(parse_section(&table, "gateway"));
-        let mut network: ParsedNetworkConfig      = try!(parse_section(&table, "network"));
-        let mut rvi:     ParsedRviConfig          = try!(parse_section(&table, "rvi"));
+        let mut auth:      Option<ParsedAuthConfig>      = maybe_parse_section(&table, "auth")?;
+        let mut provision: Option<ParsedProvisionConfig> = maybe_parse_section(&table, "provision")?;
+        let mut tls:       Option<ParsedTlsConfig>       = maybe_parse_section(&table, "tls")?;
 
-        try!(backwards_compatibility(&mut core, &mut device));
+        let mut core:    ParsedCoreConfig    = parse_section(&table, "core")?;
+        let mut dbus:    ParsedDBusConfig    = parse_section(&table, "dbus")?;
+        let mut device:  ParsedDeviceConfig  = parse_section(&table, "device")?;
+        let mut gateway: ParsedGatewayConfig = parse_section(&table, "gateway")?;
+        let mut network: ParsedNetworkConfig = parse_section(&table, "network")?;
+        let mut rvi:     ParsedRviConfig     = parse_section(&table, "rvi")?;
+        let mut uptane:  ParsedUptaneConfig  = parse_section(&table, "uptane")?;
+
+        backwards_compatibility(&mut core, &mut device)?;
 
         Ok(Config {
-            auth:    auth.map(|mut cfg| cfg.defaultify()),
-            core:    core.defaultify(),
-            dbus:    dbus.defaultify(),
-            device:  device.defaultify(),
-            gateway: gateway.defaultify(),
-            network: network.defaultify(),
-            rvi:     rvi.defaultify(),
+            auth:      auth.map(|mut cfg| cfg.defaultify()),
+            core:      core.defaultify(),
+            dbus:      dbus.defaultify(),
+            device:    device.defaultify(),
+            gateway:   gateway.defaultify(),
+            network:   network.defaultify(),
+            provision: provision.map(|mut cfg| cfg.defaultify()),
+            rvi:       rvi.defaultify(),
+            tls:       tls.map(|mut cfg| cfg.defaultify()),
+            uptane:    uptane.defaultify()
         })
+    }
+
+    /// Return the initial Auth type from the current Config.
+    pub fn initial_auth(&self) -> Result<Auth, &'static str> {
+        match (self.auth.as_ref(), self.tls.as_ref(), self.provision.as_ref()) {
+            (Some(_), Some(_), _)       => Err("Need one of [auth] or [tls] section only."),
+            (Some(_), _,       Some(_)) => Err("Need one of [auth] or [provision] section only."),
+            (None,    None,    None)    => Ok(Auth::None),
+            (_,       Some(_), None)    => Ok(Auth::Certificate),
+            (_,       _,       Some(_)) => Ok(Auth::Provision),
+
+            (Some(&AuthConfig { client_id: ref id, client_secret: ref secret, .. }), _, _) => {
+                Ok(Auth::Credentials(ClientCredentials { client_id: id.clone(), client_secret: secret.clone() }))
+            }
+        }
+    }
+
+    /// Return the certificate paths used for TLS configuration.
+    pub fn tls_data(&self, provisioning: bool) -> TlsData {
+        let ca_path = self.device.certificates_path.as_ref().map(Deref::deref);
+        let mut tls = TlsData { ca_path: ca_path, p12_path: None, p12_pass: None };
+
+        match (provisioning, self.tls.as_ref()) {
+            (false, Some(&TlsConfig { p12_path: ref path, p12_password: ref pass, .. })) => {
+                tls.p12_path = Some(path);
+                tls.p12_pass = Some(pass);
+            }
+
+            _ => ()
+        }
+
+        tls
     }
 }
 
+
 fn parse_table(toml: &str) -> Result<Table, Error> {
     let mut parser = Parser::new(toml);
-    Ok(try!(parser.parse().ok_or_else(move || parser.errors)))
+    Ok(parser.parse().ok_or_else(move || parser.errors)?)
 }
 
 fn parse_section<T: Decodable + Default>(table: &Table, section: &str) -> Result<T, Error> {
-    Ok(try!(maybe_parse_section(table, section)).unwrap_or(T::default()))
+    Ok(maybe_parse_section(table, section)?.unwrap_or(T::default()))
 }
 
 fn maybe_parse_section<T: Decodable>(table: &Table, section: &str) -> Result<Option<T>, Error> {
     table.get(section).map_or(Ok(None), |sect| {
         let mut decoder = Decoder::new(sect.clone());
-        Ok(Some(try!(T::decode(&mut decoder))))
+        Ok(Some(T::decode(&mut decoder)?))
     })
 }
 
@@ -107,10 +152,7 @@ trait Defaultify<T: Default> {
 pub struct AuthConfig {
     pub server:        Url,
     pub client_id:     String,
-    pub client_secret: Option<String>,
-    pub p12_path:      Option<String>,
-    pub p12_password:  Option<String>,
-    pub expires_in:    Option<u32> // days
+    pub client_secret: String
 }
 
 impl Default for AuthConfig {
@@ -118,10 +160,7 @@ impl Default for AuthConfig {
         AuthConfig {
             server:        "http://127.0.0.1:9001".parse().unwrap(),
             client_id:     "client-id".to_string(),
-            client_secret: None,
-            p12_path:      None,
-            p12_password:  None,
-            expires_in:    Some(365),
+            client_secret: "client-secret".to_string()
         }
     }
 }
@@ -130,10 +169,7 @@ impl Default for AuthConfig {
 struct ParsedAuthConfig {
     server:        Option<Url>,
     client_id:     Option<String>,
-    client_secret: Option<String>,
-    p12_path:      Option<String>,
-    p12_password:  Option<String>,
-    expires_in:    Option<u32>
+    client_secret: Option<String>
 }
 
 impl Default for ParsedAuthConfig {
@@ -141,10 +177,7 @@ impl Default for ParsedAuthConfig {
         ParsedAuthConfig {
             server:        None,
             client_id:     None,
-            client_secret: None,
-            p12_path:      None,
-            p12_password:  None,
-            expires_in:    None,
+            client_secret: None
         }
     }
 }
@@ -155,10 +188,7 @@ impl Defaultify<AuthConfig> for ParsedAuthConfig {
         AuthConfig {
             server:        self.server.take().unwrap_or(default.server),
             client_id:     self.client_id.take().unwrap_or(default.client_id),
-            client_secret: self.client_secret.take().or(default.client_secret),
-            p12_path:      self.p12_path.take().or(default.p12_path),
-            p12_password:  self.p12_password.take().or(default.p12_password),
-            expires_in:    self.expires_in.take().or(default.expires_in)
+            client_secret: self.client_secret.take().unwrap_or(default.client_secret)
         }
     }
 }
@@ -281,8 +311,6 @@ pub struct DeviceConfig {
     pub package_manager:   PackageManager,
     pub auto_download:     bool,
     pub certificates_path: Option<String>,
-    pub p12_path:          Option<String>,
-    pub p12_password:      String,
     pub system_info:       Option<String>,
 }
 
@@ -293,9 +321,7 @@ impl Default for DeviceConfig {
             packages_dir:      "/tmp/".to_string(),
             package_manager:   PackageManager::Off,
             auto_download:     true,
-            certificates_path: Some("/usr/local/etc/sota_certificates".to_string()),
-            p12_path:          None,
-            p12_password:      "".to_string(),
+            certificates_path: None,
             system_info:       None,
         }
     }
@@ -309,8 +335,6 @@ struct ParsedDeviceConfig {
     pub auto_download:     Option<bool>,
     pub polling_interval:  Option<u64>,
     pub certificates_path: Option<String>,
-    pub p12_path:          Option<String>,
-    pub p12_password:      Option<String>,
     pub system_info:       Option<String>,
 }
 
@@ -323,8 +347,6 @@ impl Default for ParsedDeviceConfig {
             auto_download:     None,
             polling_interval:  None,
             certificates_path: None,
-            p12_path:          None,
-            p12_password:      None,
             system_info:       None,
         }
     }
@@ -339,8 +361,6 @@ impl Defaultify<DeviceConfig> for ParsedDeviceConfig {
             package_manager:   self.package_manager.take().unwrap_or(default.package_manager),
             auto_download:     self.auto_download.take().unwrap_or(default.auto_download),
             certificates_path: self.certificates_path.take().or(default.certificates_path),
-            p12_path:          self.p12_path.take().or(default.p12_path),
-            p12_password:      self.p12_password.take().unwrap_or(default.p12_password),
             system_info:       self.system_info.take().or(default.system_info),
         }
     }
@@ -466,6 +486,58 @@ impl Defaultify<NetworkConfig> for ParsedNetworkConfig {
 }
 
 
+/// The [provision] configuration section.
+#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+pub struct ProvisionConfig {
+    pub p12_path:     String,
+    pub p12_password: String,
+    pub expiry_days:  u32,
+    pub device_id:    Option<String>,
+}
+
+impl Default for ProvisionConfig {
+    fn default() -> Self {
+        ProvisionConfig {
+            p12_path:     "/usr/local/etc/sota/registration.p12".to_string(),
+            p12_password: "".to_string(),
+            expiry_days:  365,
+            device_id:    None,
+        }
+    }
+}
+
+#[derive(RustcDecodable, Debug)]
+struct ParsedProvisionConfig {
+    p12_path:     Option<String>,
+    p12_password: Option<String>,
+    expiry_days:  Option<u32>,
+    device_id:    Option<String>,
+}
+
+impl Default for ParsedProvisionConfig {
+    fn default() -> Self {
+        ParsedProvisionConfig {
+            p12_path:     None,
+            p12_password: None,
+            expiry_days:  None,
+            device_id:    None,
+        }
+    }
+}
+
+impl Defaultify<ProvisionConfig> for ParsedProvisionConfig {
+    fn defaultify(&mut self) -> ProvisionConfig {
+        let default = ProvisionConfig::default();
+        ProvisionConfig {
+            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
+            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
+            expiry_days:  self.expiry_days.take().unwrap_or(default.expiry_days),
+            device_id:    self.device_id.take().or(default.device_id),
+        }
+    }
+}
+
+
 /// The [rvi] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct RviConfig {
@@ -478,7 +550,7 @@ impl Default for RviConfig {
     fn default() -> RviConfig {
         RviConfig {
             client:      "http://127.0.0.1:8901".parse().unwrap(),
-            storage_dir: "/var/sota".to_string(),
+            storage_dir: "/usr/local/etc/sota/rvi".to_string(),
             timeout:     None,
         }
     }
@@ -513,27 +585,111 @@ impl Defaultify<RviConfig> for ParsedRviConfig {
 }
 
 
+/// The [tls] configuration section.
+#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+pub struct TlsConfig {
+    pub server:       Url,
+    pub p12_path:     String,
+    pub p12_password: String,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        TlsConfig {
+            server:       "http://127.0.0.1:8000".parse().unwrap(),
+            p12_path:     "/usr/local/etc/sota/device.p12".to_string(),
+            p12_password: "".to_string(),
+        }
+    }
+}
+
+#[derive(RustcDecodable, Debug)]
+struct ParsedTlsConfig {
+    server:       Option<Url>,
+    p12_path:     Option<String>,
+    p12_password: Option<String>,
+}
+
+impl Default for ParsedTlsConfig {
+    fn default() -> Self {
+        ParsedTlsConfig {
+            server:       None,
+            p12_path:     None,
+            p12_password: None,
+        }
+    }
+}
+
+impl Defaultify<TlsConfig> for ParsedTlsConfig {
+    fn defaultify(&mut self) -> TlsConfig {
+        let default = TlsConfig::default();
+        TlsConfig {
+            server:       self.server.take().unwrap_or(default.server),
+            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
+            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
+        }
+    }
+}
+
+
+/// The [uptane] configuration section.
+#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+pub struct UptaneConfig {
+    pub director_server: Url,
+    pub images_server:   Url,
+    pub metadata_path:   String,
+}
+
+impl Default for UptaneConfig {
+    fn default() -> UptaneConfig {
+        UptaneConfig {
+            director_server: "http://localhost:5555/director".parse().unwrap(),
+            images_server:   "http://localhost:5555/repo".parse().unwrap(),
+            metadata_path:   "/usr/local/etc/sota/uptane".to_string(),
+        }
+    }
+}
+
+#[derive(RustcDecodable)]
+struct ParsedUptaneConfig {
+    director_server: Option<Url>,
+    images_server:   Option<Url>,
+    metadata_path:   Option<String>,
+}
+
+impl Default for ParsedUptaneConfig {
+    fn default() -> ParsedUptaneConfig {
+        ParsedUptaneConfig {
+            director_server: None,
+            images_server:   None,
+            metadata_path:   None
+        }
+    }
+}
+
+impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
+    fn defaultify(&mut self) -> UptaneConfig {
+        let default = UptaneConfig::default();
+        UptaneConfig {
+            director_server: self.director_server.take().unwrap_or(default.director_server),
+            images_server:   self.images_server.take().unwrap_or(default.images_server),
+            metadata_path:   self.metadata_path.take().unwrap_or(default.metadata_path),
+        }
+    }
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
 
-    const AUTH_CONFIG_CREDENTIALS: &'static str =
+    const AUTH_CONFIG: &'static str =
         r#"
         [auth]
         server = "http://127.0.0.1:9001"
         client_id = "client-id"
         client_secret = "client-secret"
-        "#;
-
-    const AUTH_CONFIG_CERTIFICATE: &'static str =
-        r#"
-        [auth]
-        server = "http://127.0.0.1:9001"
-        client_id = "client-id"
-        p12_path = "/usr/local/etc/sota_registration_certificates"
-        p12_password = ""
-        expires_in = 365
         "#;
 
     const CORE_CONFIG: &'static str =
@@ -561,18 +717,6 @@ mod tests {
         uuid = "123e4567-e89b-12d3-a456-426655440000"
         packages_dir = "/tmp/"
         package_manager = "off"
-        certificates_path = "/usr/local/etc/sota_certificates"
-        "#;
-
-    const DEVICE_CONFIG_CERTIFICATE: &'static str =
-        r#"
-        [device]
-        uuid = "123e4567-e89b-12d3-a456-426655440000"
-        packages_dir = "/tmp/"
-        package_manager = "off"
-        certificates_path = "/usr/local/etc/sota_certificates"
-        p12_path = "/var/sota/device.p12"
-        p12_password = ""
         "#;
 
     const GATEWAY_CONFIG: &'static str =
@@ -596,12 +740,35 @@ mod tests {
         websocket_server = "127.0.0.1:3012"
         "#;
 
+    const PROVISION_CONFIG: &'static str =
+        r#"
+        [provision]
+        p12_path = "/usr/local/etc/sota/registration.p12"
+        p12_password = ""
+        expiry_days = 365
+        "#;
+
     const RVI_CONFIG: &'static str =
         r#"
         [rvi]
         client = "http://127.0.0.1:8901"
-        storage_dir = "/var/sota"
-        timeout = 20
+        storage_dir = "/usr/local/etc/sota/rvi"
+        "#;
+
+    const TLS_CONFIG: &'static str =
+        r#"
+        [tls]
+        server = "http://127.0.0.1:9001"
+        p12_path = "/usr/local/etc/sota/device.p12"
+        p12_password = ""
+        "#;
+
+    const UPTANE_CONFIG: &'static str =
+        r#"
+        [uptane]
+        director_server = "http://localhost:5555/director"
+        images_server = "http://localhost:5555/repo"
+        metadata_path = "/usr/local/etc/sota/uptane"
         "#;
 
 
@@ -611,44 +778,35 @@ mod tests {
     }
 
     #[test]
-    fn basic_config() {
-        let config = String::new()
-            + CORE_CONFIG
-            + DEVICE_CONFIG
-            + GATEWAY_CONFIG
-            + NETWORK_CONFIG;
-        assert_eq!(Config::parse(&config).unwrap(), Config::default());
-    }
-
-    #[test]
     fn default_config() {
-        let config = String::new()
-            + AUTH_CONFIG_CREDENTIALS
+        assert_eq!(Config::load("tests/config/default.toml").unwrap(), Config::default());
+    }
+
+    #[test]
+    fn default_configs() {
+        let configs = String::new()
             + CORE_CONFIG
             + DBUS_CONFIG
             + DEVICE_CONFIG
             + GATEWAY_CONFIG
             + NETWORK_CONFIG
-            + RVI_CONFIG;
-        assert_eq!(Config::load("tests/toml/default.toml").unwrap(), Config::parse(&config).unwrap());
+            + RVI_CONFIG
+            + UPTANE_CONFIG;
+        assert_eq!(Config::parse(&configs).unwrap(), Config::default());
     }
 
     #[test]
-    fn certificates_config() {
-        let config = String::new()
-            + AUTH_CONFIG_CERTIFICATE
-            + CORE_CONFIG
-            + DBUS_CONFIG
-            + DEVICE_CONFIG_CERTIFICATE
-            + GATEWAY_CONFIG
-            + NETWORK_CONFIG
-            + RVI_CONFIG;
-        assert_eq!(Config::load("tests/toml/certificate.toml").unwrap(), Config::parse(&config).unwrap());
+    fn auth_configs() {
+        let configs = String::new()
+            + AUTH_CONFIG
+            + PROVISION_CONFIG
+            + TLS_CONFIG;
+        assert_eq!(Config::load("tests/config/auth.toml").unwrap(), Config::parse(&configs).unwrap());
     }
 
     #[test]
     fn backwards_compatible_config() {
-        let config = Config::load("tests/toml/old.toml").unwrap();
+        let config = Config::load("tests/config/old.toml").unwrap();
         assert_eq!(config.core.polling, true);
         assert_eq!(config.core.polling_sec, 10);
     }

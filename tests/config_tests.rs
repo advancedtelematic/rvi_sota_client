@@ -13,25 +13,25 @@ fn test_config(path: &str, is_ok: bool) {
 
 #[test]
 fn default_config() {
-    test_config("tests/toml/default.toml", true);
+    test_config("tests/config/default.toml", true);
 }
 
 #[test]
 fn genivi_config() {
-    test_config("tests/toml/genivi.toml", true);
-}
-
-#[test]
-fn certificate_config() {
-    test_config("tests/toml/certificate.toml", true);
+    test_config("tests/config/genivi.toml", true);
 }
 
 #[test]
 fn old_config() {
-    test_config("tests/toml/old.toml", true);
+    test_config("tests/config/old.toml", true);
 }
 
 #[test]
 fn polling_config() {
-    test_config("tests/toml/polling.toml", false);
+    test_config("tests/config/polling.toml", false);
+}
+
+#[test]
+fn auth_config() {
+    test_config("tests/config/auth.toml", true);
 }

@@ -1,0 +1,26 @@
+{
+  "signatures": [
+    {
+      "keyid": "93ec2c3dec7cc08922179320ccd8c346234bf7f21705268b93e990d5273a2a3b",
+      "method": "ed25519",
+      "sig": "e9fd40008fba263758a3ff1dc59f93e42a4910a282749af915fbbea1401178e5a012090c228f06db1deb75ad8ddd7e40635ac51d4b04301fce0fd720074e0209"
+    }
+  ],
+  "signed": {
+    "_type": "Targets",
+    "expires": "2030-01-01T00:00:00Z",
+    "version": 1,
+    "targets": {
+      "/{ostree-refname}": {
+        "custom": {
+          "ecuIdentifier": "identifier-file1",
+          "uri": "http://ostree/pull"
+        },
+        "hashes": {
+          "sha256": "65b8c67f51c993d898250f40aa57a317d854900b3a04895464313e48785440da"
+        },
+        "length": 31
+      }
+    }
+  }
+}

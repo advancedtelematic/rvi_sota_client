@@ -3,7 +3,9 @@ name = "sota_client"
 version = "0.1.0"
 authors = ["Jerry Trieu <jerry@advancedtelematic.com",
            "Shaun Taheri <shaun@advancedtelematic.com>",
-           "Stevan Andjelkovic <steven@advancedtelematic.com"]
+           "Stevan Andjelkovic <steven@advancedtelematic.com>",
+           "Eric Hartsuyker <eric.hartsuyker@advancedtelematic.com>",
+          ]
 
 [lib]
 name = "sota"
@@ -17,6 +19,7 @@ doc = false
 [dependencies]
 chan = "0.1.18"
 chan-signal = "0.1.7"
+chrono = { version = "0.3", features = ["serde", "rustc-serialize" ] }
 crossbeam = "0.2.10"
 dbus = "0.4.1"
 env_logger = "0.3.5"
@@ -25,11 +28,14 @@ hyper = { version = "0.9.13", default-features = false }
 lazy_static = "0.2.2"
 log = "0.3.6"
 nom = "1.2.4"
-openssl = "0.9.3"
+openssl = "0.9.7"
 rand = "0.3.15"
 rust-crypto = "0.2.36"
 rustc-serialize = "0.3.22"
-time = "0.1.35"
+serde_derive = "0.9"
+serde = "0.9"
+serde_json = "0.9"
+time = "0.1.36"
 toml = "0.2.1"
 unix_socket = "0.5.0"
 url = "1.2.1"

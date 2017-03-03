@@ -1,19 +1,29 @@
-use std::borrow::Cow;
+use std::fmt::{self, Display, Formatter};
 
 
 /// The available authentication types for communicating with the Auth server.
 #[derive(Clone, PartialEq, Eq, Debug, RustcEncodable, RustcDecodable)]
 pub enum Auth {
+    // ready for interpreter
     None,
-    Credentials(ClientCredentials),
     Token(AccessToken),
-    Registration(RegistrationCredentials),
     Certificate,
+
+    // need to authenticate
+    Credentials(ClientCredentials),
+    Provision
 }
 
-impl<'a> Into<Cow<'a, Auth>> for Auth {
-    fn into(self) -> Cow<'a, Auth> {
-        Cow::Owned(self)
+/// Display should not include any sensitive data for log output.
+impl Display for Auth {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            Auth::None           => write!(f, "{}", "Auth: None"),
+            Auth::Token(_)       => write!(f, "{}", "Auth: Token"),
+            Auth::Certificate    => write!(f, "{}", "Auth: Certificate"),
+            Auth::Credentials(_) => write!(f, "{}", "Auth: Credentials"),
+            Auth::Provision      => write!(f, "{}", "Auth: Provision"),
+        }
     }
 }
 
@@ -33,15 +43,4 @@ pub struct AccessToken {
     pub token_type:   String,
     pub expires_in:   i32,
     pub scope:        String
-}
-
-impl<'a> Into<Cow<'a, AccessToken>> for AccessToken {
-    fn into(self) -> Cow<'a, AccessToken> {
-        Cow::Owned(self)
-    }
-}
-
-#[derive(RustcEncodable, RustcDecodable, Debug, Clone, PartialEq, Eq)]
-pub struct RegistrationCredentials {
-    pub client_id:    String,
 }

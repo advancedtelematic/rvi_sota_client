@@ -53,8 +53,8 @@ impl Handler for HttpHandler {
                 let (etx, erx) = chan::async::<Event>();
                 response_rx = Some(erx);
                 self.itx.lock().unwrap().send(Interpret {
-                    command:     cmd,
-                    response_tx: Some(Arc::new(Mutex::new(etx))),
+                    command: cmd,
+                    resp_tx: Some(Arc::new(Mutex::new(etx))),
                 });
             }).unwrap_or_else(|err| error!("http request parse json: {}", err))
         }).unwrap_or_else(|err| error!("http request parse string: {}", err));
@@ -91,12 +91,12 @@ mod tests {
     use super::*;
     use gateway::{Gateway, Interpret};
     use datatype::{Command, Event};
-    use http::{AuthClient, Client, Response, use_default_certificates};
+    use http::{AuthClient, Client, Response, TlsData, init_tls_client};
 
 
     #[test]
     fn http_connections() {
-        use_default_certificates();
+        init_tls_client(TlsData::default());
 
         let (etx, erx) = chan::sync::<Event>(0);
         let (itx, irx) = chan::sync::<Interpret>(0);
@@ -110,7 +110,7 @@ mod tests {
                 let interpret = irx.recv().expect("itx is closed");
                 match interpret.command {
                     Command::StartDownload(id) => {
-                        let tx = interpret.response_tx.unwrap();
+                        let tx = interpret.resp_tx.unwrap();
                         tx.lock().unwrap().send(Event::FoundSystemInfo(id));
                     }
                     _ => panic!("expected AcceptUpdates"),

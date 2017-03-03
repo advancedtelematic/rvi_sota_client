@@ -1,9 +1,7 @@
-[auth]
-server = "http://127.0.0.1:9001"
-client_id = "client-id"
-p12_path = "/usr/local/etc/sota_registration_certificates"
-p12_password = ""
-expires_in = 365
+#[auth]
+#server = "http://127.0.0.1:9001"
+#client_id = "client-id"
+#client_secret = "client-secret"
 
 [core]
 server = "http://127.0.0.1:8080"
@@ -23,9 +21,8 @@ uuid = "123e4567-e89b-12d3-a456-426655440000"
 packages_dir = "/tmp/"
 package_manager = "off"
 auto_download = true
-certificates_path = "/usr/local/etc/sota_certificates"
-p12_path = "/var/sota/device.p12"
-p12_password = ""
+#certificates_path = None
+#system_info = None
 
 [gateway]
 console = false
@@ -42,7 +39,23 @@ socket_commands_path = "/tmp/sota-commands.socket"
 socket_events_path = "/tmp/sota-events.socket"
 websocket_server = "127.0.0.1:3012"
 
+#[provision]
+#p12_path = "/usr/local/etc/sota_registration.p12"
+#p12_password = ""
+#expiry_days = 365
+##device_id = None
+
 [rvi]
 client = "http://127.0.0.1:8901"
-storage_dir = "/var/sota"
-timeout = 20
+storage_dir = "/usr/local/etc/sota/rvi"
+#timeout = 20
+
+#[tls]
+#server = "http://127.0.0.1:9001"
+#p12_path = "/usr/local/etc/sota_device.p12"
+#p12_password = ""
+
+[uptane]
+director_server = "http://localhost:5555/director"
+images_server = "http://localhost:5555/repo"
+metadata_path = "/usr/local/etc/sota/uptane"

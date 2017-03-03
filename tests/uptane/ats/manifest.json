@@ -1,0 +1,35 @@
+{
+  "signatures": [{
+    "method": "rsassa-pss",
+    "sig": "",
+    "keyid": ""
+  }],
+  "signed": {
+    "vin": "{uuid}",
+    "primary_ecu_serial": "{ecu serial}",
+    "ecu_version_manifest": [
+      {
+        "signatures": [{
+          "method": "rsassa-pss",
+          "sig": "{sig}",
+          "keyid": "{keyid}"
+        }],
+        "signed": {
+          "timeserver_time": "1970-01-01T00:00:00Z",
+          "installed_image": {
+            "filepath": "/{ostree-refname}",
+            "fileinfo": {
+              "hashes": {
+                "sha256": "{ostree-commit}"
+              },
+              "length": 0
+            }
+          },
+          "previous_timeserver_time": "1970-01-01T00:00:00Z",
+          "ecu_serial": "{primary-ecu-serial}",
+          "attacks_detected": ""
+        }
+      }
+    ]
+  }
+}
