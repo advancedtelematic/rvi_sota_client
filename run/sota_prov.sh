@@ -21,6 +21,9 @@ function device_registration() {
   if [ ! -f $regpkcs ]; then
     echo "Missing '$regpkcs' in $PWD"
     exit 1
+  elif [ -f $devpkcs ]; then
+    echo "Already provisioned '$devpkcs' in $PWD"
+    exit 0
   fi
 
   openssl pkcs12 -in $regpkcs -out $regpkcs.pem -nodes -passin pass:""
@@ -65,3 +68,26 @@ device_registration
 ecu_registration
 director_metadata
 repo_metadata
+
+cat > sota.toml <<EOF
+[pkcs]
+cn = $SOTA_DEVICE_ID
+cacert = $SOTA_CERT_DIR/$srvcrt
+p12_path = $SOTA_CERT_DIR/$devpkcs
+p12_password = ""
+
+[ecu]
+primary_ecu_serial = $SOTA_DEVICE_ID
+ecu_serial = $SOTA_DEVICE_ID
+ecu_key = $SOTA_CERT_DIR/$ecukey
+
+[uptane]
+director_server = "$SOTA_GATEWAY_URI/director"
+images_server = "$SOTA_GATEWAY_URI/repo"
+metadata_path = "$SOTA_CERT_DIR/director/metadata"
+
+[device]
+packages_dir = "/tmp/"
+package_manager = "off"
+system_info = "sota_sysinfo.sh"
+EOF
