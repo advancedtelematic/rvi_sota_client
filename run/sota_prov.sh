@@ -1,7 +1,10 @@
-#!/bin/bash -x
+#!/bin/bash
+
+set -xeo pipefail
 
 : "${SOTA_GATEWAY_URI:?}"
-cd ${SOTA_CERT_DIR-/etc/sota/certs/}
+certdir=${SOTA_CERT_DIR-/usr/local/etc/sota/}
+mkdir -p $certdir && cd $certdir
 
 regpkcs="${1-credentials.p12}"
 devpkcs="${2-device.p12}"
@@ -21,12 +24,14 @@ function device_registration() {
   fi
 
   openssl pkcs12 -in $regpkcs -out $regpkcs.pem -nodes -passin pass:""
-  openssl pkcs12 -in $regpkcs -cacerts -nokeys -passin pass:"" 2>/dev/null | openssl x509 -outform PEM > $srvcrt
+  openssl pkcs12 -in $regpkcs -cacerts -nokeys -passin pass:"" 2>/dev/null \
+    | openssl x509 -outform PEM > $srvcrt
 
   curl --cacert $srvcrt --cert $regpkcs.pem \
     -X POST $SOTA_GATEWAY_URI/devices \
     -H 'Content-Type: application/json' \
-    -d '{"deviceId":"'$SOTA_DEVICE_ID'","ttl":36000}' -o $devpkcs
+    -d '{"deviceId":"'$SOTA_DEVICE_ID'","ttl":36000}' \
+    -o $devpkcs
 
   openssl pkcs12 -in $devpkcs -out $devpkcs.pem -nodes -passin pass:""
   rm -f $regpkcs $regpkcs.pem
@@ -35,7 +40,7 @@ function device_registration() {
 function ecu_registration() {
   openssl genpkey -algorithm RSA -out $ecukey.pem -pkeyopt rsa_keygen_bits:2048
   openssl rsa -pubout -in $ecukey.pem -out $ecukey.pub
-  keypub=$(cat $ecukey.pub | sed -e ':a;N;$!ba;s/\n/\\n/g')
+  keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < $ecukey.pub)
 
   curl --cacert $srvcrt --cert $devpkcs.pem \
     -X POST $SOTA_GATEWAY_URI/director/ecus \

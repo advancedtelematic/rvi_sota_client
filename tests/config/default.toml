@@ -47,7 +47,7 @@ websocket_server = "127.0.0.1:3012"
 
 [rvi]
 client = "http://127.0.0.1:8901"
-storage_dir = "/var/sota"
+storage_dir = "/usr/local/etc/sota/rvi"
 #timeout = 20
 
 #[tls]
@@ -58,4 +58,4 @@ storage_dir = "/var/sota"
 [uptane]
 director_server = "http://localhost:5555/director"
 images_server = "http://localhost:5555/repo"
-metadata_path = "/var/lib/uptane"
+metadata_path = "/usr/local/etc/sota/uptane"

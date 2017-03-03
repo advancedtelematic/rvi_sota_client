@@ -498,7 +498,7 @@ pub struct ProvisionConfig {
 impl Default for ProvisionConfig {
     fn default() -> Self {
         ProvisionConfig {
-            p12_path:     "/usr/local/etc/sota_registration.p12".to_string(),
+            p12_path:     "/usr/local/etc/sota/registration.p12".to_string(),
             p12_password: "".to_string(),
             expiry_days:  365,
             device_id:    None,
@@ -550,7 +550,7 @@ impl Default for RviConfig {
     fn default() -> RviConfig {
         RviConfig {
             client:      "http://127.0.0.1:8901".parse().unwrap(),
-            storage_dir: "/var/sota".to_string(),
+            storage_dir: "/usr/local/etc/sota/rvi".to_string(),
             timeout:     None,
         }
     }
@@ -597,7 +597,7 @@ impl Default for TlsConfig {
     fn default() -> Self {
         TlsConfig {
             server:       "http://127.0.0.1:8000".parse().unwrap(),
-            p12_path:     "/usr/local/etc/sota_device.p12".to_string(),
+            p12_path:     "/usr/local/etc/sota/device.p12".to_string(),
             p12_password: "".to_string(),
         }
     }
@@ -645,7 +645,7 @@ impl Default for UptaneConfig {
         UptaneConfig {
             director_server: "http://localhost:5555/director".parse().unwrap(),
             images_server:   "http://localhost:5555/repo".parse().unwrap(),
-            metadata_path:   "/var/lib/uptane".to_string(),
+            metadata_path:   "/usr/local/etc/sota/uptane".to_string(),
         }
     }
 }
@@ -743,7 +743,7 @@ mod tests {
     const PROVISION_CONFIG: &'static str =
         r#"
         [provision]
-        p12_path = "/usr/local/etc/sota_registration.p12"
+        p12_path = "/usr/local/etc/sota/registration.p12"
         p12_password = ""
         expiry_days = 365
         "#;
@@ -752,14 +752,14 @@ mod tests {
         r#"
         [rvi]
         client = "http://127.0.0.1:8901"
-        storage_dir = "/var/sota"
+        storage_dir = "/usr/local/etc/sota/rvi"
         "#;
 
     const TLS_CONFIG: &'static str =
         r#"
         [tls]
         server = "http://127.0.0.1:9001"
-        p12_path = "/usr/local/etc/sota_device.p12"
+        p12_path = "/usr/local/etc/sota/device.p12"
         p12_password = ""
         "#;
 
@@ -768,7 +768,7 @@ mod tests {
         [uptane]
         director_server = "http://localhost:5555/director"
         images_server = "http://localhost:5555/repo"
-        metadata_path = "/var/lib/uptane"
+        metadata_path = "/usr/local/etc/sota/uptane"
         "#;
 
 
