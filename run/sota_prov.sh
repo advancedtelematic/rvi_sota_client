@@ -12,7 +12,7 @@ srvcrt="${3-srv.crt}"
 ecukey=${4-ecuprimary}
 
 function mk_device_id() {
-  ifconfig -a | grep 'HWaddr ..:' | head -1 | sed -e 's/^.*HWaddr //' | sed -e 's/\s*$//'
+  ifconfig -a | grep 'HWaddr ..:' | head -n 1 | sed -e 's/^.*HWaddr //' | sed -e 's/\s*$//'
 }
 SOTA_DEVICE_ID="${SOTA_DEVICE_ID-$(mk_device_id)}"
 
@@ -69,7 +69,7 @@ ecu_registration
 director_metadata
 repo_metadata
 
-cat > sota.toml <<EOF
+cat > /sysroot/boot/sota.toml <<EOF
 [pkcs]
 cn = $SOTA_DEVICE_ID
 cacert = $SOTA_CERT_DIR/$srvcrt
