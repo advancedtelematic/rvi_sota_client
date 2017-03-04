@@ -47,7 +47,7 @@ impl FromStr for KeyType {
     }
 }
 
-#[derive(Serialize, PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone)]
 pub enum SignatureType {
     Ed25519,
     RsaSsaPss,
@@ -60,6 +60,16 @@ impl serde::Deserialize for SignatureType {
         } else {
             Err(serde::de::Error::custom("unknown SignatureType"))
         }
+    }
+}
+
+impl serde::Serialize for SignatureType {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where S: serde::Serializer
+    {
+        serializer.serialize_str(match self {
+            &SignatureType::Ed25519 => "ed25519",
+            &SignatureType::RsaSsaPss => "rsassa-pss" })
     }
 }
 
@@ -79,7 +89,7 @@ impl SignatureType {
     pub fn sign(&self, msg: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
             SignatureType::RsaSsaPss => {
-                let rsa = Rsa::private_key_from_der(&key)?;
+                let rsa = Rsa::private_key_from_pem(&key)?;
                 let priv_key = PKey::from_rsa(rsa)?;
                 let mut signer = Signer::new(MessageDigest::sha256(), &priv_key)?;
                 // magic number 6 taken from rsa.h in openssl
