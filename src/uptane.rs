@@ -4,6 +4,16 @@ use std::collections::HashMap;
 use datatype::{Error, Metadata, Role, Root, SignedManifest, SignedMeta, SignedCustom,
                Snapshot, Targets, Timestamp, UptaneConfig, Url, Verifier};
 use http::{Client, Response};
+use datatype::{SignatureType, PrivateKey};
+
+    use std::fs::File;
+    use std::io::Read;
+    fn read_file(path: &str) -> Vec<u8> {
+        let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open path: {}\n{}", path, err));
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf).unwrap_or_else(|err| panic!("couldn't read path: {}\n{}", path, err));
+        buf
+    }
 
 
 /// Last known version of each metadata file.
@@ -47,7 +57,7 @@ impl Uptane {
     fn endpoint(&self, director: bool, endpoint: &str) -> Url {
         if director {
             let ref server = self.uptane_cfg.director_server;
-            server.join(&format!("/{}", endpoint))
+            server.join(&format!("/director/{}", endpoint))
         } else {
             let ref server = self.uptane_cfg.images_server;
             server.join(&format!("/{}/{}", self.device_uuid, endpoint))
@@ -79,7 +89,12 @@ impl Uptane {
     /// Put a new manifest file to the Director server.
     pub fn put_manifest(&mut self, client: &Client, manifest: SignedManifest) -> Result<(), Error> {
         debug!("put_manifest");
-        self.put_endpoint(client, true, "manifest", json::to_vec(&manifest)?)
+        let key = PrivateKey {
+            // TODO: keyid = sha256sum(&self.uptane_cfg.public_key_path)
+            keyid: "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
+            priv_key: read_file(&self.uptane_cfg.private_key_path) };
+        let manf = manifest.sign(key, SignatureType::RsaSsaPss)?;
+        self.put_endpoint(client, true, "manifest", json::to_vec(&manf)?)
     }
 
     /// Add the root.json metadata to the verifier and return a new version indicator.

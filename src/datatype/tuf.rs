@@ -120,15 +120,13 @@ pub struct SignedCustom {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct SignedManifest {
-    pub vin:                  String,
     pub primary_ecu_serial:   String,
     pub ecu_version_manifest: json::Value,
 }
 
 impl SignedManifest {
-    pub fn new(vin: String, primary_ecu_serial: String, version: SignedVersion) -> Result<Self, Error> {
+    pub fn new(primary_ecu_serial: String, version: SignedVersion) -> Result<Self, Error> {
         Ok(SignedManifest {
-            vin: vin,
             primary_ecu_serial: primary_ecu_serial,
             ecu_version_manifest: version.to_json()?
         })
@@ -138,7 +136,7 @@ impl SignedManifest {
     pub fn sign(self, priv_key: PrivateKey, signature_type: SignatureType) -> Result<Metadata, Error> {
         let self_json = self.to_json()?;
         let canonical_json = canonicalize_json(self_json.to_string().as_bytes())?;
-        let sig = signature_type.sign(&priv_key.priv_key, &canonical_json)?;
+        let sig = signature_type.sign(&canonical_json, &priv_key.priv_key)?;
         let sig = Signature {
            keyid: priv_key.keyid,
            method: signature_type,
