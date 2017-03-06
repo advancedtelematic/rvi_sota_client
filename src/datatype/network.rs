@@ -1,6 +1,5 @@
 use hyper::method::Method as HyperMethod;
 use rustc_serialize::{Decoder, Decodable, Encoder, Encodable};
-use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::{SocketAddr as StdSocketAddr};
 use std::ops::Deref;
@@ -57,12 +56,6 @@ impl Url {
         Url(self.0.join(suffix).unwrap_or_else(|err| {
             panic!("couldn't join url {} with suffix {}: {}", self, suffix, err);
         }))
-    }
-}
-
-impl<'a> Into<Cow<'a, Url>> for Url {
-    fn into(self) -> Cow<'a, Url> {
-        Cow::Owned(self)
     }
 }
 
@@ -123,12 +116,6 @@ impl Into<HyperMethod> for Method {
             Method::Post => HyperMethod::Post,
             Method::Put  => HyperMethod::Put,
         }
-    }
-}
-
-impl<'a> Into<Cow<'a, Method>> for Method {
-    fn into(self) -> Cow<'a, Method> {
-        Cow::Owned(self)
     }
 }
 

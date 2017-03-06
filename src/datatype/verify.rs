@@ -9,14 +9,7 @@ use rustc_serialize::hex::FromHex;
 use std::collections::HashMap;
 use std::str::{self, FromStr};
 
-use datatype::{Error, Key, Metadata, Role, RoleData, Signed, canonicalize_json};
-
-
-pub struct PrivateKey {
-    pub keyid: String,
-    /// DER encoded private key
-    pub priv_key: Vec<u8>,
-}
+use datatype::{Error, Key, Role, RoleData, TufSigned, TufRole, canonicalize_json};
 
 
 #[derive(Serialize, PartialEq, Eq, Debug, Clone)]
@@ -64,12 +57,11 @@ impl serde::Deserialize for SignatureType {
 }
 
 impl serde::Serialize for SignatureType {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        where S: serde::Serializer
-    {
-        serializer.serialize_str(match self {
-            &SignatureType::Ed25519 => "ed25519",
-            &SignatureType::RsaSsaPss => "rsassa-pss" })
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(match *self {
+            SignatureType::Ed25519   => "ed25519",
+            SignatureType::RsaSsaPss => "rsassa-pss"
+        })
     }
 }
 
@@ -98,6 +90,7 @@ impl SignatureType {
                 let sig = signer.finish()?;
                 Ok(sig)
             }
+
             _ => unimplemented!(),
         }
     }
@@ -155,49 +148,55 @@ impl Verifier {
         self.roles.insert(role, data);
     }
 
-    pub fn verify(&self, role: &Role, metadata: &Metadata, min_version: u64) -> Result<(), Error> {
-        self.verify_signatures(role, metadata)?;
+    pub fn verify(&self, role: &Role, signed: &TufSigned, min_version: u64) -> Result<(), Error> {
+        self.verify_signatures(role, signed)?;
 
-        let signed = json::from_value::<Signed>(metadata.signed.clone())?;
-        if signed._type != *role {
+        let tuf_role = json::from_value::<TufRole>(signed.signed.clone())?;
+        if tuf_role._type != *role {
             Err(Error::UptaneInvalidRole)
-        } else if signed.expired()? {
+        } else if tuf_role.expired()? {
             Err(Error::UptaneExpired)
-        } else if signed.version < min_version {
+        } else if tuf_role.version < min_version {
             Err(Error::UptaneVersion)
         } else {
             Ok(())
         }
     }
 
-    pub fn verify_signatures(&self, role: &Role, metadata: &Metadata) -> Result<(), Error> {
-        if metadata.signatures.is_empty() {
+    pub fn verify_signatures(&self, role: &Role, signed: &TufSigned) -> Result<(), Error> {
+        if signed.signatures.is_empty() {
             return Err(Error::UptaneMissingSignatures);
         }
+        let canonical = canonicalize_json(json::to_string(&signed.signed)?.as_bytes())?;
 
-        let signed = json::to_string(&metadata.signed)?;
-        let signed = canonicalize_json(signed.as_bytes())?;
         let mut valid_count = 0;
-        for sig in &metadata.signatures {
-            self.keys.get(&sig.keyid)
-                .map(|key| {
+        for sig in &signed.signatures {
+            match self.keys.get(&sig.keyid) {
+                Some(key) => {
                     let ref public = key.keyval.public;
-                    if let Ok(decoded_sig) = sig.sig.from_hex() {
-                        // TODO this is a bit ugly
-                        (match key.keytype {
-                            KeyType::Rsa => SignatureType::RsaSsaPss,
-                            KeyType::Ed25519 => SignatureType::Ed25519,
-                        })
-                        // TODO right now the signatures are hex encoded instead of base64 :(
-                        .verify(&signed, public.as_bytes(), &decoded_sig)
+                    let sig = match sig.sig.from_hex() {
+                        Ok(sig)  => sig,
+                        Err(err) => {
+                            trace!("couldn't convert sig to hex for {}: {}", public, err);
+                            continue;
+                        }
+                    };
+                    // TODO this is a bit ugly
+                    (match key.keytype {
+                        KeyType::Rsa => SignatureType::RsaSsaPss,
+                        KeyType::Ed25519 => SignatureType::Ed25519,
+                    })
+                    // TODO right now the signatures are hex encoded instead of base64 :(
+                        .verify(&canonical, public.as_bytes(), &sig)
                         .map(|_| {
                             trace!("successful verification with: {}", public);
                             valid_count += 1;
                         })
                         .unwrap_or_else(|err| trace!("failed verification for {} with: {}", public, err));
-                    }
-                })
-                .unwrap_or_else(|| debug!("couldn't find key: {}", sig.keyid));
+                }
+
+                None => debug!("couldn't find key: {}", sig.keyid)
+            }
         }
 
         let role = self.roles.get(role).ok_or(Error::UptaneUnknownRole)?;
@@ -207,6 +206,7 @@ impl Verifier {
             Ok(())
         }
     }
+
 }
 
 

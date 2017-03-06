@@ -2,12 +2,11 @@ use chrono::{DateTime, NaiveDateTime, UTC};
 use rustc_serialize::hex::ToHex;
 use serde;
 use serde_json as json;
-use serde_json::value::ToJson;
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use time::Duration;
 
-use datatype::{Error, SignatureType, KeyType, PrivateKey, canonicalize_json};
+use datatype::{Error, SignatureType, KeyType, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
@@ -28,7 +27,6 @@ impl serde::Deserialize for Role {
         }
     }
 }
-
 
 impl FromStr for Role {
     type Err = Error;
@@ -65,7 +63,8 @@ impl RoleData {
 pub struct Key {
     pub keytype: KeyType,
     pub keyval:  KeyValue,
-    pub id:      Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -73,11 +72,31 @@ pub struct KeyValue {
     pub public: String,
 }
 
+pub struct PrivateKey {
+    pub keyid:   String,
+    pub der_key: Vec<u8>,
+}
+
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Metadata {
+pub struct TufSigned {
     pub signatures: Vec<Signature>,
     pub signed:     json::Value,
+}
+
+impl TufSigned {
+    pub fn sign(signed: json::Value, pkey: PrivateKey, sigtype: SignatureType) -> Result<TufSigned, Error> {
+        let canonical = canonicalize_json(json::to_string(&signed)?.as_bytes())?;
+        let sig = sigtype.sign(&canonical, &pkey.der_key)?;
+        Ok(TufSigned {
+            signatures: vec![Signature {
+                keyid:  pkey.keyid,
+                method: sigtype,
+                sig:    sig.to_hex()
+            }],
+            signed: signed,
+        })
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -87,83 +106,55 @@ pub struct Signature {
     pub sig:    String,
 }
 
-
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Signed {
+pub struct TufRole {
     pub _type:   Role,
     pub expires: String,
     pub version: u64,
 }
 
-impl Signed {
+impl TufRole {
     pub fn expired(&self) -> Result<bool, Error> {
         let expiry = NaiveDateTime::parse_from_str(&self.expires, "%FT%TZ")?;
         Ok(DateTime::from_utc(expiry, UTC) < UTC::now())
     }
 }
 
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct TufImage {
+    pub filepath: String,
+    pub fileinfo: TufMeta
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
-pub struct SignedMeta {
+pub struct TufMeta {
     pub length: u64,
     pub hashes: HashMap<String, String>,
-    pub custom: Option<SignedCustom>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<TufCustom>,
 }
 
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
-pub struct SignedCustom {
+pub struct TufCustom {
     pub ecuIdentifier: String,
     pub uri: Option<String>,
 }
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct SignedManifest {
+pub struct EcuManifests {
     pub primary_ecu_serial:   String,
-    pub ecu_version_manifest: json::Value,
-}
-
-impl SignedManifest {
-    pub fn new(primary_ecu_serial: String, version: SignedVersion) -> Result<Self, Error> {
-        Ok(SignedManifest {
-            primary_ecu_serial: primary_ecu_serial,
-            ecu_version_manifest: version.to_json()?
-        })
-    }
-
-    /// Consumes `self` because once we start signing, we should not modify the data
-    pub fn sign(self, priv_key: PrivateKey, signature_type: SignatureType) -> Result<Metadata, Error> {
-        let self_json = self.to_json()?;
-        let canonical_json = canonicalize_json(self_json.to_string().as_bytes())?;
-        let sig = signature_type.sign(&canonical_json, &priv_key.priv_key)?;
-        let sig = Signature {
-           keyid: priv_key.keyid,
-           method: signature_type,
-           // TODO make this b64 again sig: sig.to_base64(base64::STANDARD),
-           sig: sig.to_hex(),
-        };
-
-        Ok(Metadata {
-            signatures: vec![sig],
-            signed: self_json,
-        })
-    }
+    pub ecu_version_manifest: Vec<TufSigned>,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct SignedVersion {
-    pub timeserver_time:          String,
-    pub installed_image:          SignedImage,
-    pub previous_timeserver_time: String,
-    pub ecu_serial:               String,
+pub struct EcuVersion {
     pub attacks_detected:         String,
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct SignedImage {
-    pub filepath: String,
-    pub fileinfo: SignedMeta
+    pub ecu_serial:               String,
+    pub installed_image:          TufImage,
+    pub previous_timeserver_time: String,
+    pub timeserver_time:          String,
 }
 
 
@@ -196,7 +187,7 @@ pub struct Targets {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub targets: HashMap<String, SignedMeta>,
+    pub targets: HashMap<String, TufMeta>,
 }
 
 impl Default for Targets {
@@ -216,7 +207,7 @@ pub struct Snapshot {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub meta:    HashMap<String, SignedMeta>,
+    pub meta:    HashMap<String, TufMeta>,
 }
 
 impl Default for Snapshot {
@@ -236,7 +227,7 @@ pub struct Timestamp {
     pub _type:   Role,
     pub version: u64,
     pub expires: DateTime<UTC>,
-    pub meta:    HashMap<String, SignedMeta>
+    pub meta:    HashMap<String, TufMeta>
 }
 
 impl Default for Timestamp {

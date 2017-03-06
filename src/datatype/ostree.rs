@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-use datatype::{AccessToken, Error, Package, SignedCustom, SignedImage, SignedMeta,
-               SignedVersion, UpdateResultCode as Code};
+use datatype::{AccessToken, EcuVersion, Error, Package, TufCustom, TufImage, TufMeta,
+               UpdateResultCode as Code};
 use package_manager::package_manager::{InstallOutcome, parse_package};
 
 
@@ -17,25 +17,24 @@ pub struct OstreeBranch {
 }
 
 impl OstreeBranch {
-    pub fn signed_version(self, ecu_serial: String) -> SignedVersion {
+    pub fn ecu_version(self, ecu_serial: String) -> EcuVersion {
         let mut hashes = HashMap::new();
         hashes.insert("sha256".to_string(), self.commit);
 
-        SignedVersion {
-            timeserver_time: "1970-01-01T00:00:00Z".to_string(),
-            installed_image: SignedImage {
+        EcuVersion {
+            attacks_detected: "".to_string(),
+            ecu_serial: ecu_serial,
+            installed_image: TufImage {
                 filepath: self.refName,
-                fileinfo: SignedMeta {
+                fileinfo: TufMeta {
                     length: 0,
                     hashes: hashes,
                     custom: None
                 }
             },
             previous_timeserver_time: "1970-01-01T00:00:00Z".to_string(),
-            ecu_serial: ecu_serial,
-            attacks_detected: "".to_string()
+            timeserver_time: "1970-01-01T00:00:00Z".to_string(),
         }
-
     }
 }
 
@@ -62,10 +61,10 @@ impl Default for OstreePackage {
 }
 
 impl OstreePackage {
-    /// Convert from SignedMeta to an OstreePackage.
-    pub fn from(refname: String, hash: &str, meta: SignedMeta) -> Result<Self, String> {
+    /// Convert from TufMeta to an OstreePackage.
+    pub fn from(refname: String, hash: &str, meta: TufMeta) -> Result<Self, String> {
         let (id, uri) = match meta.custom {
-            Some(SignedCustom { ecuIdentifier: id, uri: Some(uri), .. }) => Ok((id, uri)),
+            Some(TufCustom { ecuIdentifier: id, uri: Some(uri), .. }) => Ok((id, uri)),
             _ => Err(format!("couldn't get custom for target: {}", refname))
         }?;
 
@@ -131,12 +130,20 @@ impl Ostree {
 
     /// Get the current OSTree branch.
     pub fn get_current_branch() -> Result<OstreeBranch, Error> {
+        /* FIXME
         for branch in Self::get_branches()? {
             if branch.current {
                 return Ok(branch);
             }
         }
         Err(Error::OstreeCommand("no current branch".to_string()))
+        */
+        Ok(OstreeBranch {
+            current: true,
+            refName: "/test".to_string(),
+            commit:  "08f43db61b4fcece9d35c36a825ea0aa221d6a8058777bb62f97d90d721f5e3f".to_string(),
+            description: "test only".to_string()
+        })
     }
 
     /// Run `ostree admin status` to get a list of branches.
@@ -196,11 +203,9 @@ mod tests {
         let branches = Ostree::parse_branches(OSTREE_ADMIN_STATUS)
             .unwrap_or_else(|err| panic!("couldn't parse branches: {}", err));
         assert_eq!(branches.len(), 2);
-
         assert_eq!(branches[0].current, true);
         assert_eq!(branches[0].refName, "gnome-ostree");
         assert_eq!(branches[0].commit, "67e382b11d213a402a5313e61cbc69dfd5ab93cb07");
-
         assert_eq!(branches[1].current, false);
         assert_eq!(branches[1].description,"osname:gnome-ostree/buildmaster/x86_64-runtime");
     }

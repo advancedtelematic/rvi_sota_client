@@ -29,7 +29,7 @@ DOCKER_RUN := \
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
 
-.PHONY: help client-dev new old clean test doc doc-dev client image deb rpm sota-version package-version
+.PHONY: help new old clean test doc doc-dev client client-dev image deb rpm sota-version package-version
 .DEFAULT_GOAL := help
 
 help:

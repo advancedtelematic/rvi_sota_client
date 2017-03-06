@@ -28,7 +28,7 @@ function device_registration() {
 
   openssl pkcs12 -in $regpkcs -out $regpkcs.pem -nodes -passin pass:""
   openssl pkcs12 -in $regpkcs -cacerts -nokeys -passin pass:"" 2>/dev/null \
-    | sed --quiet '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > $srvcrt
+    | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > $srvcrt
 
   curl --cacert $srvcrt --cert $regpkcs.pem \
     -X POST $SOTA_GATEWAY_URI/devices \
@@ -38,11 +38,12 @@ function device_registration() {
 
   openssl pkcs12 -in $devpkcs -out $devpkcs.pem -nodes -passin pass:""
   openssl pkcs12 -in $devpkcs -cacerts -nokeys -passin pass:"" 2>/dev/null \
-    | sed --quiet '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > $srvcrt
+    | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > $srvcrt
 }
 
 function ecu_registration() {
-  openssl genpkey -algorithm RSA -out $ecukey.pem -pkeyopt rsa_keygen_bits:2048
+  #FIXME: temp use 1024 bit instead of 2048
+  openssl genpkey -algorithm RSA -out $ecukey.pem -pkeyopt rsa_keygen_bits:1024
   openssl rsa -pubout -in $ecukey.pem -out $ecukey.pub
   keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < $ecukey.pub)
 
@@ -53,17 +54,17 @@ function ecu_registration() {
 }
 
 function director_metadata() {
-  mkdir -p director/metadata
+  mkdir -p metadata/director
   curl --cacert $srvcrt --cert $devpkcs.pem \
     $SOTA_GATEWAY_URI/director/root.json \
-    -o director/metadata/root.json
+    -o metadata/director/root.json
 }
 
 function repo_metadata() {
-  mkdir -p repo/metadata
+  mkdir -p metadata/repo
   curl --cacert $srvcrt --cert $devpkcs.pem \
     $SOTA_GATEWAY_URI/repo/root.json \
-    -o repo/metadata/root.json
+    -o metadata/repo/root.json
 }
 
 device_registration
@@ -71,23 +72,19 @@ ecu_registration
 director_metadata
 repo_metadata
 
-cat > /sysroot/boot/sota.toml <<EOF
+cat > sota.toml <<EOF
+[device]
+package_manager = "off"
+certificates_path = $SOTA_CERT_DIR/$srvcrt
+
 [tls]
-cn = $SOTA_DEVICE_ID
-cacert = $SOTA_CERT_DIR/$srvcrt
-p12_path = $SOTA_CERT_DIR/$devpkcs
+server = "$SOTA_GATEWAY_URI"
+p12_path = "$SOTA_CERT_DIR/$devpkcs"
 p12_password = ""
 
 [uptane]
-director_server = "$SOTA_GATEWAY_URI/director"
-images_server = "$SOTA_GATEWAY_URI/repo"
-metadata_path = "$SOTA_CERT_DIR/director/metadata"
-ecu_serial = "$SOTA_DEVICE_ID"
-private_key_path = $SOTA_CERT_DIR/$ecukey.pem
-public_key_path = $SOTA_CERT_DIR/$ecukey.pub
-
-[device]
-packages_dir = "/tmp/"
-package_manager = "off"
-system_info = "sota_sysinfo.sh"
+primary_ecu_serial = "$SOTA_DEVICE_ID"
+metadata_path = "$SOTA_CERT_DIR/metadata"
+private_key_path = "$SOTA_CERT_DIR/$ecukey.pem"
+public_key_path = "$SOTA_CERT_DIR/$ecukey.pub"
 EOF
