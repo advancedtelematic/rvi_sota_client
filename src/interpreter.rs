@@ -2,9 +2,6 @@ use chan::{Sender, Receiver};
 use serde_json as json;
 use std;
 use std::fmt::{self, Display, Formatter};
-use std::fs::File;
-use std::io::Write;
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, OstreePackage,
@@ -12,8 +9,7 @@ use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, Ostree
                UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
-use authenticate::{pkcs12, oauth2};
-use http::tls::init_tls_client;
+use authenticate::oauth2;
 use package_manager::PackageManager;
 use rvi::Services;
 use sota::Sota;
@@ -374,20 +370,6 @@ impl CommandInterpreter {
             }
 
             Command::Authenticate(Auth::Provision) => {
-                let tls  = self.config.tls.as_ref().expect("tls config required");
-                let prov = self.config.provision.as_ref().expect("provision config required");
-                if Path::new(&tls.p12_path).exists() {
-                    panic!("tls.p12_path already exists: {}", tls.p12_path);
-                }
-
-                let url = tls.server.join("/devices");
-                let id  = prov.device_id.as_ref().unwrap_or(&self.config.device.uuid);
-                let bundle = pkcs12(url, id.clone(), prov.expiry_days, self.http.as_ref())?;
-                let _ = File::create(&tls.p12_path)
-                    .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
-                    .map_err(|err| panic!("couldn't open tls.p12_path for writing: {}", err));
-
-                init_tls_client(self.config.tls_data(false));
                 self.auth = Auth::Certificate;
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Certificate));

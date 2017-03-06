@@ -16,13 +16,18 @@ use getopts::Options;
 use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::Write;
+use std::ops::Deref;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use sota::authenticate::pkcs12;
 use sota::datatype::{Auth, Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient, init_tls_client};
+use sota::http::{AuthClient, init_tls_client, init_tls_client_from_p12, TlsData};
 use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter,
                         CommandInterpreter, CommandMode};
 use sota::package_manager::PackageManager;
@@ -41,7 +46,11 @@ fn main() {
     let version  = start_logging();
     let config   = build_config(&version);
     let auth     = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
-    let mut mode = init_config(&config, &auth);
+    if auth == Auth::Provision {
+        provision(&config);
+    }
+
+    let mut mode = init_config(&config);
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -348,11 +357,50 @@ fn build_config(version: &str) -> Config {
     config
 }
 
-fn init_config(config: &Config, auth: &Auth) -> CommandMode {
-    if auth == &Auth::Provision {
-        init_tls_client(config.tls_data(true));
+/// download the PKCS#12 bundle needed to make the actual server calls
+fn provision(config: &Config) -> () {
+    let tls  = config.tls.as_ref().expect("tls config required");
+
+    if !Path::new(&tls.p12_path).exists() {
+        let prov = config.provision.as_ref().expect("provision config required");
+        init_tls_client_from_p12(&prov.p12_path, &prov.p12_password);
+        let url = tls.server.join("/devices");
+        let id  = prov.device_id.as_ref().unwrap_or(&config.device.uuid);
+        let http = AuthClient::default();
+
+        loop {
+            match pkcs12(url.clone(), id.clone(), prov.expiry_days, &http) {
+                Ok(bundle) => {
+                    let _ = File::create(&tls.p12_path)
+                        .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
+                        .map_err(|err| panic!("couldn't open tls.p12_path for writing: {}", err));
+                    break;
+                }
+                Err(e) => {
+                    // delay of 0 means no retry
+                    if prov.retry_delay_seconds == 0 {
+                        panic!("Error while getting bundle: {}", e);
+                    } else {
+                        info!("Retrying after error while getting bundle: {}", e);
+                        thread::sleep(Duration::from_secs(prov.retry_delay_seconds));
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn init_config(config: &Config) -> CommandMode {
+    if let Some(ref tls) = config.tls {
+        if let Some(ref certificates_path) = tls.certificates_path {
+            init_tls_client(TlsData { ca_path: Some(certificates_path), p12_path: Some(&tls.p12_path),
+                                      p12_pass: Some(&tls.p12_password) });
+        } else {
+            init_tls_client_from_p12(&tls.p12_path, &tls.p12_password);
+        }
     } else {
-        init_tls_client(config.tls_data(false));
+        let ca_path = config.device.certificates_path.as_ref().map(Deref::deref);
+        init_tls_client(TlsData { ca_path: ca_path, p12_path: None, p12_pass: None });
     }
 
     if let PackageManager::Uptane = config.device.package_manager {

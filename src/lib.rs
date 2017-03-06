@@ -14,6 +14,7 @@ extern crate rustc_serialize;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;
+extern crate tempfile;
 extern crate time;
 extern crate toml;
 extern crate unix_socket;
