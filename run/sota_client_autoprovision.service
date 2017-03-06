@@ -1,0 +1,18 @@
+[Unit]
+Description=SOTA Client Autoprovisioning
+Wants=network-online.target
+After=network.target network-online.target
+Before=sota_client.service
+Requires=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/usr/etc
+EnvironmentFile=/usr/etc/sota_provisioning_url.env
+ExecStart=/usr/bin/sota_prov.sh sota_provisioning_credentials.p12
+RemainAfterExit=true
+ExecStop=/bin/rm device.p12
+StandardOutput=journal 
+
+[Install]
+WantedBy=multi-user.target
