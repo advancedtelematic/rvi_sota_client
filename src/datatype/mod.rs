@@ -36,11 +36,12 @@ use std::process::{Command as ShellCommand, Stdio};
 use std::io::Write;
 /// Shell exec out to Python to get canonical json bytes
 pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
-	let mut child = ShellCommand::new("canonical_json.py")
-			.stdin(Stdio::piped())
-			.stdout(Stdio::piped())
-			.stderr(Stdio::piped())
-			.spawn()?;
+    let mut child = ShellCommand::new("canonical_json.py")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|err| Error::Command(format!("couldn't run canonical_json.py: {}", err)))?;
 
     match child.stdin.as_mut() {
         Some(mut stdin) => {

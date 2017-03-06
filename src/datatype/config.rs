@@ -28,9 +28,11 @@ impl Config {
     /// Read a toml config file using default values for missing sections or fields.
     pub fn load(path: &str) -> Result<Config, Error> {
         info!("Loading config file: {}", path);
-        let mut file = File::open(path).map_err(Error::Io)?;
+        let mut file = File::open(path)
+            .map_err(|err| Error::Config(format!("couldn't open config: {}", err)))?;
         let mut toml = String::new();
-        file.read_to_string(&mut toml)?;
+        file.read_to_string(&mut toml)
+            .map_err(|err| Error::Config(format!("couldn't read config: {}", err)))?;
         Config::parse(&toml)
     }
 

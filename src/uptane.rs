@@ -85,7 +85,7 @@ impl Uptane {
         let pkey = PrivateKey {
             // TODO: keyid = sha256sum(&self.uptane_cfg.public_key_path)
             keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
-            der_key: Uptane::read_file(&self.uptane_cfg.private_key_path)
+            der_key: Uptane::read_file(&self.uptane_cfg.private_key_path)?
         };
         let signed = TufSigned::sign(json::to_value(manifests)?, pkey, SignatureType::RsaSsaPss)?;
         self.put_endpoint(client, true, "manifest", json::to_vec(&signed)?)
@@ -181,11 +181,11 @@ impl Uptane {
         out
     }
 
-    pub fn read_file(path: &str) -> Vec<u8> {
-        let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open path: {}\n{}", path, err));
+    pub fn read_file(path: &str) -> Result<Vec<u8>, Error> {
+        let mut file = File::open(path).map_err(|err| Error::Client(format!("couldn't open path: {}\n{}", path, err)))?;
         let mut buf = Vec::new();
-        file.read_to_end(&mut buf).unwrap_or_else(|err| panic!("couldn't read path: {}\n{}", path, err));
-        buf
+        file.read_to_end(&mut buf).map_err(|err| Error::Client(format!("couldn't read path: {}\n{}", path, err)))?;
+        Ok(buf)
     }
 }
 
@@ -205,14 +205,14 @@ mod tests {
     fn client_from_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
         let mut replies = Vec::new();
         for path in paths {
-            replies.push(Uptane::read_file(path));
+            replies.push(Uptane::read_file(path).unwrap_or_else(|err| panic!("{}", err)));
         }
         TestClient::from(replies)
     }
 
     #[test]
     fn test_read_manifest() {
-        let bytes = Uptane::read_file("tests/uptane/ats/manifest.json");
+        let bytes = Uptane::read_file("tests/uptane/ats/manifest.json").unwrap_or_else(|err| panic!("{}", err));
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "{ecu serial}");

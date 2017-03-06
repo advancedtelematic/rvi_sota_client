@@ -8,8 +8,8 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, OstreePackage,
-               Package, SignatureType, TufSigned, UpdateReport, UpdateRequestStatus as Status,
-               UpdateResultCode, system_info};
+               Package, PrivateKey, SignatureType, TufSigned, UpdateReport,
+               UpdateRequestStatus as Status, UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use authenticate::{pkcs12, oauth2};
@@ -216,13 +216,11 @@ impl CommandInterpreter {
                         let branch  = Ostree::get_current_branch()?;
                         let ecuver  = branch.ecu_version(serial.clone());
                         let ecujson = json::to_value(ecuver)?;
-                        // FIXME: get actual private key
-                        use datatype::PrivateKey;
-                        let pkey = PrivateKey {
+                        let signed  = TufSigned::sign(ecujson, PrivateKey {
+                            // FIXME: keyid
                             keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
-                            der_key: Uptane::read_file(&self.config.uptane.private_key_path)
-                        };
-                        let signed  = TufSigned::sign(ecujson, pkey, SignatureType::RsaSsaPss)?;
+                            der_key: Uptane::read_file(&self.config.uptane.private_key_path)?
+                        }, SignatureType::RsaSsaPss)?;
 
                         uptane.put_manifest(self.http.as_ref(), EcuManifests {
                             primary_ecu_serial:   serial.clone(),
