@@ -38,9 +38,6 @@ help:
 new: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
-client-dev: ## Build the binary in debug mode
-	$(CARGO) build
-
 old: image ## Use a local `sota.toml` config file to run the client.
 	$(DOCKER_RUN) --net=host --volume sota.toml:/usr/local/etc/sota.toml $(IMAGE_SOTA)
 
