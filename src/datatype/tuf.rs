@@ -1,5 +1,5 @@
 use chrono::{DateTime, NaiveDateTime, UTC};
-use rustc_serialize::base64::{self, ToBase64};
+use rustc_serialize::hex::ToHex;
 use serde;
 use serde_json as json;
 use serde_json::value::ToJson;
@@ -140,7 +140,8 @@ impl SignedManifest {
         let sig = Signature {
            keyid: priv_key.keyid,
            method: signature_type,
-           sig: sig.to_base64(base64::STANDARD),
+           // TODO make this b64 again sig: sig.to_base64(base64::STANDARD),
+           sig: sig.to_hex(),
         };
 
         Ok(Metadata {
