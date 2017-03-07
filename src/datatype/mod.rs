@@ -15,7 +15,7 @@ pub mod verify;
 pub use self::auth::{AccessToken, Auth, ClientCredentials};
 pub use self::command::Command;
 pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
-                       GatewayConfig, RviConfig, UptaneConfig};
+                       GatewayConfig, RviConfig, TlsConfig, UptaneConfig};
 pub use self::error::Error;
 pub use self::event::Event;
 pub use self::json_rpc::{RpcRequest, RpcOk, RpcErr};

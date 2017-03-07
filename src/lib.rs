@@ -7,6 +7,7 @@ extern crate crypto;
 extern crate dbus;
 extern crate hyper;
 extern crate openssl;
+extern crate pem;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 extern crate rand;

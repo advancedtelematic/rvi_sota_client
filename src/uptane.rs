@@ -203,9 +203,27 @@ fn read_file(path: &str) -> Result<Vec<u8>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatype::{Config, EcuManifests, EcuVersion, TufSigned};
+    use pem;
+
+    use datatype::{EcuManifests, EcuVersion, TufSigned};
     use http::TestClient;
 
+
+    const RSA_2048_PRIV: &'static str = "-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDdC9QttkMbF5qB\n2plVU2hhG2sieXS2CVc3E8rm/oYGc9EHnlPMcAuaBtn9jaBo37PVYO+VFInzMu9f\nVMLm7d/hQxv4PjTBpkXvw1Ad0Tqhg/R8Lc4SXPxWxlVhg0ahLn3kDFQeEkrTNW7k\nxpAxWiE8V09ETcPwyNhPfcWeiBePwh8ySJ10IzqHt2kXwVbmL4F/mMX07KBYWIcA\n52TQLs2VhZLIaUBv9ZBxymAvogGz28clx7tHOJ8LZ/daiMzmtv5UbXPdt+q55rLJ\nZ1TuG0CuRqhTOllXnIvAYRQr6WBaLkGGbezQO86MDHBsV5TsG6JHPorrr6ogo+Lf\npuH6dcnHAgMBAAECggEBAMC/fs45fzyRkXYn4srHh14d5YbTN9VAQd/SD3zrdn0L\n4rrs8Y90KHmv/cgeBkFMx+iJtYBev4fk41xScf2icTVhKnOF8sTls1hGDIdjmeeb\nQ8ZAvs++a39TRMJaEW2dN8NyiKsMMlkH3+H3z2ZpfE+8pm8eDHza9dwjBP6fF0SP\nV1XPd2OSrJlvrgBrAU/8WWXYSYK+5F28QtJKsTuiwQylIHyJkd8cgZhgYXlUVvTj\nnHFJblpAT0qphji7p8G4Ejg+LNxu/ZD+D3wQ6iIPgKFVdC4uXmPwlf1LeYqXW0+g\ngTmHY7a/y66yn1H4A5gyfx2EffFMQu0Sl1RqzDVYYjECgYEA9Hy2QsP3pxW27yLs\nCu5e8pp3vZpdkNA71+7v2BVvaoaATnsSBOzo3elgRYsN0On4ObtfQXB3eC9poNuK\nzWxj8bkPbVOCpSpq//sUSqkh/XCmAhDl78BkgmWDb4EFEgcAT2xPBTHkb70jVAXB\nE1HBwsBcXhdxzRt8IYiBG+68d/8CgYEA53SJYpJ809lfpAG0CU986FFD7Fi/SvcX\n21TVMn1LpHuH7MZ2QuehS0SWevvspkIUm5uT3PrhTxdohAInNEzsdeHhTU11utIO\nrKnrtgZXKsBG4idsHu5ZQzp4n3CBEpfPFbOtP/UEKI/IGaJWGXVgG4J6LWmQ9LK9\nilNTaOUQ7jkCgYB+YP0B9DTPLN1cLgwf9mokNA7TdrkJA2r7yuo2I5ZtVUt7xghh\nfWk+VMXMDP4+UMNcbGvn8s/+01thqDrOx0m+iO/djn6JDC01Vz98/IKydImLpdqG\nHUiXUwwnFmVdlTrm01DhmZHA5N8fLr5IU0m6dx8IEExmPt/ioaJDoxvPVwKBgC+8\n1H01M3PKWLSN+WEWOO/9muHLaCEBF7WQKKzSNODG7cEDKe8gsR7CFbtl7GhaJr/1\ndajVQdU7Qb5AZ2+dEgQ6Q2rbOBYBLy+jmE8hvaa+o6APe3hhtp1sGObhoG2CTB7w\nwSH42hO3nBDVb6auk9T4s1Rcep5No1Q9XW28GSLZAoGATFlXg1hqNKLO8xXq1Uzi\nkDrN6Ep/wq80hLltYPu3AXQn714DVwNa3qLP04dAYXbs9IaQotAYVVGf6N1IepLM\nfQU6Q9fp9FtQJdU+Mjj2WMJVWbL0ihcU8VZV5TviNvtvR1rkToxSLia7eh39AY5G\nvkgeMZm7SwqZ9c/ZFnjJDqc=\n-----END PRIVATE KEY-----";
+
+    fn new_uptane(primary_ecu_serial: String) -> Uptane {
+        Uptane {
+            gateway:  "http://localhost:8000".parse().unwrap(),
+            deviceid: primary_ecu_serial.clone(),
+            version:  Version::default(),
+            verifier: Verifier::new(),
+            serial:   primary_ecu_serial,
+            privkey:  PrivateKey {
+                keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
+                der_key: pem::parse(RSA_2048_PRIV).unwrap().contents
+            },
+        }
+    }
 
     fn client_from_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
         let mut replies = Vec::new();
@@ -229,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_get_targets_director() {
-        let mut uptane = Uptane::new(&Config::load("tests/config/auth.toml").unwrap());
+        let mut uptane = new_uptane("test-get-targets-director".into());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
             "tests/uptane/repo_1/targets.json",
@@ -256,7 +274,7 @@ mod tests {
 
     #[test]
     fn test_get_snapshot() {
-        let mut uptane = Uptane::new(&Config::load("tests/config/auth.toml").unwrap());
+        let mut uptane = new_uptane("test-get-snapshot".into());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
             "tests/uptane/repo_1/snapshot.json",
@@ -276,9 +294,11 @@ mod tests {
         }
     }
 
+    extern crate env_logger;
     #[test]
     fn test_get_timestamp() {
-        let mut uptane = Uptane::new(&Config::load("tests/config/auth.toml").unwrap());
+        env_logger::init().expect("boo");
+        let mut uptane = new_uptane("test-get-timestamp".into());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
             "tests/uptane/repo_1/timestamp.json",

@@ -1,5 +1,5 @@
 use chrono::{DateTime, NaiveDateTime, UTC};
-use rustc_serialize::hex::ToHex;
+use rustc_serialize::base64::{self, ToBase64};
 use serde;
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
@@ -92,7 +92,7 @@ impl TufSigned {
             signatures: vec![Signature {
                 keyid:  privkey.keyid.clone(),
                 method: sigtype,
-                sig:    sig.to_hex()
+                sig:    sig.to_base64(base64::STANDARD)
             }],
             signed: signed,
         })
