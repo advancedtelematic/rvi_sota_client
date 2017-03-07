@@ -4,10 +4,15 @@ use serde_json as json;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::{Rsa, Padding};
-use openssl::sign::{Signer, Verifier as OpensslVerifier};
+use openssl::sign::{Verifier as OpensslVerifier};
+use ring::{rand, signature};
 use rustc_serialize::hex::FromHex;
 use std::collections::HashMap;
+use std::io::{self, Write};
+use std::process::{Command, Stdio};
 use std::str::{self, FromStr};
+use std::sync::Arc;
+use untrusted;
 
 use datatype::{Error, Key, Role, RoleData, TufSigned, TufRole, canonicalize_json};
 
@@ -81,14 +86,42 @@ impl SignatureType {
     pub fn sign(&self, msg: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
             SignatureType::RsaSsaPss => {
-                let rsa = Rsa::private_key_from_pem(&key)?;
-                let priv_key = PKey::from_rsa(rsa)?;
-                let mut signer = Signer::new(MessageDigest::sha256(), &priv_key)?;
-                // magic number 6 taken from rsa.h in openssl
-                signer.pkey_ctx_mut().set_rsa_padding(Padding::from_raw(6))?;
-                signer.update(msg)?;
-                let sig = signer.finish()?;
-                Ok(sig)
+                let mut child = Command::new("openssl")
+                        .args(&["rsa", "-inform", "PEM", "-outform", "DER"])
+                        .stdin(Stdio::piped())
+                        .stdout(Stdio::piped())
+                        .stderr(Stdio::piped())
+                        .spawn()?;
+                {
+                    match child.stdin.as_mut() {
+                        Some(stdin) => {
+                            stdin.write(key)?;
+                            stdin.flush()?;
+                        },
+                        None => return Err(Error::Io(io::Error::new(io::ErrorKind::Other, "stdin not found"))),
+                    }
+                }
+
+                let output = child.wait_with_output()?;
+                if !output.status.success() {
+                    let stdout = str::from_utf8(&output.stdout).unwrap_or("[stdout not utf8]");
+                    let stderr = str::from_utf8(&output.stderr).unwrap_or("[stderr not utf8]");
+                    return Err(Error::Io(io::Error::new(io::ErrorKind::Other,
+                                                        format!("process failed to exit successfully: stdout {} stderr: {}",
+                                                                stdout, stderr))));
+                }
+
+                let key_bytes_der = untrusted::Input::from(&output.stdout);
+                let key_pair = signature::RSAKeyPair::from_der(key_bytes_der)?;
+
+                let key_pair = Arc::new(key_pair);
+                let mut signing_state = signature::RSASigningState::new(key_pair)?;
+
+                let rng = rand::SystemRandom::new();
+                let mut signature = vec![0; signing_state.key_pair().public_modulus_len()];
+                signing_state.sign(&signature::RSA_PSS_SHA256, &rng, msg, &mut signature)?;
+
+                Ok(signature)
             }
 
             _ => unimplemented!(),
@@ -219,6 +252,16 @@ mod tests {
     const ED25519_PUB: &'static [u8; 44] = b"qQi1Q6V7mqZzt12UPYtcFd2oiMYtW+U8VXlXrpW8lMs=";
 
     const RSA_2048_PUB: &'static [u8; 450] = b"-----BEGIN PUBLIC KEY-----\nMIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAvK19Xh7Y1zzdjDnXotpx\nLBlDc4oahR98I3YyieKAyPmm3l9R9oZl3HHu9OOA/FVF1/QvwNZbgD9ciLyBGVor\nTNPF/2VZmlQmBF6N3BVkmYF9tF0fu8w2MznCQ9bwHE6JR4oLCsb3H/DSpm/GiQ0n\nWwmeNbWJpVpw5x3j8Tsjc7g7+2PO3e9fqh7gxAoPNj1eGwsiSdG9GVTOTBvsbxQH\n4ZT9lkablCIeMxtIdZtLZ1+LffS+f6qaVf7GCjtmIuo4mFD3BisdyHoLnaSxVSGH\nfRVUSouJPa20nP67PZo6EJoWmEOrqDXtoNASuKfS0BzwftRVl6BR3CCpnyyUbq3y\n7wIDAQAB\n-----END PUBLIC KEY-----";
+
+    // Note: this key has nothing to do with the aboce public key
+    const RSA_2048_PRIV: &'static [u8; 1712] = b"-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDdC9QttkMbF5qB\n2plVU2hhG2sieXS2CVc3E8rm/oYGc9EHnlPMcAuaBtn9jaBo37PVYO+VFInzMu9f\nVMLm7d/hQxv4PjTBpkXvw1Ad0Tqhg/R8Lc4SXPxWxlVhg0ahLn3kDFQeEkrTNW7k\nxpAxWiE8V09ETcPwyNhPfcWeiBePwh8ySJ10IzqHt2kXwVbmL4F/mMX07KBYWIcA\n52TQLs2VhZLIaUBv9ZBxymAvogGz28clx7tHOJ8LZ/daiMzmtv5UbXPdt+q55rLJ\nZ1TuG0CuRqhTOllXnIvAYRQr6WBaLkGGbezQO86MDHBsV5TsG6JHPorrr6ogo+Lf\npuH6dcnHAgMBAAECggEBAMC/fs45fzyRkXYn4srHh14d5YbTN9VAQd/SD3zrdn0L\n4rrs8Y90KHmv/cgeBkFMx+iJtYBev4fk41xScf2icTVhKnOF8sTls1hGDIdjmeeb\nQ8ZAvs++a39TRMJaEW2dN8NyiKsMMlkH3+H3z2ZpfE+8pm8eDHza9dwjBP6fF0SP\nV1XPd2OSrJlvrgBrAU/8WWXYSYK+5F28QtJKsTuiwQylIHyJkd8cgZhgYXlUVvTj\nnHFJblpAT0qphji7p8G4Ejg+LNxu/ZD+D3wQ6iIPgKFVdC4uXmPwlf1LeYqXW0+g\ngTmHY7a/y66yn1H4A5gyfx2EffFMQu0Sl1RqzDVYYjECgYEA9Hy2QsP3pxW27yLs\nCu5e8pp3vZpdkNA71+7v2BVvaoaATnsSBOzo3elgRYsN0On4ObtfQXB3eC9poNuK\nzWxj8bkPbVOCpSpq//sUSqkh/XCmAhDl78BkgmWDb4EFEgcAT2xPBTHkb70jVAXB\nE1HBwsBcXhdxzRt8IYiBG+68d/8CgYEA53SJYpJ809lfpAG0CU986FFD7Fi/SvcX\n21TVMn1LpHuH7MZ2QuehS0SWevvspkIUm5uT3PrhTxdohAInNEzsdeHhTU11utIO\nrKnrtgZXKsBG4idsHu5ZQzp4n3CBEpfPFbOtP/UEKI/IGaJWGXVgG4J6LWmQ9LK9\nilNTaOUQ7jkCgYB+YP0B9DTPLN1cLgwf9mokNA7TdrkJA2r7yuo2I5ZtVUt7xghh\nfWk+VMXMDP4+UMNcbGvn8s/+01thqDrOx0m+iO/djn6JDC01Vz98/IKydImLpdqG\nHUiXUwwnFmVdlTrm01DhmZHA5N8fLr5IU0m6dx8IEExmPt/ioaJDoxvPVwKBgC+8\n1H01M3PKWLSN+WEWOO/9muHLaCEBF7WQKKzSNODG7cEDKe8gsR7CFbtl7GhaJr/1\ndajVQdU7Qb5AZ2+dEgQ6Q2rbOBYBLy+jmE8hvaa+o6APe3hhtp1sGObhoG2CTB7w\nwSH42hO3nBDVb6auk9T4s1Rcep5No1Q9XW28GSLZAoGATFlXg1hqNKLO8xXq1Uzi\nkDrN6Ep/wq80hLltYPu3AXQn714DVwNa3qLP04dAYXbs9IaQotAYVVGf6N1IepLM\nfQU6Q9fp9FtQJdU+Mjj2WMJVWbL0ihcU8VZV5TviNvtvR1rkToxSLia7eh39AY5G\nvkgeMZm7SwqZ9c/ZFnjJDqc=\n-----END PRIVATE KEY-----
+        ";
+
+    #[test]
+    fn test_rsa_sign() {
+        let msg = b"hello";
+        SignatureType::RsaSsaPss.sign(msg, RSA_2048_PRIV).expect("couldn't sign");
+    }
 
     #[test]
     fn test_rsa_verify() {
