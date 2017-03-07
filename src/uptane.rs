@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::Read;
 
-use datatype::{EcuManifests, Error, Role, Root, Snapshot, Targets, Timestamp,
-               TufCustom, TufMeta, TufSigned, UptaneConfig, Url, Verifier};
+use datatype::{Config, EcuManifests, Error, Ostree, Role, Root, Snapshot, Targets,
+               Timestamp, TufCustom, TufMeta, TufSigned, Url, Verifier};
 use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
 
@@ -17,8 +17,8 @@ pub struct Version {
     timestamp: u64
 }
 
-impl Version {
-    fn new() -> Self {
+impl Default for Version {
+    fn default() -> Self {
         Version { root: 0, targets: 0, snapshot: 0, timestamp: 0 }
     }
 }
@@ -26,22 +26,31 @@ impl Version {
 
 /// Software over the air updates using Uptane endpoints.
 pub struct Uptane {
-    uptane_cfg:  UptaneConfig,
-    gateway:     Url,
-    device_uuid: String,
-    version:     Version,
-    verifier:    Verifier,
+    gateway:  Url,
+    deviceid: String,
+    version:  Version,
+    verifier: Verifier,
+    serial:   String,
+    privkey:  PrivateKey,
 }
 
-
 impl Uptane {
-    pub fn new(cfg: UptaneConfig, gateway: Url, device_uuid: String) -> Self {
+    pub fn new(config: &Config) -> Self {
+        let tls_cfg = config.tls.as_ref().expect("uptane mode expects [tls] config");
+        let der_key = read_file(&config.uptane.private_key_path)
+            .unwrap_or_else(|err| panic!("couldn't read uptane.private_key_path: {}", err));
+
         Uptane {
-            uptane_cfg:  cfg,
-            gateway:     gateway,
-            device_uuid: device_uuid,
-            version:     Version::new(),
-            verifier:    Verifier::new(),
+            gateway:  tls_cfg.server.clone(),
+            deviceid: config.device.uuid.clone(),
+            version:  Version::default(),
+            verifier: Verifier::new(),
+            serial:   config.uptane.primary_ecu_serial.clone(),
+            privkey:  PrivateKey {
+                // FIXME: keyid
+                keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
+                der_key: der_key
+            },
         }
     }
 
@@ -53,10 +62,9 @@ impl Uptane {
         if director {
             self.gateway.join(&format!("/director/{}", endpoint))
         } else {
-            self.gateway.join(&format!("/repo/{}/{}", self.device_uuid, endpoint))
+            self.gateway.join(&format!("/repo/{}/{}", self.deviceid, endpoint))
         }
     }
-
 
     /// GET the bytes response from the given endpoint.
     fn get_endpoint(&mut self, client: &Client, director: bool, endpoint: &str) -> Result<Vec<u8>, Error> {
@@ -78,16 +86,18 @@ impl Uptane {
         }
     }
 
-
     /// Put a new manifest file to the Director server.
-    pub fn put_manifest(&mut self, client: &Client, manifests: EcuManifests) -> Result<(), Error> {
+    pub fn put_manifest(&mut self, client: &Client) -> Result<(), Error> {
         debug!("put_manifest");
-        let pkey = PrivateKey {
-            // TODO: keyid = sha256sum(&self.uptane_cfg.public_key_path)
-            keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
-            der_key: Uptane::read_file(&self.uptane_cfg.private_key_path)?
+        let branch   = Ostree::get_current_branch()?;
+        let ecu_ver  = branch.ecu_version(self.serial.clone());
+        let ecu_sign = TufSigned::sign(json::to_value(ecu_ver)?, &self.privkey, SigType::RsaSsaPss)?;
+
+        let manifests = EcuManifests {
+            primary_ecu_serial:   self.serial.clone(),
+            ecu_version_manifest: vec![ecu_sign],
         };
-        let signed = TufSigned::sign(json::to_value(manifests)?, pkey, SigType::RsaSsaPss)?;
+        let signed = TufSigned::sign(json::to_value(manifests)?, &self.privkey, SigType::RsaSsaPss)?;
         self.put_endpoint(client, true, "manifest", json::to_vec(&signed)?)
     }
 
@@ -180,39 +190,34 @@ impl Uptane {
         }
         out
     }
+}
 
-    pub fn read_file(path: &str) -> Result<Vec<u8>, Error> {
-        let mut file = File::open(path).map_err(|err| Error::Client(format!("couldn't open path: {}\n{}", path, err)))?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf).map_err(|err| Error::Client(format!("couldn't read path: {}\n{}", path, err)))?;
-        Ok(buf)
-    }
+fn read_file(path: &str) -> Result<Vec<u8>, Error> {
+    let mut file = File::open(path).map_err(|err| Error::Client(format!("couldn't open path: {}\n{}", path, err)))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf).map_err(|err| Error::Client(format!("couldn't read path: {}\n{}", path, err)))?;
+    Ok(buf)
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatype::{TufSigned, EcuManifests, EcuVersion};
+    use datatype::{Config, EcuManifests, EcuVersion, TufSigned};
     use http::TestClient;
 
-
-    fn new_uptane(device_id: &str) -> Uptane {
-        let gateway = "http://localhost:1234".parse().expect("couldn't parse new_uptane gateway");
-        Uptane::new(UptaneConfig::default(), gateway, device_id.to_string())
-    }
 
     fn client_from_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
         let mut replies = Vec::new();
         for path in paths {
-            replies.push(Uptane::read_file(path).unwrap_or_else(|err| panic!("{}", err)));
+            replies.push(read_file(path).unwrap_or_else(|err| panic!("{}", err)));
         }
         TestClient::from(replies)
     }
 
     #[test]
     fn test_read_manifest() {
-        let bytes = Uptane::read_file("tests/uptane/ats/manifest.json").unwrap_or_else(|err| panic!("{}", err));
+        let bytes = read_file("tests/uptane/ats/manifest.json").unwrap_or_else(|err| panic!("{}", err));
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "{ecu serial}");
@@ -224,7 +229,7 @@ mod tests {
 
     #[test]
     fn test_get_targets_director() {
-        let mut uptane = new_uptane("test-get-targets-director");
+        let mut uptane = Uptane::new(&Config::load("tests/config/auth.toml").unwrap());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
             "tests/uptane/repo_1/targets.json",
@@ -251,7 +256,7 @@ mod tests {
 
     #[test]
     fn test_get_snapshot() {
-        let mut uptane = new_uptane("test-get-snapshot");
+        let mut uptane = Uptane::new(&Config::load("tests/config/auth.toml").unwrap());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
             "tests/uptane/repo_1/snapshot.json",
@@ -273,7 +278,7 @@ mod tests {
 
     #[test]
     fn test_get_timestamp() {
-        let mut uptane = new_uptane("test-get-timestamp");
+        let mut uptane = Uptane::new(&Config::load("tests/config/auth.toml").unwrap());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
             "tests/uptane/repo_1/timestamp.json",

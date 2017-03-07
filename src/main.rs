@@ -32,6 +32,7 @@ use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter,
                         CommandInterpreter, CommandMode};
 use sota::package_manager::PackageManager;
 use sota::rvi::{Edge, Services};
+use sota::uptane::Uptane;
 
 
 macro_rules! exit {
@@ -404,7 +405,7 @@ fn init_config(config: &Config) -> CommandMode {
     }
 
     if let PackageManager::Uptane = config.device.package_manager {
-        CommandMode::Uptane(None)
+        CommandMode::Uptane(Uptane::new(config))
     } else {
         CommandMode::Sota
     }

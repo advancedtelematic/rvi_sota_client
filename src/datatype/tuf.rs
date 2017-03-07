@@ -85,12 +85,12 @@ pub struct TufSigned {
 }
 
 impl TufSigned {
-    pub fn sign(signed: json::Value, pkey: PrivateKey, sigtype: SigType) -> Result<TufSigned, Error> {
+    pub fn sign(signed: json::Value, privkey: &PrivateKey, sigtype: SigType) -> Result<TufSigned, Error> {
         let canonical = canonicalize_json(json::to_string(&signed)?.as_bytes())?;
-        let sig = sigtype.sign(&canonical, &pkey.der_key)?;
+        let sig = sigtype.sign(&canonical, &privkey.der_key)?;
         Ok(TufSigned {
             signatures: vec![Signature {
-                keyid:  pkey.keyid,
+                keyid:  privkey.keyid.clone(),
                 method: sigtype,
                 sig:    sig.to_hex()
             }],

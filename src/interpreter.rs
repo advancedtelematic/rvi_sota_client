@@ -1,11 +1,9 @@
 use chan::{Sender, Receiver};
-use serde_json as json;
 use std;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
-use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, OstreePackage,
-               Package, PrivateKey, SigType, TufSigned, UpdateReport,
+use datatype::{Auth, Command, Config, Error, Event, OstreePackage, Package, UpdateReport,
                UpdateRequestStatus as Status, UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -146,7 +144,7 @@ impl Interpreter<Command, Interpret> for IntermediateInterpreter {
 pub enum CommandMode {
     Sota,
     Rvi(Box<Services>),
-    Uptane(Option<Uptane>)
+    Uptane(Uptane)
 }
 
 /// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
@@ -201,43 +199,8 @@ impl CommandInterpreter {
 
             Command::GetUpdateRequests => {
                 match self.mode {
-                    CommandMode::Uptane(None) => {
-                        info!("initialising uptane mode");
-                        let ref tlscfg = self.config.tls.as_ref().expect("Uptane mode expects [tls] config");
-                        let ref serial = self.config.uptane.primary_ecu_serial;
-                        let mut uptane = Uptane::new(self.config.uptane.clone(),
-                                                     tlscfg.server.clone(),
-                                                     self.config.device.uuid.clone());
-
-                        let branch  = Ostree::get_current_branch()?;
-                        let ecuver  = branch.ecu_version(serial.clone());
-                        let ecujson = json::to_value(ecuver)?;
-                        let signed  = TufSigned::sign(ecujson, PrivateKey {
-                            // FIXME: keyid
-                            keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
-                            der_key: Uptane::read_file(&self.config.uptane.private_key_path)?
-                        }, SigType::RsaSsaPss)?;
-
-                        uptane.put_manifest(self.http.as_ref(), EcuManifests {
-                            primary_ecu_serial:   serial.clone(),
-                            ecu_version_manifest: vec![signed],
-                        })?;
-                        self.mode = CommandMode::Uptane(Some(uptane));
-                        Event::UptaneInitialised
-                    }
-
-                    CommandMode::Uptane(Some(ref mut uptane)) => {
-                        let (_, ts_new) = uptane.get_timestamp(self.http.as_ref(), true)?;
-                        if ts_new {
-                            let (targets, _) = uptane.get_targets(self.http.as_ref(), true)?;
-                            Event::UptaneTargetsUpdated(targets.targets)
-                        } else {
-                            Event::UptaneTimestampUpdated
-                        }
-                    }
-
-                    CommandMode::Rvi(_) |
-                    CommandMode::Sota   => {
+                    CommandMode::Sota   |
+                    CommandMode::Rvi(_) => {
                         let mut updates = sota.get_update_requests()?;
                         if updates.is_empty() {
                             Event::NoUpdateRequests
@@ -246,6 +209,22 @@ impl CommandInterpreter {
                             Event::UpdatesReceived(updates)
                         }
                     }
+
+                    CommandMode::Uptane(ref mut uptane) => {
+                        // FIXME: put manifest only on startup and after install
+                        let client = self.http.as_ref();
+                        uptane.put_manifest(client)?;
+                        let _ = uptane.get_root(client, true)?;
+
+                        let (_, ts_new) = uptane.get_timestamp(client, true)?;
+                        if ts_new {
+                            let (targets, _) = uptane.get_targets(client, true)?;
+                            Event::UptaneTargetsUpdated(targets.targets)
+                        } else {
+                            Event::UptaneTimestampUpdated
+                        }
+                    }
+
                 }
             }
 
