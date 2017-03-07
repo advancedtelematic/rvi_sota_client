@@ -118,8 +118,7 @@ impl Uptane {
         }
 
         debug!("checking root keys");
-        self.verifier.verify(&Role::Root, &meta, 0)?;
-        if root.version > self.version.root {
+        if self.verifier.verify(&Role::Root, &meta)? > self.version.root {
             debug!("root version increased from {} to {}", self.version.root, root.version);
             self.version.root = root.version;
             Ok(true)
@@ -136,8 +135,7 @@ impl Uptane {
         let targ = json::from_value::<Targets>(meta.signed.clone())?;
 
         debug!("checking targets keys");
-        self.verifier.verify(&Role::Targets, &meta, 0)?;
-        if targ.version > self.version.targets {
+        if self.verifier.verify(&Role::Targets, &meta)? > self.version.targets {
             debug!("targets version increased from {} to {}", self.version.targets, targ.version);
             self.version.targets = targ.version;
             Ok((targ, true))
@@ -154,8 +152,7 @@ impl Uptane {
         let snap = json::from_value::<Snapshot>(meta.signed.clone())?;
 
         debug!("checking snapshot keys");
-        self.verifier.verify(&Role::Snapshot, &meta, 0)?;
-        if snap.version > self.version.snapshot {
+        if self.verifier.verify(&Role::Snapshot, &meta)? > self.version.snapshot {
             debug!("snapshot version increased from {} to {}", self.version.snapshot, snap.version);
             self.version.snapshot = snap.version;
             Ok((snap, true))
@@ -172,8 +169,7 @@ impl Uptane {
         let time = json::from_value::<Timestamp>(meta.signed.clone())?;
 
         debug!("checking timestamp keys");
-        self.verifier.verify(&Role::Timestamp, &meta, 0)?;
-        if time.version > self.version.timestamp {
+        if self.verifier.verify(&Role::Timestamp, &meta)? > self.version.timestamp {
             debug!("timestamp version increased from {} to {}", self.version.timestamp, time.version);
             self.version.timestamp = time.version;
             Ok((time, true))

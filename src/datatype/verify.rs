@@ -194,18 +194,16 @@ impl Verifier {
         self.roles.insert(role, data);
     }
 
-    pub fn verify(&self, role: &Role, signed: &TufSigned, min_version: u64) -> Result<(), Error> {
+    /// Return the version of the signed metadata on success.
+    pub fn verify(&self, role: &Role, signed: &TufSigned) -> Result<u64, Error> {
         self.verify_signatures(role, signed)?;
-
         let tuf_role = json::from_value::<TufRole>(signed.signed.clone())?;
         if tuf_role._type != *role {
             Err(Error::UptaneInvalidRole)
         } else if tuf_role.expired()? {
             Err(Error::UptaneExpired)
-        } else if tuf_role.version < min_version {
-            Err(Error::UptaneOldVersion)
         } else {
-            Ok(())
+            Ok(tuf_role.version)
         }
     }
 
@@ -255,7 +253,6 @@ impl Verifier {
             Ok(())
         }
     }
-
 }
 
 
