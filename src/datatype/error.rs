@@ -1,6 +1,7 @@
 use chrono::ParseError as ChronoParseError;
 use hyper::error::Error as HyperError;
 use openssl::error::ErrorStack as OpensslErrors;
+use ring::error::Unspecified;
 use rustc_serialize::json::{EncoderError as JsonEncoderError,
                             DecoderError as JsonDecoderError,
                             ParserError as JsonParserError};
@@ -41,6 +42,7 @@ pub enum Error {
     Package(String),
     Parse(String),
     Recv(RecvError),
+    RingCrypto,
     SendEvent(SendError<Event>),
     SendInterpret(SendError<Interpret>),
     SerdeJson(SerdeJsonError),
@@ -68,6 +70,12 @@ pub enum Error {
 impl<E> From<PoisonError<E>> for Error {
     fn from(e: PoisonError<E>) -> Error {
         Error::Poison(format!("{}", e))
+    }
+}
+
+impl From<Unspecified> for Error {
+    fn from (_: Unspecified) -> Error {
+        Error::RingCrypto
     }
 }
 
@@ -132,6 +140,7 @@ impl Display for Error {
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),
             Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),
             Error::Recv(ref s)          => format!("Recv error: {}", s.clone()),
+            Error::RingCrypto           => format!("Error in the 'ring' crypto library"),
             Error::SendEvent(ref s)     => format!("Send error for Event: {}", s.clone()),
             Error::SendInterpret(ref s) => format!("Send error for Interpret: {}", s.clone()),
             Error::SerdeJson(ref e)     => format!("Serde JSON error: {}", e.clone()),

@@ -10,6 +10,7 @@ extern crate openssl;
 #[macro_use] extern crate lazy_static;
 #[macro_use] extern crate log;
 extern crate rand;
+extern crate ring;
 extern crate rustc_serialize;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
@@ -17,6 +18,7 @@ extern crate serde_json;
 extern crate time;
 extern crate toml;
 extern crate unix_socket;
+extern crate untrusted;
 extern crate url;
 extern crate ws;
 
