@@ -5,7 +5,7 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, OstreePackage,
-               Package, PrivateKey, SignatureType, TufSigned, UpdateReport,
+               Package, PrivateKey, SigType, TufSigned, UpdateReport,
                UpdateRequestStatus as Status, UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -216,7 +216,7 @@ impl CommandInterpreter {
                             // FIXME: keyid
                             keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
                             der_key: Uptane::read_file(&self.config.uptane.private_key_path)?
-                        }, SignatureType::RsaSsaPss)?;
+                        }, SigType::RsaSsaPss)?;
 
                         uptane.put_manifest(self.http.as_ref(), EcuManifests {
                             primary_ecu_serial:   serial.clone(),

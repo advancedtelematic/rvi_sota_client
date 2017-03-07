@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use time::Duration;
 
-use datatype::{Error, SignatureType, KeyType, canonicalize_json};
+use datatype::{Error, SigType, KeyType, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
@@ -85,7 +85,7 @@ pub struct TufSigned {
 }
 
 impl TufSigned {
-    pub fn sign(signed: json::Value, pkey: PrivateKey, sigtype: SignatureType) -> Result<TufSigned, Error> {
+    pub fn sign(signed: json::Value, pkey: PrivateKey, sigtype: SigType) -> Result<TufSigned, Error> {
         let canonical = canonicalize_json(json::to_string(&signed)?.as_bytes())?;
         let sig = sigtype.sign(&canonical, &pkey.der_key)?;
         Ok(TufSigned {
@@ -102,7 +102,7 @@ impl TufSigned {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Signature {
     pub keyid:  String,
-    pub method: SignatureType,
+    pub method: SigType,
     pub sig:    String,
 }
 

@@ -6,7 +6,7 @@ use std::io::Read;
 use datatype::{EcuManifests, Error, Role, Root, Snapshot, Targets, Timestamp,
                TufCustom, TufMeta, TufSigned, UptaneConfig, Url, Verifier};
 use http::{Client, Response};
-use datatype::{SignatureType, PrivateKey};
+use datatype::{SigType, PrivateKey};
 
 
 /// Last known version of each metadata file.
@@ -87,7 +87,7 @@ impl Uptane {
             keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
             der_key: Uptane::read_file(&self.uptane_cfg.private_key_path)?
         };
-        let signed = TufSigned::sign(json::to_value(manifests)?, pkey, SignatureType::RsaSsaPss)?;
+        let signed = TufSigned::sign(json::to_value(manifests)?, pkey, SigType::RsaSsaPss)?;
         self.put_endpoint(client, true, "manifest", json::to_vec(&signed)?)
     }
 
