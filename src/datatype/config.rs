@@ -1,11 +1,9 @@
 use rustc_serialize::Decodable;
 use std::fs::File;
 use std::io::prelude::*;
-use std::ops::Deref;
 use toml::{Decoder, Parser, Table};
 
 use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
-use http::TlsData;
 use package_manager::PackageManager;
 
 
@@ -75,30 +73,13 @@ impl Config {
             (Some(_), Some(_), _)       => Err("Need one of [auth] or [tls] section only."),
             (Some(_), _,       Some(_)) => Err("Need one of [auth] or [provision] section only."),
             (None,    None,    None)    => Ok(Auth::None),
-            (_,       Some(_), None)    => Ok(Auth::Certificate),
-            (_,       _,       Some(_)) => Ok(Auth::Provision),
+            (None,    Some(_), None)    => Ok(Auth::Certificate),
+            (None,    _,       Some(_)) => Ok(Auth::Provision),
 
             (Some(&AuthConfig { client_id: ref id, client_secret: ref secret, .. }), _, _) => {
                 Ok(Auth::Credentials(ClientCredentials { client_id: id.clone(), client_secret: secret.clone() }))
             }
         }
-    }
-
-    /// Return the certificate paths used for TLS configuration.
-    pub fn tls_data(&self, provisioning: bool) -> TlsData {
-        let ca_path = self.device.certificates_path.as_ref().map(Deref::deref);
-        let mut tls = TlsData { ca_path: ca_path, p12_path: None, p12_pass: None };
-
-        match (provisioning, self.tls.as_ref()) {
-            (false, Some(&TlsConfig { p12_path: ref path, p12_password: ref pass, .. })) => {
-                tls.p12_path = Some(path);
-                tls.p12_pass = Some(pass);
-            }
-
-            _ => ()
-        }
-
-        tls
     }
 }
 
@@ -491,19 +472,21 @@ impl Defaultify<NetworkConfig> for ParsedNetworkConfig {
 /// The [provision] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct ProvisionConfig {
-    pub p12_path:     String,
-    pub p12_password: String,
-    pub expiry_days:  u32,
-    pub device_id:    Option<String>,
+    pub p12_path:            String,
+    pub p12_password:        String,
+    pub expiry_days:         u32,
+    pub device_id:           Option<String>,
+    pub retry_delay_seconds: u64,
 }
 
 impl Default for ProvisionConfig {
     fn default() -> Self {
         ProvisionConfig {
-            p12_path:     "/usr/local/etc/sota/registration.p12".to_string(),
-            p12_password: "".to_string(),
-            expiry_days:  365,
-            device_id:    None,
+            p12_path:            "/usr/local/etc/sota/registration.p12".to_string(),
+            p12_password:        "".to_string(),
+            expiry_days:         365,
+            device_id:           None,
+            retry_delay_seconds: 5,
         }
     }
 }
@@ -514,15 +497,17 @@ struct ParsedProvisionConfig {
     p12_password: Option<String>,
     expiry_days:  Option<u32>,
     device_id:    Option<String>,
+    retry_delay_seconds: Option<u64>,
 }
 
 impl Default for ParsedProvisionConfig {
     fn default() -> Self {
         ParsedProvisionConfig {
-            p12_path:     None,
-            p12_password: None,
-            expiry_days:  None,
-            device_id:    None,
+            p12_path:            None,
+            p12_password:        None,
+            expiry_days:         None,
+            device_id:           None,
+            retry_delay_seconds: None,
         }
     }
 }
@@ -531,10 +516,11 @@ impl Defaultify<ProvisionConfig> for ParsedProvisionConfig {
     fn defaultify(&mut self) -> ProvisionConfig {
         let default = ProvisionConfig::default();
         ProvisionConfig {
-            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
-            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
-            expiry_days:  self.expiry_days.take().unwrap_or(default.expiry_days),
-            device_id:    self.device_id.take().or(default.device_id),
+            p12_path:            self.p12_path.take().unwrap_or(default.p12_path),
+            p12_password:        self.p12_password.take().unwrap_or(default.p12_password),
+            expiry_days:         self.expiry_days.take().unwrap_or(default.expiry_days),
+            device_id:           self.device_id.take().or(default.device_id),
+            retry_delay_seconds: self.retry_delay_seconds.take().unwrap_or(default.retry_delay_seconds),
         }
     }
 }
@@ -590,34 +576,38 @@ impl Defaultify<RviConfig> for ParsedRviConfig {
 /// The [tls] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct TlsConfig {
-    pub server:       Url,
-    pub p12_path:     String,
-    pub p12_password: String,
+    pub server:            Url,
+    pub p12_path:          String,
+    pub p12_password:      String,
+    pub certificates_path: Option<String>,
 }
 
 impl Default for TlsConfig {
     fn default() -> Self {
         TlsConfig {
-            server:       "http://127.0.0.1:8000".parse().unwrap(),
-            p12_path:     "/usr/local/etc/sota/device.p12".to_string(),
-            p12_password: "".to_string(),
+            server:            "http://127.0.0.1:8000".parse().unwrap(),
+            p12_path:          "/usr/local/etc/sota/device.p12".to_string(),
+            p12_password:      "".to_string(),
+            certificates_path: None,
         }
     }
 }
 
 #[derive(RustcDecodable, Debug)]
 struct ParsedTlsConfig {
-    server:       Option<Url>,
-    p12_path:     Option<String>,
-    p12_password: Option<String>,
+    server:            Option<Url>,
+    p12_path:          Option<String>,
+    p12_password:      Option<String>,
+    certificates_path: Option<String>,
 }
 
 impl Default for ParsedTlsConfig {
     fn default() -> Self {
         ParsedTlsConfig {
-            server:       None,
-            p12_path:     None,
-            p12_password: None,
+            server:            None,
+            p12_path:          None,
+            p12_password:      None,
+            certificates_path: None,
         }
     }
 }
@@ -626,9 +616,10 @@ impl Defaultify<TlsConfig> for ParsedTlsConfig {
     fn defaultify(&mut self) -> TlsConfig {
         let default = TlsConfig::default();
         TlsConfig {
-            server:       self.server.take().unwrap_or(default.server),
-            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
-            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
+            server:            self.server.take().unwrap_or(default.server),
+            p12_path:          self.p12_path.take().unwrap_or(default.p12_path),
+            p12_password:      self.p12_password.take().unwrap_or(default.p12_password),
+            certificates_path: self.certificates_path.take().or(default.certificates_path),
         }
     }
 }
@@ -752,7 +743,8 @@ mod tests {
         [provision]
         p12_path = "/usr/local/etc/sota/registration.p12"
         p12_password = ""
-        expiry_days = 365
+        expiry_days = 11
+        retry_delay_seconds = 17
         "#;
 
     const RVI_CONFIG: &'static str =

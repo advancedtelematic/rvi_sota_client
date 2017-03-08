@@ -1,6 +1,9 @@
 use hyper::error::{Error as HyperError, Result as HyperResult};
 use hyper::net::{HttpStream, NetworkStream, SslClient};
+use tempfile::NamedTempFile;
+use openssl::error::ErrorStack;
 use openssl::pkcs12::Pkcs12;
+use openssl::pkcs12::ParsedPkcs12;
 use openssl::ssl::{Error as SslError, SslConnectorBuilder, SslConnector,
                    SslMethod, SslStream, ShutdownResult};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
@@ -33,6 +36,28 @@ pub fn init_tls_client(tls: TlsData) {
     *CONNECTOR.lock().unwrap() = Some(Arc::new(TlsConnector::new(tls)));
 }
 
+
+fn load_p12(p12_path: &str, p12_pass: &str) -> Result<ParsedPkcs12, ErrorStack> {
+    let mut file = File::open(p12_path)
+        .unwrap_or_else(|err| panic!("couldn't open p12 file: {}", err));
+    let mut buf = Vec::new();
+    let _ = file.read_to_end(&mut buf)
+        .map_err(|err| panic!("couldn't read p12 file: {}", err));
+    let pkcs = Pkcs12::from_der(&buf)
+        .unwrap_or_else(|err| panic!("couldn't parse p12 file: {}", err));
+    pkcs.parse(p12_pass)
+}
+
+pub fn init_tls_client_from_p12(p12_path: &str, p12_pass: &str) {
+    let p12 = load_p12(p12_path, p12_pass)
+        .unwrap_or_else(|err| panic!("couldn't decode p12 file: {}", err));
+    let chain = p12.chain;
+    let x509 = chain.get(0).expect("couldn't get CA").to_pem().expect("couldn't convert CA");
+    let mut temp_ca_file = NamedTempFile::new().expect("Couldn't create temp CA file");
+    temp_ca_file.write_all(&x509).expect("Couldn't write temp CA file");
+    init_tls_client(TlsData { ca_path: temp_ca_file.path().to_str(), p12_path: Some(p12_path),
+                              p12_pass: Some(p12_pass) });
+}
 
 /// TLS client for HTTPS communication.
 pub struct TlsClient(Arc<TlsConnector>);
@@ -76,14 +101,7 @@ impl TlsConnector {
 
         tls.p12_path.map(|path| {
             info!("Setting PKCS#12 file to {}.", path);
-            let mut file = File::open(path)
-                .unwrap_or_else(|err| panic!("couldn't open p12 file: {}", err));
-            let mut buf = Vec::new();
-            let _ = file.read_to_end(&mut buf)
-                .map_err(|err| panic!("couldn't read p12 file: {}", err));
-            let pkcs = Pkcs12::from_der(&buf)
-                .unwrap_or_else(|err| panic!("couldn't parse p12 file: {}", err));
-            let parsed = pkcs.parse(tls.p12_pass.unwrap_or(""))
+            let parsed = load_p12(path, tls.p12_pass.unwrap_or(""))
                 .unwrap_or_else(|err| panic!("couldn't decode p12 file: {}", err));
 
             let context = builder.builder_mut();
@@ -93,6 +111,10 @@ impl TlsConnector {
                 .map_err(|err| panic!("couldn't set private key: {}", err));
             let _ = context.check_private_key()
                 .map_err(|err| panic!("couldn't validate private key: {}", err));
+            debug!("parsed.chain.len(): {}", parsed.chain.len());
+            for cert in parsed.chain {
+                context.add_extra_chain_cert(cert).expect("Adding extra cert failed");
+            }
         });
 
         TlsConnector(builder.build())
