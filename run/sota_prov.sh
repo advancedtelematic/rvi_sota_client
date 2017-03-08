@@ -75,7 +75,7 @@ repo_metadata
 cat > sota.toml <<EOF
 [device]
 package_manager = "off"
-certificates_path = $SOTA_CERT_DIR/$srvcrt
+certificates_path = "$SOTA_CERT_DIR/$srvcrt"
 
 [tls]
 server = "$SOTA_GATEWAY_URI"
