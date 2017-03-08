@@ -7,8 +7,8 @@ Requires=network-online.target
 
 [Service]
 Type=oneshot
-WorkingDirectory=/usr/etc
-EnvironmentFile=/usr/etc/sota_provisioning_url.env
+WorkingDirectory=/var/sota
+EnvironmentFile=/var/sota/sota_provisioning_url.env
 ExecStart=/usr/bin/sota_prov.sh sota_provisioning_credentials.p12
 RemainAfterExit=true
 ExecStop=/bin/rm device.p12
