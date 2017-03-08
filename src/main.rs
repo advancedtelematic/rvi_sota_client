@@ -364,7 +364,8 @@ fn initialize(config: &Config, auth: &Auth) -> CommandMode {
     init_tls_client(config.tls_data());
 
     if let PackageManager::Uptane = config.device.package_manager {
-        CommandMode::Uptane(Uptane::new(config))
+        let uptane = Uptane::new(config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
+        CommandMode::Uptane(uptane)
     } else {
         CommandMode::Sota
     }
@@ -392,9 +393,9 @@ fn provision_p12(config: &Config) -> () {
     let device = prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone();
     let client = AuthClient::default();
     let bundle = pkcs12(server, device, prov.expiry_days, &client)
-        .unwrap_or_else(|err| panic!("couldn't get pkcs12 bundle: {}", err));
+        .unwrap_or_else(|err| exit!(3, "couldn't get pkcs12 bundle: {}", err));
 
     let _ = File::create(&tls.p12_path)
         .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
-        .map_err(|err| panic!("couldn't open tls.p12_path for writing: {}", err));
+        .map_err(|err| exit!(3, "couldn't open tls.p12_path for writing: {}", err));
 }

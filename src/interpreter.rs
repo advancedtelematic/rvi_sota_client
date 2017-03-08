@@ -95,7 +95,9 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::InstallComplete(report) | Event::InstallFailed(report) => {
-                ctx.send(Command::SendUpdateReport(report));
+                if self.pacman != PackageManager::Uptane {
+                    ctx.send(Command::SendUpdateReport(report));
+                }
             }
 
             Event::UpdateReportSent => {
@@ -211,10 +213,8 @@ impl CommandInterpreter {
                     }
 
                     CommandMode::Uptane(ref mut uptane) => {
-                        // FIXME: put manifest only on startup and after install
                         let client = self.http.as_ref();
-                        uptane.put_manifest(client)?;
-                        let _ = uptane.get_root(client, true)?;
+                        uptane.initialize(client)?;
 
                         let (_, ts_new) = uptane.get_timestamp(client, true)?;
                         if ts_new {
@@ -242,11 +242,17 @@ impl CommandInterpreter {
             }
 
             Command::OstreeInstall(pkg) => {
-                let id = pkg.commit.clone();
-                let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
-                match pkg.install(token) {
-                    Ok((code, out))  => Event::InstallComplete(UpdateReport::single(id, code, out)),
-                    Err((code, out)) => Event::InstallFailed(UpdateReport::single(id, code, out))
+                match pkg.install(if let Auth::Token(ref t) = self.auth { Some(t) } else { None }) {
+                    Ok((code, out)) => {
+                        if let CommandMode::Uptane(ref mut uptane) = self.mode {
+                            uptane.send_manifest = true;
+                        }
+                        Event::InstallComplete(UpdateReport::single(pkg.commit.clone(), code, out))
+                    }
+
+                    Err((code, out)) => {
+                        Event::InstallFailed(UpdateReport::single(pkg.commit.clone(), code, out))
+                    }
                 }
             }
 
@@ -310,7 +316,8 @@ impl CommandInterpreter {
                         Event::DownloadingUpdate(id)
                     }
 
-                    _ => {
+                    CommandMode::Sota      |
+                    CommandMode::Uptane(_) => {
                         etx.send(Event::InstallingUpdate(id.clone()));
                         let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
                         match sota.install_update(token, id) {
@@ -351,7 +358,6 @@ impl CommandInterpreter {
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Certificate));
                 }
-
                 Event::Authenticated
             }
 

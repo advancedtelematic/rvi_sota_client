@@ -27,7 +27,6 @@ getopts = "0.2.14"
 hyper = { version = "0.9.13", default-features = false }
 lazy_static = "0.2.2"
 log = "0.3.6"
-tempfile = "2.1.5"
 nom = "1.2.4"
 openssl = "0.9.7"
 pem = "0.2.0"
