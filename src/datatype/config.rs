@@ -1,9 +1,11 @@
 use rustc_serialize::Decodable;
 use std::fs::File;
 use std::io::prelude::*;
+use std::ops::Deref;
 use toml::{Decoder, Parser, Table};
 
 use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
+use http::TlsData;
 use package_manager::PackageManager;
 
 
@@ -81,6 +83,23 @@ impl Config {
             }
         }
     }
+
+    /// Return the certificates used for TLS connections from the current Config.
+    pub fn tls_data(&self) -> TlsData {
+        if let Some(ref tls) = self.tls {
+            TlsData {
+                ca_file:  Some(&tls.ca_file),
+                p12_path: Some(&tls.p12_path),
+                p12_pass: Some(&tls.p12_password)
+            }
+        } else {
+            TlsData {
+                ca_file:  self.core.ca_file.as_ref().map(Deref::deref),
+                p12_path: None,
+                p12_pass: None
+            }
+        }
+    }
 }
 
 
@@ -103,6 +122,7 @@ fn maybe_parse_section<T: Decodable>(table: &Table, section: &str) -> Result<Opt
 fn backwards_compatibility(core:   &mut ParsedCoreConfig,
                            device: &mut ParsedDeviceConfig) -> Result<(), Error> {
 
+    // device.polling_interval -> core.polling_sec
     match (device.polling_interval, core.polling_sec) {
         (Some(_), Some(_)) => {
             return Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string()))
@@ -116,6 +136,19 @@ fn backwards_compatibility(core:   &mut ParsedCoreConfig,
                 core.polling = Some(false);
             }
         }
+
+        _ => ()
+    }
+
+    // device.certificates_path -> core.ca_file
+    match (&device.certificates_path, &core.ca_file) {
+        (&Some(_), &Some(_)) => {
+            return Err(Error::Config("core.ca_file and device.certificates_path both set".to_string()))
+        }
+
+        (&Some(ref path), &None) => {
+            core.ca_file = Some(path.clone());
+        },
 
         _ => ()
     }
@@ -182,7 +215,8 @@ impl Defaultify<AuthConfig> for ParsedAuthConfig {
 pub struct CoreConfig {
     pub server:      Url,
     pub polling:     bool,
-    pub polling_sec: u64
+    pub polling_sec: u64,
+    pub ca_file:     Option<String>
 }
 
 impl Default for CoreConfig {
@@ -190,7 +224,8 @@ impl Default for CoreConfig {
         CoreConfig {
             server:      "http://127.0.0.1:8080".parse().unwrap(),
             polling:     true,
-            polling_sec: 10
+            polling_sec: 10,
+            ca_file:     None,
         }
     }
 }
@@ -199,7 +234,8 @@ impl Default for CoreConfig {
 struct ParsedCoreConfig {
     server:      Option<Url>,
     polling:     Option<bool>,
-    polling_sec: Option<u64>
+    polling_sec: Option<u64>,
+    ca_file:     Option<String>,
 }
 
 impl Default for ParsedCoreConfig {
@@ -207,7 +243,8 @@ impl Default for ParsedCoreConfig {
         ParsedCoreConfig {
             server:      None,
             polling:     None,
-            polling_sec: None
+            polling_sec: None,
+            ca_file:     None,
         }
     }
 }
@@ -218,7 +255,8 @@ impl Defaultify<CoreConfig> for ParsedCoreConfig {
         CoreConfig {
             server:      self.server.take().unwrap_or(default.server),
             polling:     self.polling.take().unwrap_or(default.polling),
-            polling_sec: self.polling_sec.take().unwrap_or(default.polling_sec)
+            polling_sec: self.polling_sec.take().unwrap_or(default.polling_sec),
+            ca_file:     self.ca_file.take().or(default.ca_file),
         }
     }
 }
@@ -293,7 +331,6 @@ pub struct DeviceConfig {
     pub packages_dir:      String,
     pub package_manager:   PackageManager,
     pub auto_download:     bool,
-    pub certificates_path: Option<String>,
     pub system_info:       Option<String>,
 }
 
@@ -304,7 +341,6 @@ impl Default for DeviceConfig {
             packages_dir:      "/tmp/".to_string(),
             package_manager:   PackageManager::Off,
             auto_download:     true,
-            certificates_path: None,
             system_info:       None,
         }
     }
@@ -316,9 +352,9 @@ struct ParsedDeviceConfig {
     pub packages_dir:      Option<String>,
     pub package_manager:   Option<PackageManager>,
     pub auto_download:     Option<bool>,
+    pub system_info:       Option<String>,
     pub polling_interval:  Option<u64>,
     pub certificates_path: Option<String>,
-    pub system_info:       Option<String>,
 }
 
 impl Default for ParsedDeviceConfig {
@@ -328,9 +364,9 @@ impl Default for ParsedDeviceConfig {
             packages_dir:      None,
             package_manager:   None,
             auto_download:     None,
+            system_info:       None,
             polling_interval:  None,
             certificates_path: None,
-            system_info:       None,
         }
     }
 }
@@ -339,12 +375,11 @@ impl Defaultify<DeviceConfig> for ParsedDeviceConfig {
     fn defaultify(&mut self) -> DeviceConfig {
         let default = DeviceConfig::default();
         DeviceConfig {
-            uuid:              self.uuid.take().unwrap_or(default.uuid),
-            packages_dir:      self.packages_dir.take().unwrap_or(default.packages_dir),
-            package_manager:   self.package_manager.take().unwrap_or(default.package_manager),
-            auto_download:     self.auto_download.take().unwrap_or(default.auto_download),
-            certificates_path: self.certificates_path.take().or(default.certificates_path),
-            system_info:       self.system_info.take().or(default.system_info),
+            uuid:            self.uuid.take().unwrap_or(default.uuid),
+            packages_dir:    self.packages_dir.take().unwrap_or(default.packages_dir),
+            package_manager: self.package_manager.take().unwrap_or(default.package_manager),
+            auto_download:   self.auto_download.take().unwrap_or(default.auto_download),
+            system_info:     self.system_info.take().or(default.system_info),
         }
     }
 }
@@ -472,21 +507,19 @@ impl Defaultify<NetworkConfig> for ParsedNetworkConfig {
 /// The [provision] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct ProvisionConfig {
-    pub p12_path:            String,
-    pub p12_password:        String,
-    pub expiry_days:         u32,
-    pub device_id:           Option<String>,
-    pub retry_delay_seconds: u64,
+    pub p12_path:     String,
+    pub p12_password: String,
+    pub expiry_days:  u32,
+    pub device_id:    Option<String>,
 }
 
 impl Default for ProvisionConfig {
     fn default() -> Self {
         ProvisionConfig {
-            p12_path:            "/usr/local/etc/sota/registration.p12".to_string(),
-            p12_password:        "".to_string(),
-            expiry_days:         365,
-            device_id:           None,
-            retry_delay_seconds: 5,
+            p12_path:     "/usr/local/etc/sota/registration.p12".to_string(),
+            p12_password: "".to_string(),
+            expiry_days:  365,
+            device_id:    None,
         }
     }
 }
@@ -497,17 +530,15 @@ struct ParsedProvisionConfig {
     p12_password: Option<String>,
     expiry_days:  Option<u32>,
     device_id:    Option<String>,
-    retry_delay_seconds: Option<u64>,
 }
 
 impl Default for ParsedProvisionConfig {
     fn default() -> Self {
         ParsedProvisionConfig {
-            p12_path:            None,
-            p12_password:        None,
-            expiry_days:         None,
-            device_id:           None,
-            retry_delay_seconds: None,
+            p12_path:     None,
+            p12_password: None,
+            expiry_days:  None,
+            device_id:    None,
         }
     }
 }
@@ -516,11 +547,10 @@ impl Defaultify<ProvisionConfig> for ParsedProvisionConfig {
     fn defaultify(&mut self) -> ProvisionConfig {
         let default = ProvisionConfig::default();
         ProvisionConfig {
-            p12_path:            self.p12_path.take().unwrap_or(default.p12_path),
-            p12_password:        self.p12_password.take().unwrap_or(default.p12_password),
-            expiry_days:         self.expiry_days.take().unwrap_or(default.expiry_days),
-            device_id:           self.device_id.take().or(default.device_id),
-            retry_delay_seconds: self.retry_delay_seconds.take().unwrap_or(default.retry_delay_seconds),
+            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
+            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
+            expiry_days:  self.expiry_days.take().unwrap_or(default.expiry_days),
+            device_id:    self.device_id.take().or(default.device_id),
         }
     }
 }
@@ -576,38 +606,38 @@ impl Defaultify<RviConfig> for ParsedRviConfig {
 /// The [tls] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct TlsConfig {
-    pub server:            Url,
-    pub p12_path:          String,
-    pub p12_password:      String,
-    pub certificates_path: Option<String>,
+    pub server:       Url,
+    pub p12_path:     String,
+    pub p12_password: String,
+    pub ca_file:      String,
 }
 
 impl Default for TlsConfig {
     fn default() -> Self {
         TlsConfig {
-            server:            "http://127.0.0.1:8000".parse().unwrap(),
-            p12_path:          "/usr/local/etc/sota/device.p12".to_string(),
-            p12_password:      "".to_string(),
-            certificates_path: None,
+            server:       "http://127.0.0.1:8000".parse().unwrap(),
+            p12_path:     "/usr/local/etc/sota/device.p12".to_string(),
+            p12_password: "".to_string(),
+            ca_file:      "/usr/local/etc/sota/srv.crt".to_string(),
         }
     }
 }
 
 #[derive(RustcDecodable, Debug)]
 struct ParsedTlsConfig {
-    server:            Option<Url>,
-    p12_path:          Option<String>,
-    p12_password:      Option<String>,
-    certificates_path: Option<String>,
+    server:       Option<Url>,
+    p12_path:     Option<String>,
+    p12_password: Option<String>,
+    ca_file:      Option<String>,
 }
 
 impl Default for ParsedTlsConfig {
     fn default() -> Self {
         ParsedTlsConfig {
-            server:            None,
-            p12_path:          None,
-            p12_password:      None,
-            certificates_path: None,
+            server:       None,
+            p12_path:     None,
+            p12_password: None,
+            ca_file:      None,
         }
     }
 }
@@ -616,10 +646,10 @@ impl Defaultify<TlsConfig> for ParsedTlsConfig {
     fn defaultify(&mut self) -> TlsConfig {
         let default = TlsConfig::default();
         TlsConfig {
-            server:            self.server.take().unwrap_or(default.server),
-            p12_path:          self.p12_path.take().unwrap_or(default.p12_path),
-            p12_password:      self.p12_password.take().unwrap_or(default.p12_password),
-            certificates_path: self.certificates_path.take().or(default.certificates_path),
+            server:       self.server.take().unwrap_or(default.server),
+            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
+            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
+            ca_file:      self.ca_file.take().unwrap_or(default.ca_file),
         }
     }
 }
@@ -628,6 +658,8 @@ impl Defaultify<TlsConfig> for ParsedTlsConfig {
 /// The [uptane] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct UptaneConfig {
+    pub director_server:    Url,
+    pub repo_server:        Url,
     pub primary_ecu_serial: String,
     pub metadata_path:      String,
     pub private_key_path:   String,
@@ -637,6 +669,8 @@ pub struct UptaneConfig {
 impl Default for UptaneConfig {
     fn default() -> UptaneConfig {
         UptaneConfig {
+            director_server:    "http://localhost:8001".parse().unwrap(),
+            repo_server:        "http://localhost:8002".parse().unwrap(),
             primary_ecu_serial: "primary-serial".to_string(),
             metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
             private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
@@ -647,6 +681,8 @@ impl Default for UptaneConfig {
 
 #[derive(RustcDecodable)]
 struct ParsedUptaneConfig {
+    director_server:    Option<Url>,
+    repo_server:        Option<Url>,
     primary_ecu_serial: Option<String>,
     metadata_path:      Option<String>,
     private_key_path:   Option<String>,
@@ -656,6 +692,8 @@ struct ParsedUptaneConfig {
 impl Default for ParsedUptaneConfig {
     fn default() -> ParsedUptaneConfig {
         ParsedUptaneConfig {
+            director_server:    None,
+            repo_server:        None,
             primary_ecu_serial: None,
             metadata_path:      None,
             private_key_path:   None,
@@ -668,6 +706,8 @@ impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
     fn defaultify(&mut self) -> UptaneConfig {
         let default = UptaneConfig::default();
         UptaneConfig {
+            director_server:    self.director_server.take().unwrap_or(default.director_server),
+            repo_server:        self.repo_server.take().unwrap_or(default.repo_server),
             primary_ecu_serial: self.primary_ecu_serial.take().unwrap_or(default.primary_ecu_serial),
             metadata_path:      self.metadata_path.take().unwrap_or(default.metadata_path),
             private_key_path:   self.private_key_path.take().unwrap_or(default.private_key_path),
@@ -744,7 +784,6 @@ mod tests {
         p12_path = "/usr/local/etc/sota/registration.p12"
         p12_password = ""
         expiry_days = 11
-        retry_delay_seconds = 17
         "#;
 
     const RVI_CONFIG: &'static str =
@@ -760,11 +799,14 @@ mod tests {
         server = "http://127.0.0.1:9001"
         p12_path = "/usr/local/etc/sota/device.p12"
         p12_password = ""
+        ca_file = "/usr/local/etc/sota/srv.crt"
         "#;
 
     const UPTANE_CONFIG: &'static str =
         r#"
         [uptane]
+        director_server = "http://localhost:8001"
+        repo_server = "http://localhost:8002"
         primary_ecu_serial = "primary-serial"
         metadata_path = "/usr/local/etc/sota/metadata"
         private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
