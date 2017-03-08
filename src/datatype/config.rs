@@ -216,7 +216,7 @@ pub struct CoreConfig {
     pub server:      Url,
     pub polling:     bool,
     pub polling_sec: u64,
-    pub ca_file:     Option<String>
+    pub ca_file:     Option<String>,
 }
 
 impl Default for CoreConfig {

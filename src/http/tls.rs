@@ -101,10 +101,6 @@ impl TlsConnector {
                 .map_err(|err| panic!("couldn't set private key: {}", err));
             let _ = context.check_private_key()
                 .map_err(|err| panic!("couldn't validate private key: {}", err));
-            debug!("parsed.chain.len(): {}", parsed.chain.len());
-            for cert in parsed.chain {
-                context.add_extra_chain_cert(cert).expect("Adding extra cert failed");
-            }
         });
 
         TlsConnector(builder.build())

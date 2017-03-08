@@ -221,7 +221,7 @@ impl Verifier {
                     let ref pem = match pem::parse(&key.keyval.public) {
                         Ok(pem)  => pem.contents,
                         Err(err) => {
-                            trace!("couldn't parse public signature as pem for {}: {:?}", public, err);
+                            trace!("couldn't parse public key as pem for {}: {:?}", public, err);
                             continue;
                         }
                     };

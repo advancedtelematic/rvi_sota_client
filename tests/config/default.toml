@@ -40,7 +40,7 @@ socket_events_path = "/tmp/sota-events.socket"
 websocket_server = "127.0.0.1:3012"
 
 #[provision]
-#p12_path = "/usr/local/etc/sota_registration.p12"
+#p12_path = "/usr/local/etc/sota/credentials.p12"
 #p12_password = ""
 #expiry_days = 365
 ##device_id = None
@@ -52,7 +52,7 @@ storage_dir = "/usr/local/etc/sota/rvi"
 
 #[tls]
 #server = "http://127.0.0.1:9001"
-#p12_path = "/usr/local/etc/sota_device.p12"
+#p12_path = "/usr/local/etc/sota/device.p12"
 #p12_password = ""
 #ca_file = "/usr/local/etc/sota/srv.crt"
 

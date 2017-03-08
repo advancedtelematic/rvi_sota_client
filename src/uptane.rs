@@ -1,5 +1,5 @@
 use serde_json as json;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -39,33 +39,21 @@ pub struct Uptane {
 
 impl Uptane {
     pub fn new(config: &Config) -> Result<Self, Error> {
-        let mut verifier = Verifier::new();
         let der_key = read_file(&config.uptane.private_key_path)
             .map_err(|err| Error::Client(format!("couldn't read uptane.private_key_path: {}", err)))?;
-
-        let root_path  = format!("{}/director/root.json", &config.uptane.metadata_path);
-        let fetch_root = if Path::new(&root_path).exists() {
-            let buf  = read_file(&root_path)?;
-            let meta = json::from_slice::<TufSigned>(&buf)?;
-            let root = json::from_value::<Root>(meta.signed.clone())?;
-            Self::add_root_keys(&mut verifier, &root);
-            false
-        } else {
-            true
-        };
 
         Ok(Uptane {
             uptane_cfg: config.uptane.clone(),
             deviceid:   config.device.uuid.clone(),
             version:    Version::default(),
-            verifier:   verifier,
+            verifier:   Verifier::new(),
             serial:     config.uptane.primary_ecu_serial.clone(),
             privkey:  PrivateKey {
                 // FIXME: keyid
                 keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
                 der_key: der_key
             },
-            fetch_root:    fetch_root,
+            fetch_root:    true,
             send_manifest: true,
         })
     }
@@ -77,16 +65,7 @@ impl Uptane {
         }
 
         if self.fetch_root {
-            let buf  = self.get_endpoint(client, true, "root.json")?;
-            let meta = json::from_slice::<TufSigned>(&buf)?;
-            let root = json::from_value::<Root>(meta.signed.clone())?;
-            Self::add_root_keys(&mut self.verifier, &root);
-
-            let path = format!("{}/director/root.json", &self.uptane_cfg.metadata_path);
-            let mut file = File::create(&path)
-                .map_err(|err| Error::Client(format!("couldn't open {} for writing: {}", path, err)))?;
-            let _ = file.write(&*buf)
-                .map_err(|err| Error::Client(format!("couldn't write to {}: {}", path, err)))?;
+            self.get_root(client, true)?;
             self.fetch_root = false;
         }
 
@@ -138,13 +117,38 @@ impl Uptane {
         self.put_endpoint(client, true, "manifest", json::to_vec(&signed)?)
     }
 
-    /// Add the root.json metadata to the verifier and return a new version indicator.
+    /// Verify the local root.json metadata or download it if it doesn't exist.
     pub fn get_root(&mut self, client: &Client, director: bool) -> Result<bool, Error> {
         debug!("get_root");
-        let buf  = self.get_endpoint(client, director, "root.json")?;
+        let path = format!("{}/director/root.json", &self.uptane_cfg.metadata_path);
+        let buf  = if Path::new(&path).exists() {
+            read_file(&path)?
+        } else {
+            self.get_endpoint(client, director, "root.json")?
+        };
+
+        if self.verify_root(&buf)? {
+            write_file(&path, &buf)?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
+    }
+
+    /// Add the root.json metadata to the verifier, returning a new version indicator.
+    pub fn verify_root(&mut self, buf: &[u8]) -> Result<bool, Error> {
+        debug!("verify_root");
         let meta = json::from_slice::<TufSigned>(&buf)?;
         let root = json::from_value::<Root>(meta.signed.clone())?;
-        Self::add_root_keys(&mut self.verifier, &root);
+
+        for (id, key) in &root.keys {
+            trace!("adding key: {:?}", key);
+            self.verifier.add_key(id.clone(), key.clone());
+        }
+        for (role, data) in &root.roles {
+            trace!("adding roledata: {:?}", data);
+            self.verifier.add_role(role.clone(), data.clone());
+        }
 
         debug!("checking root keys");
         if self.verifier.verify(&Role::Root, &meta)? > self.version.root {
@@ -156,7 +160,8 @@ impl Uptane {
         }
     }
 
-    /// Get the targets.json metadata and a new version indicator.
+    /// Download and verify the targets.json metadata, returning the targets
+    /// with a new version indicator.
     pub fn get_targets(&mut self, client: &Client, director: bool) -> Result<(Targets, bool), Error> {
         debug!("get_targets");
         let buf  = self.get_endpoint(client, director, "targets.json")?;
@@ -173,7 +178,8 @@ impl Uptane {
         }
     }
 
-    /// Get the snapshot.json metadata and a new version indicator.
+    /// Download and verify the snapshot.json metadata, returning the snapshots
+    /// with a new version indicator.
     pub fn get_snapshot(&mut self, client: &Client, director: bool) -> Result<(Snapshot, bool), Error> {
         debug!("get_snapshot");
         let buf  = self.get_endpoint(client, director, "snapshot.json")?;
@@ -190,7 +196,8 @@ impl Uptane {
         }
     }
 
-    /// Get the timestamp.json metadata and a new version indicator.
+    /// Download and verify the timestamp.json metadata, returning the timestamp
+    /// with a new version indicator.
     pub fn get_timestamp(&mut self, client: &Client, director: bool) -> Result<(Timestamp, bool), Error> {
         debug!("get_timestamp");
         let buf  = self.get_endpoint(client, director, "timestamp.json")?;
@@ -206,18 +213,6 @@ impl Uptane {
             Ok((time, false))
         }
     }
-
-    fn add_root_keys(verifier: &mut Verifier, root: &Root) {
-        debug!("add_root_keys");
-        for (id, key) in &root.keys {
-            trace!("adding key: {:?}", key);
-            verifier.add_key(id.clone(), key.clone());
-        }
-        for (role, data) in &root.roles {
-            trace!("adding roledata: {:?}", data);
-            verifier.add_role(role.clone(), data.clone());
-        }
-    }
 }
 
 fn read_file(path: &str) -> Result<Vec<u8>, Error> {
@@ -227,6 +222,17 @@ fn read_file(path: &str) -> Result<Vec<u8>, Error> {
     file.read_to_end(&mut buf)
         .map_err(|err| Error::Client(format!("couldn't read {}: {}", path, err)))?;
     Ok(buf)
+}
+
+fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
+    let mut file = OpenOptions::new()
+        .create(true)
+        .write(true)
+        .open(path)
+        .map_err(|err| Error::Client(format!("couldn't open {} for writing: {}", path, err)))?;
+    let _ = file.write(&*buf)
+        .map_err(|err| Error::Client(format!("couldn't write to {}: {}", path, err)))?;
+    Ok(())
 }
 
 
@@ -345,10 +351,8 @@ mod tests {
         }
     }
 
-    extern crate env_logger;
     #[test]
     fn test_get_timestamp() {
-        env_logger::init().expect("boo");
         let mut uptane = new_uptane("test-get-timestamp".into());
         let client = client_from_paths(&[
             "tests/uptane/repo_1/root.json",
