@@ -11,7 +11,7 @@ use authenticate::oauth2;
 use package_manager::PackageManager;
 use rvi::Services;
 use sota::Sota;
-use uptane::Uptane;
+use uptane::{Service, Uptane};
 
 
 /// An `Interpreter` loops over any incoming values, on receipt of which it
@@ -213,12 +213,10 @@ impl CommandInterpreter {
                     }
 
                     CommandMode::Uptane(ref mut uptane) => {
-                        let client = self.http.as_ref();
-                        uptane.initialize(client)?;
-
-                        let (_, ts_new) = uptane.get_timestamp(client, true)?;
+                        uptane.initialize(&*self.http)?;
+                        let (_, ts_new) = uptane.get_timestamp(&*self.http, Service::Director)?;
                         if ts_new {
-                            let (targets, _) = uptane.get_targets(client, true)?;
+                            let (targets, _) = uptane.get_targets(&*self.http, Service::Director)?;
                             Event::UptaneTargetsUpdated(targets.targets)
                         } else {
                             Event::UptaneTimestampUpdated
