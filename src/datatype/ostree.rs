@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-use datatype::{AccessToken, EcuVersion, Error, Package, TufCustom, TufImage, TufMeta,
-               UpdateResultCode as Code};
-use package_manager::package_manager::{InstallOutcome, parse_package};
+use datatype::{EcuVersion, Error, Package, TufCustom, TufImage, TufMeta, UpdateResultCode as Code};
+use package_manager::{Credentials, InstallOutcome, parse_package};
 
 
 /// Details of an OSTree branch.
@@ -81,17 +80,19 @@ impl OstreePackage {
     }
 
     /// Shell out to the ostree command to install this package.
-    pub fn install(&self, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install(&self, creds: Credentials) -> Result<InstallOutcome, InstallOutcome> {
         debug!("installing ostree package: {:?}", self);
 
-        let mut command = Command::new("sota_ostree.sh");
-        command.env("COMMIT", self.commit.clone())
-            .env("REF_NAME", self.refName.clone())
-            .env("DESCRIPTION", self.description.clone())
-            .env("PULL_URI", self.pullUri.clone());
-        token.map(|t| command.env("AUTHPLUS_ACCESS_TOKEN", t.access_token.clone()));
+        let mut cmd = Command::new("sota_ostree.sh");
+        cmd.env("COMMIT", self.commit.clone());
+        cmd.env("REF_NAME", self.refName.clone());
+        cmd.env("DESCRIPTION", self.description.clone());
+        cmd.env("PULL_URI", self.pullUri.clone());
+        creds.access_token.map(|t| cmd.env("AUTHPLUS_ACCESS_TOKEN", t.clone()));
+        creds.ca_file.map(|f| cmd.env("TLS_CA_CERT", f.clone()));
+        creds.cert_file.map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
 
-        let output = command.output().map_err(|err| (Code::GENERAL_ERROR, format!("ostree install: {}", err)))?;
+        let output = cmd.output().map_err(|err| (Code::GENERAL_ERROR, format!("ostree install: {}", err)))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 

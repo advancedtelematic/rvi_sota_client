@@ -8,7 +8,7 @@ use std::io::prelude::*;
 use time;
 
 use datatype::{Error, Package, UpdateResultCode};
-use package_manager::package_manager::{InstallOutcome, PackageManager};
+use package_manager::{InstallOutcome, PackageManager};
 
 
 impl PackageManager {

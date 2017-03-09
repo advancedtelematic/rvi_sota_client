@@ -2,15 +2,15 @@ use rustc_serialize::json;
 use std::fs::File;
 use std::io::prelude::*;
 
-use datatype::{AccessToken, Error, Ostree, OstreePackage, Package, UpdateResultCode};
-use package_manager::package_manager::InstallOutcome;
+use datatype::{Error, Ostree, OstreePackage, Package, UpdateResultCode};
+use package_manager::{Credentials, InstallOutcome};
 
 
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
     Ostree::get_installed()
 }
 
-pub fn install_package(path: &str, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
+pub fn install_package(path: &str, creds: Credentials) -> Result<InstallOutcome, InstallOutcome> {
     let mut file = File::open(path)
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}", err)))?;
     let mut content = String::new();
@@ -18,5 +18,5 @@ pub fn install_package(path: &str, token: Option<&AccessToken>) -> Result<Instal
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("reading file: {:?}", err)))?;
     let pkg = json::decode::<OstreePackage>(&content)
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("parsing file {:?}", err)))?;
-    pkg.install(token)
+    pkg.install(creds)
 }

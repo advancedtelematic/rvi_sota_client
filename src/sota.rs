@@ -3,9 +3,10 @@ use std::{fs, io};
 use std::fs::File;
 use std::path::PathBuf;
 
-use datatype::{AccessToken, Config, DownloadComplete, Error, Package, UpdateReport,
-               UpdateRequest, UpdateRequestId, Url};
+use datatype::{Config, DownloadComplete, Error, Package, UpdateReport, UpdateRequest,
+               UpdateRequestId, Url};
 use http::{Client, Response};
+use package_manager::Credentials;
 
 
 /// Encapsulate the client configuration and HTTP client used for
@@ -72,15 +73,16 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Install an update using the package manager.
-    pub fn install_update<'t>(&mut self, token: Option<&AccessToken>, id: UpdateRequestId) -> Result<UpdateReport, UpdateReport> {
-        let ref pacman = self.config.device.package_manager;
-        let path       = self.package_path(id.clone()).expect("install_update expects a valid path");
-        pacman.install_package(&path, token).and_then(|(code, output)| {
-            let _ = fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
-            Ok(UpdateReport::single(id.clone(), code, output))
-        }).or_else(|(code, output)| {
-            Err(UpdateReport::single(id.clone(), code, output))
-        })
+    pub fn install_update<'t>(&mut self, id: UpdateRequestId, creds: Credentials) -> Result<UpdateReport, UpdateReport> {
+        let path = self.package_path(id.clone()).expect("install_update expects a valid path");
+        match self.config.device.package_manager.install_package(&path, creds) {
+            Ok((code, output)) => {
+                let _ = fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
+                Ok(UpdateReport::single(id.clone(), code, output))
+            }
+
+            Err((code, output)) => Err(UpdateReport::single(id.clone(), code, output))
+        }
     }
 
     /// Send a list of the currently installed packages to the Core server.

@@ -86,17 +86,17 @@ impl Config {
 
     /// Return the certificates used for TLS connections from the current Config.
     pub fn tls_data(&self) -> TlsData {
-        if let Some(ref tls) = self.tls {
-            TlsData {
-                ca_file:  Some(&tls.ca_file),
-                p12_path: Some(&tls.p12_path),
-                p12_pass: Some(&tls.p12_password)
-            }
-        } else {
-            TlsData {
-                ca_file:  self.core.ca_file.as_ref().map(Deref::deref),
-                p12_path: None,
-                p12_pass: None
+        match self.tls {
+            Some(ref tls) => TlsData {
+                ca_file:   Some(&tls.ca_file),
+                cert_file: Some(&tls.cert_file),
+                pkey_file: Some(&tls.pkey_file),
+            },
+
+            None => TlsData {
+                ca_file:   self.core.ca_file.as_ref().map(Deref::deref),
+                cert_file: None,
+                pkey_file: None,
             }
         }
     }
@@ -606,38 +606,38 @@ impl Defaultify<RviConfig> for ParsedRviConfig {
 /// The [tls] configuration section.
 #[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
 pub struct TlsConfig {
-    pub server:       Url,
-    pub p12_path:     String,
-    pub p12_password: String,
-    pub ca_file:      String,
+    pub server:    Url,
+    pub ca_file:   String,
+    pub cert_file: String,
+    pub pkey_file: String,
 }
 
 impl Default for TlsConfig {
     fn default() -> Self {
         TlsConfig {
-            server:       "http://127.0.0.1:8000".parse().unwrap(),
-            p12_path:     "/usr/local/etc/sota/device.p12".to_string(),
-            p12_password: "".to_string(),
-            ca_file:      "/usr/local/etc/sota/srv.crt".to_string(),
+            server:    "http://127.0.0.1:8000".parse().unwrap(),
+            ca_file:   "/usr/local/etc/sota/srv.crt".to_string(),
+            cert_file: "/usr/local/etc/sota/srv.crt".to_string(),
+            pkey_file: "/usr/local/etc/sota/device.p12.pem".to_string(),
         }
     }
 }
 
 #[derive(RustcDecodable, Debug)]
 struct ParsedTlsConfig {
-    server:       Option<Url>,
-    p12_path:     Option<String>,
-    p12_password: Option<String>,
-    ca_file:      Option<String>,
+    server:    Option<Url>,
+    ca_file:   Option<String>,
+    cert_file: Option<String>,
+    pkey_file: Option<String>,
 }
 
 impl Default for ParsedTlsConfig {
     fn default() -> Self {
         ParsedTlsConfig {
-            server:       None,
-            p12_path:     None,
-            p12_password: None,
-            ca_file:      None,
+            server:    None,
+            ca_file:   None,
+            cert_file: None,
+            pkey_file: None,
         }
     }
 }
@@ -646,10 +646,10 @@ impl Defaultify<TlsConfig> for ParsedTlsConfig {
     fn defaultify(&mut self) -> TlsConfig {
         let default = TlsConfig::default();
         TlsConfig {
-            server:       self.server.take().unwrap_or(default.server),
-            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
-            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
-            ca_file:      self.ca_file.take().unwrap_or(default.ca_file),
+            server:    self.server.take().unwrap_or(default.server),
+            ca_file:   self.ca_file.take().unwrap_or(default.ca_file),
+            cert_file: self.cert_file.take().unwrap_or(default.cert_file),
+            pkey_file: self.pkey_file.take().unwrap_or(default.pkey_file),
         }
     }
 }

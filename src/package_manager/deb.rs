@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use datatype::{Error, Package, UpdateResultCode};
-use package_manager::package_manager::{InstallOutcome, parse_package};
+use package_manager::{InstallOutcome, parse_package};
 
 
 /// Returns a list of installed DEB packages with
