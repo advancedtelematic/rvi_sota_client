@@ -9,6 +9,7 @@ Requires=network-online.target
 Type=oneshot
 WorkingDirectory=/var/sota
 EnvironmentFile=/var/sota/sota_provisioning_url.env
+Environment=SOTA_CERT_DIR=/var/sota
 ExecStart=/usr/bin/sota_prov.sh sota_provisioning_credentials.p12
 RemainAfterExit=true
 ExecStop=/bin/rm device.p12
