@@ -74,12 +74,12 @@ repo_metadata
 cat > sota.toml <<EOF
 [device]
 package_manager = "off"
-certificates_path = "$SOTA_CERT_DIR/$srvcrt"
 
 [tls]
 server = "$SOTA_GATEWAY_URI"
 p12_path = "$SOTA_CERT_DIR/$devpkcs"
 p12_password = ""
+ca_file = "$SOTA_CERT_DIR/$srvcrt"
 
 [uptane]
 primary_ecu_serial = "$SOTA_DEVICE_ID"
