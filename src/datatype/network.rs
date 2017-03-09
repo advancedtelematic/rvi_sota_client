@@ -53,9 +53,12 @@ pub struct Url(pub url::Url);
 impl Url {
     /// Append the string suffix to this URL.
     pub fn join(&self, suffix: &str) -> Url {
-        Url(self.0.join(suffix).unwrap_or_else(|err| {
-            panic!("couldn't join url {} with suffix {}: {}", self, suffix, err);
-        }))
+        let mut url = self.0.clone();
+        url.path_segments_mut()
+            .expect("couldn't get url segments")
+            .pop_if_empty() // drop trailing slash before extending
+            .extend(&[suffix]);
+        Url(url)
     }
 }
 
@@ -127,5 +130,21 @@ impl Display for Method {
             Method::Put  => "PUT".to_string(),
         };
         write!(f, "{}", method)
+    }
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+
+    #[test]
+    fn test_join_url() {
+        let slash:    Url = "http://localhost:1234/foo/".parse().unwrap();
+        let no_slash: Url = "http://localhost:1234/foo".parse().unwrap();
+        let expect:   Url = "http://localhost:1234/foo/bar".parse().unwrap();
+        assert_eq!(slash.join("bar"), expect);
+        assert_eq!(no_slash.join("bar"), expect);
     }
 }
