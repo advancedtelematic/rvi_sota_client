@@ -9,6 +9,12 @@ use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
 
 
+/// Uptane service to communicate with.
+pub enum Service {
+    Director,
+    Repo,
+}
+
 /// Last known version of each metadata file.
 pub struct Version {
     root:      u64,
@@ -65,27 +71,26 @@ impl Uptane {
         }
 
         if self.fetch_root {
-            self.get_root(client, true)?;
+            self.get_root(client, Service::Director, true)?;
             self.fetch_root = false;
         }
 
         Ok(())
     }
 
-    /// If using director it returns: `<director-server>/<endpoint>`,
-    /// otherwise it returns: `<repo-server>/<uuid>/<endpoint>`.
-    fn endpoint(&self, director: bool, endpoint: &str) -> Url {
-        if director {
-            self.uptane_cfg.director_server.join(&format!("/{}", endpoint))
-        } else {
-            self.uptane_cfg.repo_server.join(&format!("/{}/{}", self.deviceid, endpoint))
+    /// Returns a URL based on the uptane service.
+    fn endpoint(&self, service: Service, endpoint: &str) -> Url {
+        let ref cfg = self.uptane_cfg;
+        match service {
+            Service::Director => cfg.director_server.join(&format!("/{}", endpoint)),
+            Service::Repo     => cfg.repo_server.join(&format!("/{}/{}", self.deviceid, endpoint))
         }
     }
 
     /// GET the bytes response from the given endpoint.
-    fn get_endpoint(&mut self, client: &Client, director: bool, endpoint: &str) -> Result<Vec<u8>, Error> {
-        let rx = client.get(self.endpoint(director, endpoint), None);
-        match rx.recv().ok_or(Error::Client("couldn't get bytes from endpoint".to_string()))? {
+    fn get(&mut self, client: &Client, service: Service, endpoint: &str) -> Result<Vec<u8>, Error> {
+        let rx = client.get(self.endpoint(service, endpoint), None);
+        match rx.recv().expect("couldn't GET from uptane") {
             Response::Success(data) => Ok(data.body),
             Response::Failed(data)  => Err(Error::from(data)),
             Response::Error(err)    => Err(err)
@@ -93,9 +98,9 @@ impl Uptane {
     }
 
     /// PUT bytes to endpoint.
-    fn put_endpoint(&mut self, client: &Client, director: bool, endpoint: &str, bytes: Vec<u8>) -> Result<(), Error> {
-        let rx = client.put(self.endpoint(director, endpoint), Some(bytes));
-        match rx.recv().ok_or(Error::Client("couldn't put bytes to endpoint".to_string()))? {
+    fn put(&mut self, client: &Client, service: Service, endpoint: &str, bytes: Vec<u8>) -> Result<(), Error> {
+        let rx = client.put(self.endpoint(service, endpoint), Some(bytes));
+        match rx.recv().expect("couldn't PUT bytes to uptane") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(Error::from(data)),
             Response::Error(err)   => Err(err)
@@ -105,33 +110,34 @@ impl Uptane {
     /// Put a new manifest file to the Director server.
     pub fn put_manifest(&mut self, client: &Client) -> Result<(), Error> {
         debug!("put_manifest");
-        let branch   = Ostree::get_current_branch()?;
-        let ecu_ver  = branch.ecu_version(self.serial.clone());
-        let ecu_sign = TufSigned::sign(json::to_value(ecu_ver)?, &self.privkey, SigType::RsaSsaPss)?;
-
+        let branch  = Ostree::get_current_branch()?;
+        let version = branch.ecu_version(self.serial.clone());
+        let signed  = TufSigned::sign(json::to_value(version)?, &self.privkey, SigType::RsaSsaPss)?;
         let manifests = EcuManifests {
             primary_ecu_serial:   self.serial.clone(),
-            ecu_version_manifest: vec![ecu_sign],
+            ecu_version_manifest: vec![signed],
         };
         let signed = TufSigned::sign(json::to_value(manifests)?, &self.privkey, SigType::RsaSsaPss)?;
-        self.put_endpoint(client, true, "manifest", json::to_vec(&signed)?)
+        self.put(client, Service::Director, "manifest", json::to_vec(&signed)?)
     }
 
     /// Verify the local root.json metadata or download it if it doesn't exist.
-    pub fn get_root(&mut self, client: &Client, director: bool) -> Result<bool, Error> {
+    pub fn get_root(&mut self, client: &Client, service: Service, persist: bool) -> Result<bool, Error> {
         debug!("get_root");
         let path = format!("{}/director/root.json", &self.uptane_cfg.metadata_path);
-        let buf  = if Path::new(&path).exists() {
+        let buf = if Path::new(&path).exists() {
             read_file(&path)?
         } else {
-            self.get_endpoint(client, director, "root.json")?
+            self.get(client, service, "root.json")?
         };
 
-        if self.verify_root(&buf)? {
-            write_file(&path, &buf)?;
-            Ok(true)
-        } else {
-            Ok(false)
+        match self.verify_root(&buf)? {
+            true if persist => {
+                write_file(&path, &buf)?;
+                Ok(true)
+            },
+            true  => Ok(true),
+            false => Ok(false)
         }
     }
 
@@ -162,9 +168,9 @@ impl Uptane {
 
     /// Download and verify the targets.json metadata, returning the targets
     /// with a new version indicator.
-    pub fn get_targets(&mut self, client: &Client, director: bool) -> Result<(Targets, bool), Error> {
+    pub fn get_targets(&mut self, client: &Client, service: Service) -> Result<(Targets, bool), Error> {
         debug!("get_targets");
-        let buf  = self.get_endpoint(client, director, "targets.json")?;
+        let buf  = self.get(client, service, "targets.json")?;
         let meta = json::from_slice::<TufSigned>(&buf)?;
         let targ = json::from_value::<Targets>(meta.signed.clone())?;
 
@@ -180,9 +186,9 @@ impl Uptane {
 
     /// Download and verify the snapshot.json metadata, returning the snapshots
     /// with a new version indicator.
-    pub fn get_snapshot(&mut self, client: &Client, director: bool) -> Result<(Snapshot, bool), Error> {
+    pub fn get_snapshot(&mut self, client: &Client, service: Service) -> Result<(Snapshot, bool), Error> {
         debug!("get_snapshot");
-        let buf  = self.get_endpoint(client, director, "snapshot.json")?;
+        let buf  = self.get(client, service, "snapshot.json")?;
         let meta = json::from_slice::<TufSigned>(&buf)?;
         let snap = json::from_value::<Snapshot>(meta.signed.clone())?;
 
@@ -198,9 +204,9 @@ impl Uptane {
 
     /// Download and verify the timestamp.json metadata, returning the timestamp
     /// with a new version indicator.
-    pub fn get_timestamp(&mut self, client: &Client, director: bool) -> Result<(Timestamp, bool), Error> {
+    pub fn get_timestamp(&mut self, client: &Client, service: Service) -> Result<(Timestamp, bool), Error> {
         debug!("get_timestamp");
-        let buf  = self.get_endpoint(client, director, "timestamp.json")?;
+        let buf  = self.get(client, service, "timestamp.json")?;
         let meta = json::from_slice::<TufSigned>(&buf)?;
         let time = json::from_value::<Timestamp>(meta.signed.clone())?;
 
@@ -215,6 +221,7 @@ impl Uptane {
     }
 }
 
+
 fn read_file(path: &str) -> Result<Vec<u8>, Error> {
     let mut file = File::open(path)
         .map_err(|err| Error::Client(format!("couldn't open {}: {}", path, err)))?;
@@ -228,6 +235,7 @@ fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(true)
         .open(path)
         .map_err(|err| Error::Client(format!("couldn't open {} for writing: {}", path, err)))?;
     let _ = file.write(&*buf)
@@ -253,9 +261,9 @@ mod tests {
             director_server:    "http://localhost:8001".parse().unwrap(),
             repo_server:        "http://localhost:8002".parse().unwrap(),
             primary_ecu_serial: "test-primary-serial".into(),
-            metadata_path:      "/tmp/sota-root.json".into(),
-            private_key_path:   "/tmp/sota-ecuprimary.pem".into(),
-            public_key_path:    "/tmp/sota-ecuprimary.pub".into(),
+            metadata_path:      "[unused]".into(),
+            private_key_path:   "[unused]".into(),
+            public_key_path:    "[unused]".into(),
         };
 
         Uptane {
@@ -277,7 +285,7 @@ mod tests {
     fn client_from_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
         let mut replies = Vec::new();
         for path in paths {
-            replies.push(read_file(path).unwrap_or_else(|err| panic!("{}", err)));
+            replies.push(read_file(path).expect("couldn't read file"));
         }
         TestClient::from(replies)
     }
@@ -290,9 +298,10 @@ mod tests {
         out
     }
 
+
     #[test]
     fn test_read_manifest() {
-        let bytes = read_file("tests/uptane/ats/manifest.json").unwrap_or_else(|err| panic!("{}", err));
+        let bytes = read_file("tests/uptane/manifest.json").unwrap_or_else(|err| panic!("{}", err));
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "{ecu serial}");
@@ -306,68 +315,53 @@ mod tests {
     fn test_get_targets_director() {
         let mut uptane = new_uptane("test-get-targets-director".into());
         let client = client_from_paths(&[
-            "tests/uptane/repo_1/root.json",
-            "tests/uptane/repo_1/targets.json",
+            "tests/uptane/root.json",
+            "tests/uptane/targets.json",
         ]);
 
-        assert!(uptane.get_root(&client, true).expect("couldn't get_root"));
-        match uptane.get_targets(&client, true) {
-            Ok((ts, ts_new)) => {
-                assert_eq!(ts_new, true);
-                {
-                    let meta = ts.targets.get("/file.img").expect("no /file.img metadata");
-                    assert_eq!(meta.length, 1337);
-                    let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
-                    assert_eq!(hash, "dd250ea90b872a4a9f439027ac49d853c753426f71f61ae44c2f360a16179fb9");
-                }
-                let custom = extract_custom(ts.targets);
-                let image  = custom.get("/file.img").expect("couldn't get /file.img custom");
-                assert_eq!(image.ecuIdentifier, "some-ecu-id");
-            }
-
-            Err(err) => panic!("couldn't get_targets_director: {}", err)
+        assert!(uptane.get_root(&client, Service::Director, false).expect("couldn't get_root"));
+        let (ts, ts_new) = uptane.get_targets(&client, Service::Director).expect("couldn't get_targets_director");
+        assert_eq!(ts_new, true);
+        {
+            let meta = ts.targets.get("/file.img").expect("no /file.img metadata");
+            assert_eq!(meta.length, 1337);
+            let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
+            assert_eq!(hash, "dd250ea90b872a4a9f439027ac49d853c753426f71f61ae44c2f360a16179fb9");
         }
+        let custom = extract_custom(ts.targets);
+        let image  = custom.get("/file.img").expect("couldn't get /file.img custom");
+        assert_eq!(image.ecuIdentifier, "some-ecu-id");
     }
 
     #[test]
     fn test_get_snapshot() {
         let mut uptane = new_uptane("test-get-snapshot".into());
         let client = client_from_paths(&[
-            "tests/uptane/repo_1/root.json",
-            "tests/uptane/repo_1/snapshot.json",
+            "tests/uptane/root.json",
+            "tests/uptane/snapshot.json",
         ]);
 
-        assert!(uptane.get_root(&client, true).expect("couldn't get_root"));
-        match uptane.get_snapshot(&client, true) {
-            Ok((ss, ss_new)) => {
-                assert_eq!(ss_new, true);
-                let meta = ss.meta.get("targets.json").expect("no targets.json metadata");
-                assert_eq!(meta.length, 653);
-                let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
-                assert_eq!(hash, "086b26f2ea32d51543533b2a150de619d08f45a151c1f59c07eaa8a18a4a9548");
-            }
-
-            Err(err) => panic!("couldn't get_snapshot: {}", err)
-        }
+        assert!(uptane.get_root(&client, Service::Director, false).expect("couldn't get_root"));
+        let (ss, ss_new) = uptane.get_snapshot(&client, Service::Director).expect("couldn't get_snapshot");
+        assert_eq!(ss_new, true);
+        let meta = ss.meta.get("targets.json").expect("no targets.json metadata");
+        assert_eq!(meta.length, 741);
+        let hash = meta.hashes.get("sha256").expect("couldn't get sha256 hash");
+        assert_eq!(hash, "b10b36997574e6898dda4cfeb61c5f286d84dfa4be807950f14996cd476e6305");
     }
 
     #[test]
     fn test_get_timestamp() {
         let mut uptane = new_uptane("test-get-timestamp".into());
         let client = client_from_paths(&[
-            "tests/uptane/repo_1/root.json",
-            "tests/uptane/repo_1/timestamp.json",
+            "tests/uptane/root.json",
+            "tests/uptane/timestamp.json",
         ]);
 
-        assert!(uptane.get_root(&client, true).expect("get_root failed"));
-        match uptane.get_timestamp(&client, true) {
-            Ok((ts, ts_new)) => {
-                assert_eq!(ts_new, true);
-                let meta = ts.meta.get("snapshot.json").expect("no snapshot.json metadata");
-                assert_eq!(meta.length, 696);
-            }
-
-            Err(err) => panic!("couldn't get_timestamp: {}", err)
-        }
+        assert!(uptane.get_root(&client, Service::Director, false).expect("get_root failed"));
+        let (ts, ts_new) = uptane.get_timestamp(&client, Service::Director).expect("couldn't get_timestamp");
+        assert_eq!(ts_new, true);
+        let meta = ts.meta.get("snapshot.json").expect("no snapshot.json metadata");
+        assert_eq!(meta.length, 784);
     }
 }
