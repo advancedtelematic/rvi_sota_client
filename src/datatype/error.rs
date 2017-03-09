@@ -1,7 +1,6 @@
 use chrono::ParseError as ChronoParseError;
 use hyper::error::Error as HyperError;
 use openssl::error::ErrorStack as OpensslErrors;
-use ring::error::Unspecified;
 use rustc_serialize::json::{EncoderError as JsonEncoderError,
                             DecoderError as JsonDecoderError,
                             ParserError as JsonParserError};
@@ -38,11 +37,10 @@ pub enum Error {
     JsonParser(JsonParserError),
     Openssl(OpensslErrors),
     OstreeCommand(String),
-    Poison(String),
     Package(String),
     Parse(String),
+    Poison(String),
     Recv(RecvError),
-    RingCrypto,
     SendEvent(SendError<Event>),
     SendInterpret(SendError<Interpret>),
     SerdeJson(SerdeJsonError),
@@ -51,31 +49,21 @@ pub enum Error {
     TomlParser(Vec<TomlParserError>),
     TomlDecode(TomlDecodeError),
     UptaneExpired,
-    UptaneInvalidId,
-    UptaneInvalidKey,
     UptaneInvalidKeyType(String),
-    UptaneInvalidSignatureType(String),
-    UptaneInvalidMeta,
+    UptaneInvalidSigType(String),
     UptaneInvalidRole,
-    UptaneMissingMetadata(&'static str),
     UptaneMissingSignatures,
     UptaneRoleThreshold,
     UptaneUnknownRole,
     UptaneVerifySignatures,
-    UptaneVersion,
     UrlParse(UrlParseError),
+    Verify(String),
     Websocket(WebsocketError),
 }
 
 impl<E> From<PoisonError<E>> for Error {
     fn from(e: PoisonError<E>) -> Error {
         Error::Poison(format!("{}", e))
-    }
-}
-
-impl From<Unspecified> for Error {
-    fn from (_: Unspecified) -> Error {
-        Error::RingCrypto
     }
 }
 
@@ -140,7 +128,6 @@ impl Display for Error {
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),
             Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),
             Error::Recv(ref s)          => format!("Recv error: {}", s.clone()),
-            Error::RingCrypto           => format!("Error in the 'ring' crypto library"),
             Error::SendEvent(ref s)     => format!("Send error for Event: {}", s.clone()),
             Error::SendInterpret(ref s) => format!("Send error for Interpret: {}", s.clone()),
             Error::SerdeJson(ref e)     => format!("Serde JSON error: {}", e.clone()),
@@ -148,20 +135,16 @@ impl Display for Error {
             Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
             Error::TomlDecode(ref e)    => format!("Toml decode error: {}", e.clone()),
             Error::TomlParser(ref e)    => format!("Toml parser errors: {:?}", e.clone()),
-            Error::UptaneExpired                      => format!("Uptane: expired"),
-            Error::UptaneInvalidId                    => format!("Uptane: invalid id"),
-            Error::UptaneInvalidKey                   => format!("Uptane: invalid key"),
-            Error::UptaneInvalidKeyType(ref s)        => format!("Uptane: invalid key type: {}", s.clone()),
-            Error::UptaneInvalidSignatureType(ref s)  => format!("Uptane: invalid signature type: {}", s.clone()),
-            Error::UptaneInvalidMeta                  => format!("Uptane: invalid meta"),
-            Error::UptaneInvalidRole                  => format!("Uptane: invalid role"),
-            Error::UptaneMissingMetadata(ref e)       => format!("Uptane: missing metadata: {}", e.clone()),
-            Error::UptaneMissingSignatures            => format!("Uptane: missing signatures"),
-            Error::UptaneRoleThreshold                => format!("Uptane: role threshold not met"),
-            Error::UptaneUnknownRole                  => format!("Uptane: unknown role"),
-            Error::UptaneVerifySignatures             => format!("Uptane: invalid signature"),
-            Error::UptaneVersion                      => format!("Uptane: bad version"),
+            Error::UptaneExpired               => format!("Uptane: expired"),
+            Error::UptaneInvalidKeyType(ref s) => format!("Uptane: invalid key type: {}", s.clone()),
+            Error::UptaneInvalidSigType(ref s) => format!("Uptane: invalid signature type: {}", s.clone()),
+            Error::UptaneInvalidRole           => format!("Uptane: invalid role"),
+            Error::UptaneMissingSignatures     => format!("Uptane: missing signatures"),
+            Error::UptaneRoleThreshold         => format!("Uptane: role threshold not met"),
+            Error::UptaneUnknownRole           => format!("Uptane: unknown role"),
+            Error::UptaneVerifySignatures      => format!("Uptane: invalid signature"),
             Error::UrlParse(ref s)  => format!("Url parse error: {}", s.clone()),
+            Error::Verify(ref s)    => format!("Verification error: {}", s.clone()),
             Error::Websocket(ref e) => format!("Websocket Error: {:?}", e.clone()),
         };
         write!(f, "{}", inner)

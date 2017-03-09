@@ -81,15 +81,14 @@ impl OstreePackage {
     }
 
     /// Shell out to the ostree command to install this package.
-    pub fn install(self, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install(&self, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
         debug!("installing ostree package: {:?}", self);
 
         let mut command = Command::new("sota_ostree.sh");
-        command
-            .env("COMMIT",      self.commit)
-            .env("REF_NAME",    self.refName)
-            .env("DESCRIPTION", self.description)
-            .env("PULL_URI",    self.pullUri);
+        command.env("COMMIT", self.commit.clone())
+            .env("REF_NAME", self.refName.clone())
+            .env("DESCRIPTION", self.description.clone())
+            .env("PULL_URI", self.pullUri.clone());
         token.map(|t| command.env("AUTHPLUS_ACCESS_TOKEN", t.access_token.clone()));
 
         let output = command.output().map_err(|err| (Code::GENERAL_ERROR, format!("ostree install: {}", err)))?;
@@ -130,20 +129,12 @@ impl Ostree {
 
     /// Get the current OSTree branch.
     pub fn get_current_branch() -> Result<OstreeBranch, Error> {
-        /* FIXME
         for branch in Self::get_branches()? {
             if branch.current {
                 return Ok(branch);
             }
         }
         Err(Error::OstreeCommand("no current branch".to_string()))
-        */
-        Ok(OstreeBranch {
-            current: true,
-            refName: "/test".to_string(),
-            commit:  "08f43db61b4fcece9d35c36a825ea0aa221d6a8058777bb62f97d90d721f5e3f".to_string(),
-            description: "test only".to_string()
-        })
     }
 
     /// Run `ostree admin status` to get a list of branches.

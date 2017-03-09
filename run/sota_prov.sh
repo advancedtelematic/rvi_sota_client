@@ -42,8 +42,7 @@ function device_registration() {
 }
 
 function ecu_registration() {
-  #FIXME: temp use 1024 bit instead of 2048
-  openssl genpkey -algorithm RSA -out $ecukey.pem -pkeyopt rsa_keygen_bits:1024
+  openssl genpkey -algorithm RSA -out $ecukey.pem -pkeyopt rsa_keygen_bits:2048
   openssl rsa -pubout -in $ecukey.pem -out $ecukey.pub
   keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < $ecukey.pub)
 

@@ -1,11 +1,9 @@
 use chan::{Sender, Receiver};
-use serde_json as json;
 use std;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
-use datatype::{Auth, Command, Config, EcuManifests, Error, Event, Ostree, OstreePackage,
-               Package, PrivateKey, SignatureType, TufSigned, UpdateReport,
+use datatype::{Auth, Command, Config, Error, Event, OstreePackage, Package, UpdateReport,
                UpdateRequestStatus as Status, UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -97,7 +95,9 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::InstallComplete(report) | Event::InstallFailed(report) => {
-                ctx.send(Command::SendUpdateReport(report));
+                if self.pacman != PackageManager::Uptane {
+                    ctx.send(Command::SendUpdateReport(report));
+                }
             }
 
             Event::UpdateReportSent => {
@@ -146,7 +146,7 @@ impl Interpreter<Command, Interpret> for IntermediateInterpreter {
 pub enum CommandMode {
     Sota,
     Rvi(Box<Services>),
-    Uptane(Option<Uptane>)
+    Uptane(Uptane)
 }
 
 /// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
@@ -201,43 +201,8 @@ impl CommandInterpreter {
 
             Command::GetUpdateRequests => {
                 match self.mode {
-                    CommandMode::Uptane(None) => {
-                        info!("initialising uptane mode");
-                        let ref tlscfg = self.config.tls.as_ref().expect("Uptane mode expects [tls] config");
-                        let ref serial = self.config.uptane.primary_ecu_serial;
-                        let mut uptane = Uptane::new(self.config.uptane.clone(),
-                                                     tlscfg.server.clone(),
-                                                     self.config.device.uuid.clone());
-
-                        let branch  = Ostree::get_current_branch()?;
-                        let ecuver  = branch.ecu_version(serial.clone());
-                        let ecujson = json::to_value(ecuver)?;
-                        let signed  = TufSigned::sign(ecujson, PrivateKey {
-                            // FIXME: keyid
-                            keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
-                            der_key: Uptane::read_file(&self.config.uptane.private_key_path)?
-                        }, SignatureType::RsaSsaPss)?;
-
-                        uptane.put_manifest(self.http.as_ref(), EcuManifests {
-                            primary_ecu_serial:   serial.clone(),
-                            ecu_version_manifest: vec![signed],
-                        })?;
-                        self.mode = CommandMode::Uptane(Some(uptane));
-                        Event::UptaneInitialised
-                    }
-
-                    CommandMode::Uptane(Some(ref mut uptane)) => {
-                        let (_, ts_new) = uptane.get_timestamp(self.http.as_ref(), true)?;
-                        if ts_new {
-                            let (targets, _) = uptane.get_targets(self.http.as_ref(), true)?;
-                            Event::UptaneTargetsUpdated(targets.targets)
-                        } else {
-                            Event::UptaneTimestampUpdated
-                        }
-                    }
-
-                    CommandMode::Rvi(_) |
-                    CommandMode::Sota   => {
+                    CommandMode::Sota   |
+                    CommandMode::Rvi(_) => {
                         let mut updates = sota.get_update_requests()?;
                         if updates.is_empty() {
                             Event::NoUpdateRequests
@@ -246,6 +211,20 @@ impl CommandInterpreter {
                             Event::UpdatesReceived(updates)
                         }
                     }
+
+                    CommandMode::Uptane(ref mut uptane) => {
+                        let client = self.http.as_ref();
+                        uptane.initialize(client)?;
+
+                        let (_, ts_new) = uptane.get_timestamp(client, true)?;
+                        if ts_new {
+                            let (targets, _) = uptane.get_targets(client, true)?;
+                            Event::UptaneTargetsUpdated(targets.targets)
+                        } else {
+                            Event::UptaneTimestampUpdated
+                        }
+                    }
+
                 }
             }
 
@@ -263,11 +242,17 @@ impl CommandInterpreter {
             }
 
             Command::OstreeInstall(pkg) => {
-                let id = pkg.commit.clone();
-                let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
-                match pkg.install(token) {
-                    Ok((code, out))  => Event::InstallComplete(UpdateReport::single(id, code, out)),
-                    Err((code, out)) => Event::InstallFailed(UpdateReport::single(id, code, out))
+                match pkg.install(if let Auth::Token(ref t) = self.auth { Some(t) } else { None }) {
+                    Ok((code, out)) => {
+                        if let CommandMode::Uptane(ref mut uptane) = self.mode {
+                            uptane.send_manifest = true;
+                        }
+                        Event::InstallComplete(UpdateReport::single(pkg.commit.clone(), code, out))
+                    }
+
+                    Err((code, out)) => {
+                        Event::InstallFailed(UpdateReport::single(pkg.commit.clone(), code, out))
+                    }
                 }
             }
 
@@ -331,7 +316,8 @@ impl CommandInterpreter {
                         Event::DownloadingUpdate(id)
                     }
 
-                    _ => {
+                    CommandMode::Sota      |
+                    CommandMode::Uptane(_) => {
                         etx.send(Event::InstallingUpdate(id.clone()));
                         let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
                         match sota.install_update(token, id) {
@@ -372,7 +358,6 @@ impl CommandInterpreter {
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Certificate));
                 }
-
                 Event::Authenticated
             }
 

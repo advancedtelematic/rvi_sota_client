@@ -18,7 +18,6 @@ use std::{env, process, thread};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::Write;
-use std::ops::Deref;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -27,11 +26,12 @@ use sota::authenticate::pkcs12;
 use sota::datatype::{Auth, Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient, init_tls_client, init_tls_client_from_p12, TlsData};
+use sota::http::{AuthClient, TlsData, init_tls_client, write_p12_chain};
 use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter,
                         CommandInterpreter, CommandMode};
 use sota::package_manager::PackageManager;
 use sota::rvi::{Edge, Services};
+use sota::uptane::Uptane;
 
 
 macro_rules! exit {
@@ -46,11 +46,7 @@ fn main() {
     let version  = start_logging();
     let config   = build_config(&version);
     let auth     = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
-    if auth == Auth::Provision {
-        provision(&config);
-    }
-
-    let mut mode = init_config(&config);
+    let mut mode = initialize(&config, &auth);
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -205,6 +201,7 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "core-server", "change the core server", "URL");
     opts.optopt("", "core-polling", "toggle polling the core server for updates", "BOOL");
     opts.optopt("", "core-polling-sec", "change the core polling interval", "SECONDS");
+    opts.optopt("", "core-ca-file", "pin the core CA certificates path", "PATH");
 
     opts.optopt("", "dbus-name", "change the dbus registration name", "NAME");
     opts.optopt("", "dbus-path", "change the dbus path", "PATH");
@@ -216,7 +213,6 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "device-uuid", "change the device uuid", "UUID");
     opts.optopt("", "device-packages-dir", "change downloaded directory for packages", "PATH");
     opts.optopt("", "device-package-manager", "change the package manager", "MANAGER");
-    opts.optopt("", "device-certificates-path", "change the CA certificates path", "PATH");
     opts.optopt("", "device-p12-path", "change the PKCS12 file path", "PATH");
     opts.optopt("", "device-p12-password", "change the PKCS12 file password", "PASSWORD");
     opts.optopt("", "device-system-info", "change the system information command", "PATH");
@@ -245,6 +241,7 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "tls-server", "change the TLS server", "PATH");
     opts.optopt("", "tls-p12-path", "change the TLS PKCS#12 credentials file", "PATH");
     opts.optopt("", "tls-p12-password", "change the TLS PKCS#12 file password", "PASSWORD");
+    opts.optopt("", "tls-ca-file", "pin the TLS root CA certificate chain", "PATH");
 
     let matches = opts.parse(&args[1..]).unwrap_or_else(|err| panic!(err.to_string()));
 
@@ -279,6 +276,7 @@ fn build_config(version: &str) -> Config {
     matches.opt_str("core-polling-sec").map(|secs| {
         config.core.polling_sec = secs.parse().unwrap_or_else(|err| exit!(1, "Invalid core-polling-sec: {}", err));
     });
+    matches.opt_str("core-ca-file").map(|path| config.core.ca_file = Some(path));
 
     matches.opt_str("dbus-name").map(|name| config.dbus.name = name);
     matches.opt_str("dbus-path").map(|path| config.dbus.path = path);
@@ -294,7 +292,6 @@ fn build_config(version: &str) -> Config {
     matches.opt_str("device-package-manager").map(|text| {
         config.device.package_manager = text.parse().unwrap_or_else(|err| exit!(1, "Invalid device-package-manager: {}", err));
     });
-    matches.opt_str("device-certificates-path").map(|path| config.device.certificates_path = Some(path));
     matches.opt_str("device-system-info").map(|cmd| config.device.system_info = Some(cmd));
 
     matches.opt_str("gateway-console").map(|console| {
@@ -348,6 +345,7 @@ fn build_config(version: &str) -> Config {
         });
         matches.opt_str("tls-p12-path").map(|path| tls_cfg.p12_path = path);
         matches.opt_str("tls-p12-password").map(|password| tls_cfg.p12_password = password);
+        matches.opt_str("tls-ca-file").map(|path| tls_cfg.ca_file = path);
     });
 
     if matches.opt_present("print") {
@@ -357,55 +355,47 @@ fn build_config(version: &str) -> Config {
     config
 }
 
-/// download the PKCS#12 bundle needed to make the actual server calls
-fn provision(config: &Config) -> () {
-    let tls  = config.tls.as_ref().expect("tls config required");
-
-    if !Path::new(&tls.p12_path).exists() {
-        let prov = config.provision.as_ref().expect("provision config required");
-        init_tls_client_from_p12(&prov.p12_path, &prov.p12_password);
-        let url = tls.server.join("/devices");
-        let id  = prov.device_id.as_ref().unwrap_or(&config.device.uuid);
-        let http = AuthClient::default();
-
-        loop {
-            match pkcs12(url.clone(), id.clone(), prov.expiry_days, &http) {
-                Ok(bundle) => {
-                    let _ = File::create(&tls.p12_path)
-                        .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
-                        .map_err(|err| panic!("couldn't open tls.p12_path for writing: {}", err));
-                    break;
-                }
-                Err(e) => {
-                    // delay of 0 means no retry
-                    if prov.retry_delay_seconds == 0 {
-                        panic!("Error while getting bundle: {}", e);
-                    } else {
-                        info!("Retrying after error while getting bundle: {}", e);
-                        thread::sleep(Duration::from_secs(prov.retry_delay_seconds));
-                    }
-                }
-            }
-        }
+/// Initialize the client then return the interpreter processing mode.
+fn initialize(config: &Config, auth: &Auth) -> CommandMode {
+    if *auth == Auth::Provision {
+        provision_p12(&config);
     }
-}
 
-fn init_config(config: &Config) -> CommandMode {
-    if let Some(ref tls) = config.tls {
-        if let Some(ref certificates_path) = tls.certificates_path {
-            init_tls_client(TlsData { ca_path: Some(certificates_path), p12_path: Some(&tls.p12_path),
-                                      p12_pass: Some(&tls.p12_password) });
-        } else {
-            init_tls_client_from_p12(&tls.p12_path, &tls.p12_password);
-        }
-    } else {
-        let ca_path = config.device.certificates_path.as_ref().map(Deref::deref);
-        init_tls_client(TlsData { ca_path: ca_path, p12_path: None, p12_pass: None });
-    }
+    init_tls_client(config.tls_data());
 
     if let PackageManager::Uptane = config.device.package_manager {
-        CommandMode::Uptane(None)
+        let uptane = Uptane::new(config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
+        CommandMode::Uptane(uptane)
     } else {
         CommandMode::Sota
     }
+}
+
+/// Download the PKCS#12 bundle needed to communicate with the server.
+fn provision_p12(config: &Config) -> () {
+    let prov = config.provision.as_ref().expect("provisioning expects a [provision] config");
+    let tls  = config.tls.as_ref().expect("provisioning expects a [tls] config");
+
+    if Path::new(&tls.p12_path).exists() {
+        exit!(3, "{}", "can't provision when tls.p12_path already exists");
+    } else if Path::new(&tls.ca_file).exists() {
+        exit!(3, "{}", "can't provision when tls.ca_file already exists");
+    }
+
+    write_p12_chain(&tls.ca_file, &prov.p12_path, &prov.p12_password);
+    init_tls_client(TlsData {
+        ca_file:  Some(&tls.ca_file),
+        p12_path: Some(&prov.p12_path),
+        p12_pass: Some(&prov.p12_password)
+    });
+
+    let server = tls.server.join("/devices").clone();
+    let device = prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone();
+    let client = AuthClient::default();
+    let bundle = pkcs12(server, device, prov.expiry_days, &client)
+        .unwrap_or_else(|err| exit!(3, "couldn't get pkcs12 bundle: {}", err));
+
+    let _ = File::create(&tls.p12_path)
+        .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
+        .map_err(|err| exit!(3, "couldn't open tls.p12_path for writing: {}", err));
 }

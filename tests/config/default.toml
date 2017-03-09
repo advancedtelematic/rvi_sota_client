@@ -7,6 +7,7 @@
 server = "http://127.0.0.1:8080"
 polling = true
 polling_sec = 10
+#ca_file = None
 
 [dbus]
 name = "org.genivi.SotaClient"
@@ -21,7 +22,6 @@ uuid = "123e4567-e89b-12d3-a456-426655440000"
 packages_dir = "/tmp/"
 package_manager = "off"
 auto_download = true
-#certificates_path = None
 #system_info = None
 
 [gateway]
@@ -40,7 +40,7 @@ socket_events_path = "/tmp/sota-events.socket"
 websocket_server = "127.0.0.1:3012"
 
 #[provision]
-#p12_path = "/usr/local/etc/sota_registration.p12"
+#p12_path = "/usr/local/etc/sota/credentials.p12"
 #p12_password = ""
 #expiry_days = 365
 ##device_id = None
@@ -52,10 +52,13 @@ storage_dir = "/usr/local/etc/sota/rvi"
 
 #[tls]
 #server = "http://127.0.0.1:9001"
-#p12_path = "/usr/local/etc/sota_device.p12"
+#p12_path = "/usr/local/etc/sota/device.p12"
 #p12_password = ""
+#ca_file = "/usr/local/etc/sota/srv.crt"
 
 [uptane]
+director_server = "http://localhost:8001"
+repo_server = "http://localhost:8002"
 primary_ecu_serial = "primary-serial"
 metadata_path = "/usr/local/etc/sota/metadata"
 private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
