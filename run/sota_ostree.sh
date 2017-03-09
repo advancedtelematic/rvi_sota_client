@@ -30,7 +30,7 @@ if [ "$AUTHPLUS_ACCESS_TOKEN" ]; then
 fi
 
 if [[ -n "$TLS_CLIENT_CERT" && -n "$TLS_CA_CERT" ]]; then
-    tls_option=--set="tls-client-cert-path=$TLS_CLIENT_CERT"\ --set="tls-client-key=$TLS_CLIENT_CERT"\ --set="tls-ca-path=$TLS_CA_CERT"
+    tls_option=--set="tls-client-cert-path=$TLS_CLIENT_CERT"\ --set="tls-client-key-path=$TLS_CLIENT_CERT"\ --set="tls-ca-path=$TLS_CA_CERT"
 fi
 
 mkdir -p /var/sota_ostree/
