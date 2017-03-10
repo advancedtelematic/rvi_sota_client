@@ -15,8 +15,7 @@ pub struct SocketAddr(pub StdSocketAddr);
 
 impl Decodable for SocketAddr {
     fn decode<D: Decoder>(d: &mut D) -> Result<SocketAddr, D::Error> {
-        let addr = try!(d.read_str());
-        addr.parse().or_else(|err| Err(d.error(&format!("{}", err))))
+        d.read_str()?.parse().or_else(|err| Err(d.error(&format!("{}", err))))
     }
 }
 
@@ -66,15 +65,13 @@ impl FromStr for Url {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let url = try!(url::Url::parse(s));
-        Ok(Url(url))
+        Ok(Url(url::Url::parse(s)?))
     }
 }
 
 impl Decodable for Url {
     fn decode<D: Decoder>(d: &mut D) -> Result<Url, D::Error> {
-        let s = try!(d.read_str());
-        s.parse().map_err(|e: Error| d.error(&e.to_string()))
+        d.read_str()?.parse().map_err(|err: Error| d.error(&err.to_string()))
     }
 }
 

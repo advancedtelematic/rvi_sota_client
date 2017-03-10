@@ -11,6 +11,7 @@ retry_delay_seconds = 17
 #device_id = None
 
 [tls]
-server = "http://127.0.0.1:9001"
-p12_path = "/usr/local/etc/sota/device.p12"
-p12_password = ""
+server = "http://localhost:8000"
+ca_file = "/usr/local/etc/sota/ca.crt"
+cert_file = "/usr/local/etc/sota/device.crt"
+pkey_file = "/usr/local/etc/sota/device.pem"

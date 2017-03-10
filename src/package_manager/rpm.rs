@@ -25,17 +25,16 @@ pub fn installed_packages() -> Result<Vec<Package>, Error> {
 
 /// Installs a new RPM package with `rpm -Uvh --force <package-path>`.
 pub fn install_package(path: &str) -> Result<InstallOutcome, InstallOutcome> {
-    let output = try!(Command::new("rpm").arg("-Uvh").arg("--force").arg(path)
+    let output = Command::new("rpm").arg("-Uvh").arg("--force").arg(path)
         .output()
-        .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("{:?}", err))));
+        .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("{:?}", err)))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
 
     match output.status.code() {
         Some(0) => {
-            let _ = Command::new("sync").status()
-                .map_err(|err| error!("couldn't run 'sync': {}", err));
+            let _ = Command::new("sync").status().map_err(|err| error!("couldn't run 'sync': {}", err));
             Ok((UpdateResultCode::OK, stdout))
         }
 

@@ -33,7 +33,7 @@ pub fn oauth2(server: Url, client: &Client) -> Result<AccessToken, Error> {
         Response::Failed(data)  => return Err(Error::from(data)),
         Response::Error(err)    => return Err(err)
     };
-    Ok(try!(json::decode(&body)))
+    Ok(json::decode(&body)?)
 }
 
 

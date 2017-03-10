@@ -25,24 +25,18 @@ pub fn installed_packages() -> Result<Vec<Package>, Error> {
 
 /// Installs a new DEB package.
 pub fn install_package(path: &str) -> Result<InstallOutcome, InstallOutcome> {
-    let output = try!(Command::new("dpkg").arg("-E").arg("-i").arg(path)
+    let output = Command::new("dpkg").arg("-E").arg("-i").arg(path)
         .output()
-        .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("{:?}", e))));
+        .map_err(|e| (UpdateResultCode::GENERAL_ERROR, format!("{:?}", e)))?;
 
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let exists = (&stdout).contains("already installed");
 
     match output.status.code() {
-        Some(0) => {
-            if (&stdout).contains("already installed") {
-                Ok((UpdateResultCode::ALREADY_PROCESSED, stdout))
-            } else {
-                Ok((UpdateResultCode::OK, stdout))
-            }
-        }
-        _ => {
-            let out = format!("stdout: {}\nstderr: {}", stdout, stderr);
-            Err((UpdateResultCode::INSTALL_FAILED, out))
-        }
+        Some(0) if exists => Ok((UpdateResultCode::ALREADY_PROCESSED, stdout)),
+        Some(0)           => Ok((UpdateResultCode::OK, stdout)),
+        _                 => Err((UpdateResultCode::INSTALL_FAILED,
+                                  format!("stdout: {}\nstderr: {}", stdout, stderr)))
     }
 }

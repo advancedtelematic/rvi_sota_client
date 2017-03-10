@@ -615,10 +615,10 @@ pub struct TlsConfig {
 impl Default for TlsConfig {
     fn default() -> Self {
         TlsConfig {
-            server:    "http://127.0.0.1:8000".parse().unwrap(),
-            ca_file:   "/usr/local/etc/sota/srv.crt".to_string(),
-            cert_file: "/usr/local/etc/sota/srv.crt".to_string(),
-            pkey_file: "/usr/local/etc/sota/device.p12.pem".to_string(),
+            server:    "http://localhost:8000".parse().unwrap(),
+            ca_file:   "/usr/local/etc/sota/ca.crt".to_string(),
+            cert_file: "/usr/local/etc/sota/device.crt".to_string(),
+            pkey_file: "/usr/local/etc/sota/device.pem".to_string(),
         }
     }
 }
@@ -669,8 +669,8 @@ pub struct UptaneConfig {
 impl Default for UptaneConfig {
     fn default() -> UptaneConfig {
         UptaneConfig {
-            director_server:    "http://localhost:8001".parse().unwrap(),
-            repo_server:        "http://localhost:8002".parse().unwrap(),
+            director_server:    "http://localhost:8001/director".parse().unwrap(),
+            repo_server:        "http://localhost:8002/repo".parse().unwrap(),
             primary_ecu_serial: "primary-serial".to_string(),
             metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
             private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
@@ -796,17 +796,17 @@ mod tests {
     const TLS_CONFIG: &'static str =
         r#"
         [tls]
-        server = "http://127.0.0.1:9001"
-        p12_path = "/usr/local/etc/sota/device.p12"
-        p12_password = ""
-        ca_file = "/usr/local/etc/sota/srv.crt"
+        server = "http://localhost:8000"
+        ca_file = "/usr/local/etc/sota/ca.crt"
+        cert_file = "/usr/local/etc/sota/device.crt"
+        pkey_file = "/usr/local/etc/sota/device.pem"
         "#;
 
     const UPTANE_CONFIG: &'static str =
         r#"
         [uptane]
-        director_server = "http://localhost:8001"
-        repo_server = "http://localhost:8002"
+        director_server = "http://localhost:8001/director"
+        repo_server = "http://localhost:8002/repo"
         primary_ecu_serial = "primary-serial"
         metadata_path = "/usr/local/etc/sota/metadata"
         private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
