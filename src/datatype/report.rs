@@ -5,7 +5,23 @@ use std::str::FromStr;
 use datatype::{Error, UpdateRequestId};
 
 
-/// An encodable report of the installation outcome.
+/// An encodable response of the installation outcome.
+#[derive(Serialize, Deserialize, RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
+pub struct OperationResult {
+    pub id:          String,
+    pub result_code: UpdateResultCode,
+    pub result_text: String,
+}
+
+impl OperationResult {
+    /// Create a new installation report.
+    pub fn new(id: String, result_code: UpdateResultCode, result_text: String) -> OperationResult {
+        OperationResult { id: id, result_code: result_code, result_text: result_text }
+    }
+}
+
+
+/// A report of a list of installation outcomes.
 #[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct UpdateReport {
     pub update_id:         UpdateRequestId,
@@ -13,12 +29,17 @@ pub struct UpdateReport {
 }
 
 impl UpdateReport {
-    /// Instantiate a new report with a vector of installation outcomes.
+    /// Create a new report from a vector of installation outcomes.
     pub fn new(update_id: String, results: Vec<OperationResult>) -> UpdateReport {
         UpdateReport { update_id: update_id, operation_results: results }
     }
 
-    /// Instantiate a new report with a single installation outcome.
+    /// Convert an OperationResult to an UpdateReport.
+    pub fn from(result: OperationResult) -> UpdateReport {
+        UpdateReport { update_id: result.id.clone(), operation_results: vec![result] }
+    }
+
+    /// Create a new report with a single installation outcome.
     pub fn single(update_id: UpdateRequestId, result_code: UpdateResultCode, result_text: String) -> UpdateReport {
         let result = OperationResult {
             id: update_id.clone(),
@@ -36,24 +57,9 @@ impl Default for UpdateReport {
 }
 
 
-/// Bind the installation outcome report to a specific device.
-#[derive(RustcEncodable, Clone, Debug)]
-pub struct DeviceReport<'d, 'r> {
-    pub device:        &'d str,
-    pub update_report: &'r UpdateReport
-}
-
-impl<'d, 'r> DeviceReport<'d, 'r> {
-    /// Instantiate a new installation outcome report for a specific device.
-    pub fn new(device: &'d str, update_report: &'r UpdateReport) -> DeviceReport<'d, 'r> {
-        DeviceReport { device: device, update_report: update_report }
-    }
-}
-
-
 /// Enumerate the possible outcomes when trying to install a package.
 #[allow(non_camel_case_types)]
-#[derive(RustcDecodable, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, RustcDecodable, Clone, Debug, PartialEq, Eq)]
 pub enum UpdateResultCode {
     /// Operation executed successfully
     OK = 0,
@@ -134,15 +140,6 @@ impl Encodable for UpdateResultCode {
 }
 
 
-/// An encodable response of the installation outcome for a particular update ID.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
-pub struct OperationResult {
-    pub id:          String,
-    pub result_code: UpdateResultCode,
-    pub result_text: String,
-}
-
-
 /// Encapsulates a single firmware installed on the device.
 #[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct InstalledFirmware {
@@ -150,7 +147,6 @@ pub struct InstalledFirmware {
     pub firmware_id:   String,
     pub last_modified: u64
 }
-
 
 /// Encapsulates a single package installed on the device.
 #[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
@@ -160,7 +156,6 @@ pub struct InstalledPackage {
     pub description:   String,
     pub last_modified: u64
 }
-
 
 /// An encodable list of packages and firmwares to send to RVI.
 #[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]

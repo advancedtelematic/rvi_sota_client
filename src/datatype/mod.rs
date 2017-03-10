@@ -20,14 +20,14 @@ pub use self::error::Error;
 pub use self::event::Event;
 pub use self::json_rpc::{RpcRequest, RpcOk, RpcErr};
 pub use self::network::{Method, SocketAddr, Url};
-pub use self::report::{DeviceReport, InstalledFirmware, InstalledPackage, InstalledSoftware,
+pub use self::report::{InstalledFirmware, InstalledPackage, InstalledSoftware,
                        OperationResult, UpdateResultCode, UpdateReport, system_info};
 pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, DownloadStarted, Package,
                         UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
 pub use self::ostree::{Ostree, OstreeBranch, OstreePackage};
-pub use self::tuf::{EcuManifests, EcuVersion, Key, KeyValue, PrivateKey, Role, RoleData,
-                    Root, Signature, Snapshot, Targets, Timestamp, TufCustom, TufImage,
-                    TufMeta, TufRole, TufSigned};
+pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyValue, PrivateKey,
+                    Role, RoleData, Root, Signature, Snapshot, Targets, Timestamp,
+                    TufCustom, TufImage, TufMeta, TufRole, TufSigned};
 pub use self::verify::{KeyType, SigType, Verifier};
 
 

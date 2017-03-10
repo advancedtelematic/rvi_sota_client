@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 use time::Duration;
 
-use datatype::{Error, SigType, KeyType, canonicalize_json};
+use datatype::{Error, KeyType, OperationResult, SigType, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
@@ -155,6 +155,13 @@ pub struct EcuVersion {
     pub installed_image:          TufImage,
     pub previous_timeserver_time: String,
     pub timeserver_time:          String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<EcuCustom>,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct EcuCustom {
+    pub operation_result: OperationResult,
 }
 
 

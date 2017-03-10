@@ -16,8 +16,6 @@ use getopts::Options;
 use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::Write;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -26,7 +24,7 @@ use sota::authenticate::pkcs12;
 use sota::datatype::{Auth, Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient, TlsData, init_tls_client, write_p12_chain};
+use sota::http::{AuthClient, Pkcs12, TlsClient, TlsData};
 use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter,
                         CommandInterpreter, CommandMode};
 use sota::package_manager::PackageManager;
@@ -343,9 +341,9 @@ fn build_config(version: &str) -> Config {
         matches.opt_str("tls-server").map(|text| {
             tls_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid tls-server URL: {}", err));
         });
-        matches.opt_str("tls-p12-path").map(|path| tls_cfg.p12_path = path);
-        matches.opt_str("tls-p12-password").map(|password| tls_cfg.p12_password = password);
         matches.opt_str("tls-ca-file").map(|path| tls_cfg.ca_file = path);
+        matches.opt_str("tls-cert-file").map(|path| tls_cfg.cert_file = path);
+        matches.opt_str("tls-pkey-file").map(|path| tls_cfg.pkey_file = path);
     });
 
     if matches.opt_present("print") {
@@ -360,8 +358,7 @@ fn initialize(config: &Config, auth: &Auth) -> CommandMode {
     if *auth == Auth::Provision {
         provision_p12(&config);
     }
-
-    init_tls_client(config.tls_data());
+    TlsClient::init(config.tls_data());
 
     if let PackageManager::Uptane = config.device.package_manager {
         let uptane = Uptane::new(config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
@@ -371,23 +368,33 @@ fn initialize(config: &Config, auth: &Auth) -> CommandMode {
     }
 }
 
-/// Download the PKCS#12 bundle needed to communicate with the server.
+/// Extract the certificates from a PKCS#12 bundle for TLS communication.
 fn provision_p12(config: &Config) -> () {
     let prov = config.provision.as_ref().expect("provisioning expects a [provision] config");
     let tls  = config.tls.as_ref().expect("provisioning expects a [tls] config");
 
-    if Path::new(&tls.p12_path).exists() {
-        exit!(3, "{}", "can't provision when tls.p12_path already exists");
-    } else if Path::new(&tls.ca_file).exists() {
+    if Path::new(&tls.ca_file).exists() {
         exit!(3, "{}", "can't provision when tls.ca_file already exists");
+    } else if Path::new(&tls.cert_file).exists() {
+        exit!(3, "{}", "can't provision when tls.cert_file already exists");
+    } else if Path::new(&tls.pkey_file).exists() {
+        exit!(3, "{}", "can't provision when tls.pkey_file already exists");
     }
 
-    write_p12_chain(&tls.ca_file, &prov.p12_path, &prov.p12_password);
-    init_tls_client(TlsData {
-        ca_file:  Some(&tls.ca_file),
-        p12_path: Some(&prov.p12_path),
-        p12_pass: Some(&prov.p12_password)
+    // FIXME: don't use temp files
+    let prov_p12 = Pkcs12::from_file(&prov.p12_path, &prov.p12_password);
+    prov_p12.write_chain("/tmp/ca");
+    prov_p12.write_cert("/tmp/cert");
+    prov_p12.write_pkey("/tmp/pkey");
+    TlsClient::init(TlsData {
+        ca_file:   Some("/tmp/ca"),
+        cert_file: Some("/tmp/cert"),
+        pkey_file: Some("/tmp/pkey")
     });
+    use std::fs;
+    fs::remove_file("/tmp/ca").expect("couldn't remove file");
+    fs::remove_file("/tmp/cert").expect("couldn't remove file");
+    fs::remove_file("/tmp/pkey").expect("couldn't remove file");
 
     let server = tls.server.join("/devices").clone();
     let device = prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone();
@@ -395,7 +402,8 @@ fn provision_p12(config: &Config) -> () {
     let bundle = pkcs12(server, device, prov.expiry_days, &client)
         .unwrap_or_else(|err| exit!(3, "couldn't get pkcs12 bundle: {}", err));
 
-    let _ = File::create(&tls.p12_path)
-        .map(|mut file| file.write(&*bundle).expect("couldn't write pkcs12 bundle"))
-        .map_err(|err| exit!(3, "couldn't open tls.p12_path for writing: {}", err));
+    let tls_p12 = Pkcs12::from_der(&bundle, "");
+    tls_p12.write_chain(&tls.ca_file);
+    tls_p12.write_cert(&tls.cert_file);
+    tls_p12.write_pkey(&tls.pkey_file);
 }

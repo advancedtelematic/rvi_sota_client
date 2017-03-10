@@ -1,13 +1,27 @@
 use rustc_serialize::{Decoder, Decodable};
 use std::str::FromStr;
 
-use datatype::{AccessToken, Error, Package, UpdateResultCode};
+use datatype::{Error, Package, UpdateResultCode};
 use package_manager::{deb, ostree, rpm, test};
 
 
 /// The outcome when installing a package as a tuple of the `UpdateResultCode`
 /// and any stdout/stderr output.
 pub type InstallOutcome = (UpdateResultCode, String);
+
+/// Optional credentials for forwarding the to package manager.
+pub struct Credentials {
+    pub access_token: Option<String>,
+    pub ca_file:      Option<String>,
+    pub cert_file:    Option<String>,
+}
+
+impl Default for Credentials {
+    fn default() -> Self {
+        Credentials { access_token: None, ca_file: None, cert_file: None }
+    }
+}
+
 
 /// An enumeration of the available package managers for querying and installing
 /// new packages.
@@ -39,14 +53,14 @@ impl PackageManager {
 
     /// Delegates to the package manager specific function for installing a new
     /// package on the device.
-    pub fn install_package<'t>(&self, path: &str, token: Option<&AccessToken>) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install_package(&self, path: &str, creds: Credentials) -> Result<InstallOutcome, InstallOutcome> {
         match *self {
             PackageManager::Off => panic!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
 
             PackageManager::Uptane |
-            PackageManager::Ostree => ostree::install_package(path, token),
+            PackageManager::Ostree => ostree::install_package(path, creds),
 
             PackageManager::Test { ref filename, succeeds } => {
                 test::install_package(filename, path, succeeds)

@@ -3,12 +3,13 @@ use std;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
-use datatype::{Auth, Command, Config, Error, Event, OstreePackage, Package, UpdateReport,
-               UpdateRequestStatus as Status, UpdateResultCode, system_info};
+use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
+               OstreePackage, Package, UpdateReport, UpdateRequestStatus as Status,
+               UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use authenticate::oauth2;
-use package_manager::PackageManager;
+use package_manager::{Credentials, PackageManager};
 use rvi::Services;
 use sota::Sota;
 use uptane::{Service, Uptane};
@@ -49,9 +50,10 @@ impl Interpreter<Event, Command> for EventInterpreter {
         match event {
             Event::Authenticated => {
                 if self.pacman != PackageManager::Off {
-                    self.pacman.installed_packages()
-                        .map(|pkgs| ctx.send(Command::SendInstalledPackages(pkgs)))
-                        .unwrap_or_else(|err| error!("couldn't send a list of packages: {}", err));
+                    match self.pacman.installed_packages() {
+                        Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
+                        Err(err) => error!("couldn't send a list of packages: {}", err)
+                    }
                 }
 
                 self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo));
@@ -102,17 +104,19 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::UpdateReportSent => {
                 if self.pacman != PackageManager::Off {
-                    self.pacman.installed_packages().map(|packages| {
-                        ctx.send(Command::SendInstalledPackages(packages));
-                    }).unwrap_or_else(|err| error!("couldn't send a list of packages: {}", err));
+                    match self.pacman.installed_packages() {
+                        Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
+                        Err(err) => error!("couldn't send a list of packages: {}", err)
+                    }
                 }
             }
 
             Event::UptaneTargetsUpdated(targets) => {
                 for (refname, meta) in targets {
-                    let _ = OstreePackage::from(refname, "sha256", meta)
-                        .map(|package| ctx.send(Command::OstreeInstall(package)))
-                        .map_err(|err| error!("{}", err));
+                    match OstreePackage::from(refname, "sha256", meta) {
+                        Ok(pkg)  => ctx.send(Command::OstreeInstall(pkg)),
+                        Err(err) => error!("{}", err)
+                    }
                 }
             }
 
@@ -240,17 +244,21 @@ impl CommandInterpreter {
             }
 
             Command::OstreeInstall(pkg) => {
-                match pkg.install(if let Auth::Token(ref t) = self.auth { Some(t) } else { None }) {
-                    Ok((code, out)) => {
-                        if let CommandMode::Uptane(ref mut uptane) = self.mode {
-                            uptane.send_manifest = true;
-                        }
-                        Event::InstallComplete(UpdateReport::single(pkg.commit.clone(), code, out))
-                    }
+                let (ok, code, out) = match pkg.install(self.get_credentials()) {
+                    Ok((code, out))  => (true, code, out),
+                    Err((code, out)) => (false, code, out),
+                };
 
-                    Err((code, out)) => {
-                        Event::InstallFailed(UpdateReport::single(pkg.commit.clone(), code, out))
-                    }
+                let result = OperationResult::new(pkg.refName.clone(), code, out);
+                if let CommandMode::Uptane(ref mut uptane) = self.mode {
+                    uptane.send_manifest = true;
+                    uptane.ecu_custom = Some(EcuCustom { operation_result: result.clone() });
+                }
+
+                if ok {
+                    Event::InstallComplete(UpdateReport::from(result))
+                } else {
+                    Event::InstallFailed(UpdateReport::from(result))
                 }
             }
 
@@ -314,15 +322,15 @@ impl CommandInterpreter {
                         Event::DownloadingUpdate(id)
                     }
 
-                    CommandMode::Sota      |
-                    CommandMode::Uptane(_) => {
+                    CommandMode::Sota => {
                         etx.send(Event::InstallingUpdate(id.clone()));
-                        let token = if let Auth::Token(ref t) = self.auth { Some(t) } else { None };
-                        match sota.install_update(token, id) {
+                        match sota.install_update(id, self.get_credentials()) {
                             Ok(report)  => Event::InstallComplete(report),
                             Err(report) => Event::InstallFailed(report)
                         }
                     }
+
+                    CommandMode::Uptane(_) => unimplemented!()
                 }
             }
 
@@ -363,6 +371,20 @@ impl CommandInterpreter {
 
             _ => Event::NotAuthenticated
         })
+    }
+
+    fn get_credentials(&self) -> Credentials {
+        let token = if let Auth::Token(ref t) = self.auth {
+            Some(t.access_token.clone())
+        } else {
+            None
+        };
+
+        Credentials {
+            access_token: token,
+            ca_file:      None,
+            cert_file:    None,
+        }
     }
 }
 

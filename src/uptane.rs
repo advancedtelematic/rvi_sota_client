@@ -1,10 +1,11 @@
 use serde_json as json;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
+use std::mem;
 use std::path::Path;
 
-use datatype::{Config, EcuManifests, Error, Ostree, Role, Root, Snapshot, Targets,
-               Timestamp, TufSigned, UptaneConfig, Url, Verifier};
+use datatype::{Config, EcuCustom, EcuManifests, Error, Ostree, Role, Root, Snapshot,
+               Targets, Timestamp, TufSigned, UptaneConfig, Url, Verifier};
 use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
 
@@ -41,6 +42,7 @@ pub struct Uptane {
 
     pub fetch_root:    bool,
     pub send_manifest: bool,
+    pub ecu_custom:    Option<EcuCustom>,
 }
 
 impl Uptane {
@@ -54,19 +56,22 @@ impl Uptane {
             version:    Version::default(),
             verifier:   Verifier::new(),
             serial:     config.uptane.primary_ecu_serial.clone(),
-            privkey:  PrivateKey {
+            privkey:    PrivateKey {
                 // FIXME: keyid
                 keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
                 der_key: der_key
             },
+
             fetch_root:    true,
             send_manifest: true,
+            ecu_custom:    None,
         })
     }
 
     pub fn initialize(&mut self, client: &Client) -> Result<(), Error> {
         if self.send_manifest {
-            self.put_manifest(client)?;
+            let custom = mem::replace(&mut self.ecu_custom, None);
+            self.put_manifest(client, custom)?;
             self.send_manifest = false;
         }
 
@@ -108,10 +113,10 @@ impl Uptane {
     }
 
     /// Put a new manifest file to the Director server.
-    pub fn put_manifest(&mut self, client: &Client) -> Result<(), Error> {
+    pub fn put_manifest(&mut self, client: &Client, custom: Option<EcuCustom>) -> Result<(), Error> {
         debug!("put_manifest");
         let branch  = Ostree::get_current_branch()?;
-        let version = branch.ecu_version(self.serial.clone());
+        let version = branch.ecu_version(self.serial.clone(), custom);
         let signed  = TufSigned::sign(json::to_value(version)?, &self.privkey, SigType::RsaSsaPss)?;
         let manifests = EcuManifests {
             primary_ecu_serial:   self.serial.clone(),
@@ -279,6 +284,7 @@ mod tests {
 
             fetch_root:    true,
             send_manifest: true,
+            ecu_custom:    None,
         }
     }
 
