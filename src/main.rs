@@ -237,9 +237,9 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "rvi-timeout", "change the rvi timeout", "TIMEOUT");
 
     opts.optopt("", "tls-server", "change the TLS server", "PATH");
-    opts.optopt("", "tls-p12-path", "change the TLS PKCS#12 credentials file", "PATH");
-    opts.optopt("", "tls-p12-password", "change the TLS PKCS#12 file password", "PASSWORD");
     opts.optopt("", "tls-ca-file", "pin the TLS root CA certificate chain", "PATH");
+    opts.optopt("", "tls-cert-file", "change the TLS certificate", "PATH");
+    opts.optopt("", "tls-pkey-file", "change the TLS private key", "PASSWORD");
 
     let matches = opts.parse(&args[1..]).unwrap_or_else(|err| panic!(err.to_string()));
 
