@@ -56,7 +56,7 @@ impl Url {
         url.path_segments_mut()
             .expect("couldn't get url segments")
             .pop_if_empty() // drop trailing slash before extending
-            .extend(&[suffix]);
+            .extend(suffix.split("/"));
         Url(url)
     }
 }
@@ -143,5 +143,6 @@ mod tests {
         let expect:   Url = "http://localhost:1234/foo/bar".parse().unwrap();
         assert_eq!(slash.join("bar"), expect);
         assert_eq!(no_slash.join("bar"), expect);
+        assert_eq!(slash.join("a/b"), "http://localhost:1234/foo/a/b".parse().unwrap());
     }
 }
