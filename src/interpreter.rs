@@ -3,8 +3,9 @@ use std;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
-use datatype::{Auth, Command, Config, Error, Event, OstreePackage, Package, UpdateReport,
-               UpdateRequestStatus as Status, UpdateResultCode, system_info};
+use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
+               OstreePackage, Package, UpdateReport, UpdateRequestStatus as Status,
+               UpdateResultCode, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use authenticate::oauth2;
@@ -243,13 +244,21 @@ impl CommandInterpreter {
             }
 
             Command::OstreeInstall(pkg) => {
+                let (ok, code, out) = match pkg.install(self.get_credentials()) {
+                    Ok((code, out))  => (true, code, out),
+                    Err((code, out)) => (false, code, out),
+                };
+
+                let result = OperationResult::new(pkg.refName.clone(), code, out);
                 if let CommandMode::Uptane(ref mut uptane) = self.mode {
                     uptane.send_manifest = true;
+                    uptane.ecu_custom = Some(EcuCustom { operation_result: result.clone() });
                 }
-                let report = |code, out| UpdateReport::single(pkg.commit.clone(), code, out);
-                match pkg.install(self.get_credentials()) {
-                    Ok((code, out))  => Event::InstallComplete(report(code, out)),
-                    Err((code, out)) => Event::InstallFailed(report(code, out))
+
+                if ok {
+                    Event::InstallComplete(UpdateReport::from(result))
+                } else {
+                    Event::InstallFailed(UpdateReport::from(result))
                 }
             }
 

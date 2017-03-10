@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 use std::process::Command;
 
-use datatype::{EcuVersion, Error, Package, TufCustom, TufImage, TufMeta, UpdateResultCode as Code};
+use datatype::{EcuCustom, EcuVersion, Error, Package, TufCustom, TufImage, TufMeta,
+               UpdateResultCode as Code};
 use package_manager::{Credentials, InstallOutcome, parse_package};
 
 
@@ -16,7 +17,7 @@ pub struct OstreeBranch {
 }
 
 impl OstreeBranch {
-    pub fn ecu_version(self, ecu_serial: String) -> EcuVersion {
+    pub fn ecu_version(self, ecu_serial: String, custom: Option<EcuCustom>) -> EcuVersion {
         let mut hashes = HashMap::new();
         hashes.insert("sha256".to_string(), self.commit);
 
@@ -33,6 +34,7 @@ impl OstreeBranch {
             },
             previous_timeserver_time: "1970-01-01T00:00:00Z".to_string(),
             timeserver_time: "1970-01-01T00:00:00Z".to_string(),
+            custom: custom
         }
     }
 }
