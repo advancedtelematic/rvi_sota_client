@@ -42,7 +42,7 @@ websocket_server = "127.0.0.1:3012"
 #[provision]
 #p12_path = "/usr/local/etc/sota/credentials.p12"
 #p12_password = ""
-#expiry_days = 365
+#expiry_days = 11
 ##device_id = None
 
 [rvi]

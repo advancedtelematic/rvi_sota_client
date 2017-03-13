@@ -7,7 +7,6 @@ client_secret = "client-secret"
 p12_path = "/usr/local/etc/sota/registration.p12"
 p12_password = ""
 expiry_days = 11
-retry_delay_seconds = 17
 #device_id = None
 
 [tls]
