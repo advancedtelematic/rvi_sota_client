@@ -6,6 +6,7 @@ PACKAGE_VERSION := $(shell git describe --tags | cut -c2-)
 IMAGE_RUST := advancedtelematic/rust:x86-1.15.1
 IMAGE_SOTA := advancedtelematic/sota-client:latest
 IMAGE_FPM  := advancedtelematic/fpm:latest
+IMAGE_TEST := advancedtelematic/sota-client-test:latest
 
 # target client binary format
 TARGET := x86_64-unknown-linux-gnu
@@ -42,7 +43,7 @@ old: image ## Use a local `sota.toml` config file to run the client.
 	$(DOCKER_RUN) --net=host --volume sota.toml:/usr/local/etc/sota.toml $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
-	$(CARGO) test --target=$(TARGET)
+	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET)
 
 doc: ## Generate documentation for the sota crate.
 	$(CARGO) doc --lib --no-deps --release
