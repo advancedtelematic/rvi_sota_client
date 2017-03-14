@@ -30,7 +30,7 @@ function device_registration() {
   openssl pkcs12 -in "$in_reg.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
     | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
 
-  curl --cacert "$out_ca.crt" --cert "$in_reg.pem" \
+  curl -vv -f --cacert "$out_ca.crt" --cert "$in_reg.pem" \
     -X POST "$SOTA_GATEWAY_URI/devices" \
     -H 'Content-Type: application/json' \
     -d '{"deviceId":"'"$device_id"'","ttl":36000}' \
@@ -48,7 +48,7 @@ function ecu_registration() {
   openssl rsa -pubout -in "$out_ecu.pem" -out "$out_ecu.pub"
   keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_ecu.pub")
 
-  curl --cacert "$out_ca.crt" --cert "$out_dev.pem" \
+  curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     -X POST "$SOTA_GATEWAY_URI/director/ecus" \
     -H 'Content-Type: application/json' \
     -d '{"primary_ecu_serial":"'"$device_id"'", "ecus":[{"ecu_serial":"'"$device_id"'", "clientKey": {"keytype": "RSA", "keyval": {"public": "'"$keypub"'"}}}]}'
@@ -63,7 +63,7 @@ function director_metadata() {
 
 function repo_metadata() {
   mkdir -p metadata/repo
-  curl --cacert "$out_ca.crt" --cert "$out_dev.pem" \
+  curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     "$SOTA_GATEWAY_URI/repo/root.json" \
     -o metadata/repo/root.json
 }
