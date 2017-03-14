@@ -9,7 +9,7 @@ RestartSec=5
 Restart=on-failure
 Environment="RUST_LOG=debug"
 DefaultTimeoutStopSec=5
-ExecStart=/usr/bin/sota_client --config /var/sota/sota.toml --device-package-manager ostree
+ExecStart=/usr/bin/sota_client --config /var/sota/sota.toml --device-package-manager uptane
 
 [Install]
 WantedBy=multi-user.target
