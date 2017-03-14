@@ -35,23 +35,31 @@ function device_registration() {
     -H 'Content-Type: application/json' \
     -d '{"deviceId":"'"$device_id"'","ttl":36000}' \
     -o "$out_dev.p12"
+  echo "Registered device $device_id with server"
+  echo "Received device PKCS-12 bundle"
 
   openssl pkcs12 -in "$out_dev.p12" -out "$out_dev.pem" -nodes -passin pass:""
   openssl pkcs12 -in "$out_dev.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
     | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
+  echo "Created SOTA certificate authority file at $certdir/$out_ca.crt"
   openssl pkcs12 -in "$out_dev.p12" -clcerts -nokeys -passin pass:"" 2>/dev/null \
     | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_dev.crt"
+  echo "Created SOTA device certificate at $certdir/$out_ca.crt"
 }
 
 function ecu_registration() {
+  echo "Generating ECU keypair"
   openssl genpkey -algorithm RSA -out "$out_ecu.pem" -pkeyopt rsa_keygen_bits:2048
+  echo "Saved ECU private key to $certdir/$out_ecu.pem"
   openssl rsa -pubout -in "$out_ecu.pem" -out "$out_ecu.pub"
+  echo "Saved ECU public key to $certdir/$out_ecu.pub"
   keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_ecu.pub")
 
   curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     -X POST "$SOTA_GATEWAY_URI/director/ecus" \
     -H 'Content-Type: application/json' \
     -d '{"primary_ecu_serial":"'"$device_id"'", "ecus":[{"ecu_serial":"'"$device_id"'", "clientKey": {"keytype": "RSA", "keyval": {"public": "'"$keypub"'"}}}]}'
+  echo "Registered device ECUs with Director service"
 }
 
 function director_metadata() {
@@ -59,6 +67,7 @@ function director_metadata() {
   curl --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     "$SOTA_GATEWAY_URI/director/root.json" \
     -o metadata/director/root.json
+  echo "Received signed root.json from Director service, stored in $certdir/metadata/director/root.json"
 }
 
 function repo_metadata() {
@@ -66,13 +75,18 @@ function repo_metadata() {
   curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     "$SOTA_GATEWAY_URI/repo/root.json" \
     -o metadata/repo/root.json
+  echo "Received signed root.json from Repo service, stored in $certdir/metadata/repo/root.json"
 }
 
-
+echo "Registering device using hardware identifier $device_id"
 device_registration
+echo "Registering device ECUs"
 ecu_registration
+echo "Requesting signed root.json from Director service"
 director_metadata
+echo "Requesting signed root.json from Repo service"
 repo_metadata
+echo "Writing SOTA Client config file to $certdir/sota.toml"
 
 cat > sota.toml <<EOF
 [device]
@@ -92,3 +106,5 @@ metadata_path = "$certdir/metadata"
 private_key_path = "$certdir/$out_ecu.pem"
 public_key_path = "$certdir/$out_ecu.pub"
 EOF
+
+echo "Autoprovisioning completed successfully"
