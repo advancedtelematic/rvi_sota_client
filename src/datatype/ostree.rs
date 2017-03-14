@@ -93,6 +93,7 @@ impl OstreePackage {
         creds.access_token.map(|t| cmd.env("AUTHPLUS_ACCESS_TOKEN", t.clone()));
         creds.ca_file.map(|f| cmd.env("TLS_CA_CERT", f.clone()));
         creds.cert_file.map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
+        creds.pkey_file.map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
 
         let output = cmd.output().map_err(|err| (Code::GENERAL_ERROR, format!("ostree install: {}", err)))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();

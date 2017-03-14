@@ -382,10 +382,17 @@ impl CommandInterpreter {
             None
         };
 
+        let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
+            (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
+        } else {
+            (None, None, None)
+        };
+
         Credentials {
             access_token: token,
-            ca_file:      None,
-            cert_file:    None,
+            ca_file:      ca,
+            cert_file:    cert,
+            pkey_file:    pkey,
         }
     }
 }

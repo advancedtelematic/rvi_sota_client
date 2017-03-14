@@ -9,8 +9,9 @@ function print_usage {
     echo "PULL_URI: The remote to pull from"
     echo "COMMIT: The commit-hash"
     echo "AUTHPLUS_ACCESS_TOKEN: The auth-plus access token (optional)"
-    echo "TLS_CLIENT_CERT: Client TLS certificate (optional)"
     echo "TLS_CA_CERT: Server TLS certificate (optional)"
+    echo "TLS_CLIENT_CERT: Client TLS certificate (optional)"
+    echo "TLS_CLIENT_KEY: Client PEM private key (optional)"
 }
 
 if [ -z "$PULL_URI" ]; then
@@ -29,8 +30,8 @@ if [ "$AUTHPLUS_ACCESS_TOKEN" ]; then
     auth_header_option=--http-header="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
 fi
 
-if [[ -n "$TLS_CLIENT_CERT" && -n "$TLS_CA_CERT" ]]; then
-    tls_option=--set="tls-client-cert-path=$TLS_CLIENT_CERT"\ --set="tls-client-key-path=$TLS_CLIENT_CERT"\ --set="tls-ca-path=$TLS_CA_CERT"
+if [[ -n "$TLS_CLIENT_KEY" && -n "$TLS_CA_CERT" ]]; then
+    tls_option=--set="tls-client-cert-path=$TLS_CLIENT_KEY"\ --set="tls-client-key-path=$TLS_CLIENT_KEY"\ --set="tls-ca-path=$TLS_CA_CERT"
 fi
 
 mkdir -p /var/sota_ostree/

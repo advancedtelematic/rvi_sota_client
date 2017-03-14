@@ -14,11 +14,12 @@ pub struct Credentials {
     pub access_token: Option<String>,
     pub ca_file:      Option<String>,
     pub cert_file:    Option<String>,
+    pub pkey_file:    Option<String>,
 }
 
 impl Default for Credentials {
     fn default() -> Self {
-        Credentials { access_token: None, ca_file: None, cert_file: None }
+        Credentials { access_token: None, ca_file: None, cert_file: None, pkey_file: None }
     }
 }
 
