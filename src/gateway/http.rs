@@ -1,15 +1,14 @@
-use chan::{self, Sender};
+use chan::{self, Sender, Receiver};
 use hyper::header::ContentType;
 use hyper::mime::{Mime, SubLevel, TopLevel};
 use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
-use rustc_serialize::json;
-use std::io::Read;
+use serde_json as json;
 use std::net::SocketAddr;
 use std::thread;
 use std::sync::{Arc, Mutex};
 
-use datatype::{Command, Event};
+use datatype::Event;
 use gateway::{Gateway, Interpret};
 
 
@@ -19,14 +18,11 @@ pub struct Http {
 }
 
 impl Gateway for Http {
-    fn initialize(&mut self, itx: Sender<Interpret>) -> Result<(), String> {
-        let server = try!(Server::http(&self.server).map_err(|err| {
-            format!("couldn't start http gateway: {}", err)
-        }));
-
+    fn start(&mut self, itx: Sender<Interpret>, _: Receiver<Event>) {
+        info!("Starting HTTP gateway at http://{}", self.server);
+        let server = Server::http(&self.server).expect("couldn't start http gateway");
         let itx = Arc::new(Mutex::new(itx));
         thread::spawn(move || server.handle(HttpHandler::new(itx.clone())).unwrap());
-        Ok(info!("HTTP gateway listening at http://{}", self.server))
     }
 }
 
@@ -42,39 +38,20 @@ impl HttpHandler {
 }
 
 impl Handler for HttpHandler {
-    fn handle(&self, mut req: HyperRequest, mut resp: HyperResponse) {
-        let mut buf = Vec::new();
-        req.read_to_end(&mut buf).expect("couldn't read HTTP request body");
-
-        let mut response_rx = None;
-        String::from_utf8(buf).map(|body| {
-            json::decode::<Command>(&body).map(|cmd| {
-                info!("Incoming HTTP request command: {}", cmd);
-                let (etx, erx) = chan::async::<Event>();
-                response_rx = Some(erx);
-                self.itx.lock().unwrap().send(Interpret {
-                    command: cmd,
-                    resp_tx: Some(Arc::new(Mutex::new(etx))),
-                });
-            }).unwrap_or_else(|err| error!("http request parse json: {}", err))
-        }).unwrap_or_else(|err| error!("http request parse string: {}", err));
-
+    fn handle(&self, req: HyperRequest, mut resp: HyperResponse) {
         let mut body = Vec::new();
-        *resp.status_mut() = response_rx.map_or(StatusCode::BadRequest, |rx| {
-            rx.recv().map_or_else(|| {
-                error!("http receiver error");
-                StatusCode::InternalServerError
-            }, |event| {
-                json::encode(&event).map(|text| {
-                    resp.headers_mut().set(ContentType(Mime(TopLevel::Application, SubLevel::Json, vec![])));
-                    body = text.into_bytes();
-                    StatusCode::Ok
-                }).unwrap_or_else(|err| {
-                    error!("http response encoding: {:?}", err);
-                    StatusCode::InternalServerError
-                })
+        let _ = json::from_reader(req)
+            .map_err(|err| {
+                error!("couldn't read HTTP request: {}", err);
+                *resp.status_mut() = StatusCode::BadRequest;
             })
-        });
+            .map(|cmd| {
+                let (etx, erx) = chan::async::<Event>();
+                self.itx.lock().unwrap().send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx))) });
+                body = json::to_vec(&erx.recv().expect("no http response")).expect("encode event");
+                resp.headers_mut().set(ContentType(Mime(TopLevel::Application, SubLevel::Json, vec![])));
+                *resp.status_mut() = StatusCode::Ok;
+            });
         resp.send(&body).expect("couldn't send HTTP response");
     }
 }
@@ -84,7 +61,7 @@ impl Handler for HttpHandler {
 mod tests {
     use chan;
     use crossbeam;
-    use rustc_serialize::json;
+    use serde_json as json;
     use std::thread;
     use std::time::Duration;
 
@@ -107,13 +84,13 @@ mod tests {
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                let interpret = irx.recv().expect("itx is closed");
-                match interpret.command {
+                let interpret = irx.recv().unwrap();
+                match interpret.cmd {
                     Command::StartDownload(id) => {
-                        let tx = interpret.resp_tx.unwrap();
-                        tx.lock().unwrap().send(Event::FoundSystemInfo(id));
+                        let resp_tx = interpret.etx.unwrap();
+                        resp_tx.lock().unwrap().send(Event::FoundSystemInfo(id));
                     }
-                    _ => panic!("expected AcceptUpdates"),
+                    _ => panic!("expected StartDownload")
                 }
             }
         });
@@ -121,19 +98,17 @@ mod tests {
         crossbeam::scope(|scope| {
             for id in 0..10 {
                 scope.spawn(move || {
-                    let cmd     = Command::StartDownload(format!("{}", id));
-                    let client  = AuthClient::default();
-                    let url     = "http://127.0.0.1:8888".parse().unwrap();
-                    let body    = json::encode(&cmd).unwrap();
-                    let resp_rx = client.post(url, Some(body.into_bytes()));
-                    let resp    = resp_rx.recv().unwrap();
-                    let text    = match resp {
-                        Response::Success(data) => String::from_utf8(data.body).unwrap(),
-                        Response::Failed(data)  => panic!("failed response: {}", data),
-                        Response::Error(err)    => panic!("error response: {}", err)
+                    let cmd = Command::StartDownload(format!("{}", id));
+                    let url = "http://127.0.0.1:8888".parse().unwrap();
+                    let rx  = AuthClient::default().post(url, Some(json::to_vec(&cmd).unwrap()));
+                    match rx.recv().unwrap() {
+                        Response::Success(data) => {
+                            let event = json::from_slice::<Event>(&data.body).unwrap();
+                            assert_eq!(event, Event::FoundSystemInfo(format!("{}", id)));
+                        },
+                        Response::Failed(data) => panic!("failed response: {}", data),
+                        Response::Error(err)   => panic!("error response: {}", err)
                     };
-                    assert_eq!(json::decode::<Event>(&text).unwrap(),
-                               Event::FoundSystemInfo(format!("{}", id)));
                 });
             }
         });

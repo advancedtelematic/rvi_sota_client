@@ -1,6 +1,6 @@
 use serde_json as json;
 use std::fs::File;
-use std::io::prelude::*;
+use std::io::{BufReader, Read};
 
 use datatype::{Error, OstreePackage, Package, UpdateResultCode};
 use package_manager::{Credentials, InstallOutcome, parse_package};
@@ -19,12 +19,8 @@ pub fn installed_packages() -> Result<Vec<Package>, Error> {
 }
 
 pub fn install_package(path: &str, creds: &Credentials) -> Result<InstallOutcome, InstallOutcome> {
-    let mut file = File::open(path)
-        .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}", err)))?;
-    let mut content = String::new();
-    file.read_to_string(&mut content)
+    let file = File::open(path).map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}", err)))?;
+    let pkg: OstreePackage = json::from_reader(BufReader::new(file))
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("reading file: {:?}", err)))?;
-    let pkg = json::from_str::<OstreePackage>(&content)
-        .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("parsing file: {:?}", err)))?;
     pkg.install(creds)
 }

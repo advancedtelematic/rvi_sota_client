@@ -1,11 +1,12 @@
 use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
-use rustc_serialize::json::{self, Json};
+use serde_json as json;
+use serde_json::Value;
 use std::str;
 use std::io::Read;
 
-use datatype::{RpcRequest, RpcOk, RpcErr, SocketAddr, Url};
-use super::services::Services;
+use datatype::{SocketAddr, Url};
+use rvi::{RpcErr, RpcOk, RpcRequest, Services};
 
 
 /// The HTTP server endpoint for `RVI` client communication.
@@ -22,10 +23,9 @@ impl Edge {
                 network_address: format!("http://{}", rvi_edge),
                 service:         service.to_string(),
             });
-            let resp = req.send(rvi_client.clone())
-                .unwrap_or_else(|err| panic!("RegisterServiceRequest failed: {}", err));
-            let rpc_ok = json::decode::<RpcOk<RegisterServiceResponse>>(&resp)
-                .unwrap_or_else(|err| panic!("couldn't decode RegisterServiceResponse: {}", err));
+            let resp = req.send(rvi_client.clone()).expect("RegisterServiceRequest failed");
+            let rpc_ok = json::from_str::<RpcOk<RegisterServiceResponse>>(&resp)
+                .expect("couldn't decode RegisterServiceResponse");
             rpc_ok.result.expect("expected rpc_ok result").service
         });
 
@@ -34,21 +34,20 @@ impl Edge {
 
     /// Start the HTTP server listening for incoming RVI client connections.
     pub fn start(&mut self) {
-        let server = Server::http(&*self.rvi_edge)
-            .unwrap_or_else(|err| panic!("couldn't start rvi edge server: {}", err));
+        let server = Server::http(&*self.rvi_edge).expect("couldn't start rvi edge server");
         let _ = server.handle(EdgeHandler::new(self.services.clone())).unwrap();
         info!("RVI server edge listening at http://{}.", self.rvi_edge);
     }
 }
 
 
-#[derive(RustcEncodable)]
+#[derive(Serialize)]
 struct RegisterServiceRequest {
     pub network_address: String,
     pub service:         String,
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize)]
 struct RegisterServiceResponse {
     pub service: String,
     pub status:  i32,
@@ -61,51 +60,46 @@ struct EdgeHandler {
 
 impl EdgeHandler {
     fn new(services: Services) -> EdgeHandler {
-        EdgeHandler { services:  services }
+        EdgeHandler { services: services }
     }
 }
 
 impl Handler for EdgeHandler {
     fn handle(&self, mut req: HyperRequest, mut resp: HyperResponse) {
-        let mut buf = Vec::new();
-        req.read_to_end(&mut buf).expect("couldn't read Edge HTTP request body");
+        let mut text = String::new();
+        req.read_to_string(&mut text).expect("couldn't read Edge HTTP request body");
 
         let outcome = || -> Result<RpcOk<i32>, RpcErr> {
-            let text   = try!(str::from_utf8(&buf).map_err(|err| RpcErr::parse_error(err.to_string())));
-            let data   = try!(Json::from_str(text).map_err(|err| RpcErr::parse_error(err.to_string())));
-            let object = try!(data.as_object().ok_or(RpcErr::parse_error("not an object".to_string())));
-            let id     = try!(object.get("id").and_then(|x| x.as_u64())
-                              .ok_or(RpcErr::parse_error("expected id".to_string())));
-            let method = try!(object.get("method").and_then(|x| x.as_string())
-                              .ok_or(RpcErr::invalid_request(id, "expected method".to_string())));
-
+            let body: Value = json::to_value(&text)
+                .map_err(|err| RpcErr::parse_error(format!("invalid json: {}", err)))?;
+            let id = body.get("id").and_then(|x| x.as_u64())
+                .ok_or(RpcErr::parse_error("missing id".into()))?;
+            let method = body.get("method").and_then(|x| x.as_str())
+                .ok_or(RpcErr::invalid_request(id, "missing method".into()))?;
             match method {
                 "services_available" => Ok(RpcOk::new(id, None)),
-
                 "message" => {
-                    let params  = try!(object.get("params").and_then(|p| p.as_object())
-                                       .ok_or(RpcErr::invalid_request(id, "expected params".to_string())));
-                    let service = try!(params.get("service_name").and_then(|s| s.as_string())
-                                       .ok_or(RpcErr::invalid_request(id, "expected params.service_name".to_string())));
-                    self.services.handle_service(service, id, text)
-                }
-
+                    let params = body.get("params")
+                        .ok_or(RpcErr::invalid_request(id, "missing params".into()))?;
+                    let service = params.get("service_name").and_then(|x| x.as_str())
+                        .ok_or(RpcErr::invalid_request(id, "missing params.service_name".into()))?;
+                    self.services.handle_service(service, id, &text)
+                },
                 _ => Err(RpcErr::method_not_found(id, format!("unknown method: {}", method)))
             }
         }();
 
         let body = match outcome {
-            Ok(msg)  => {
+            Ok(msg) => {
                 *resp.status_mut() = StatusCode::Ok;
-                json::encode::<RpcOk<i32>>(&msg).expect("couldn't encode RpcOk response")
-            }
+                json::to_vec::<RpcOk<i32>>(&msg).expect("encode RpcOk")
+            },
 
             Err(err) => {
                 *resp.status_mut() = StatusCode::BadRequest;
-                json::encode::<RpcErr>(&err).expect("couldn't encode RpcErr response")
+                json::to_vec::<RpcErr>(&err).expect("encode RpcErr")
             }
         };
-
-        resp.send(&body.into_bytes()).expect("couldn't send Edge HTTP response");
+        resp.send(&body).expect("EdgeHandler response");
     }
 }

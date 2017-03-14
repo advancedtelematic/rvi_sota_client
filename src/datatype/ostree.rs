@@ -16,7 +16,7 @@ const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 
 
 /// Details of a remote OSTree package.
-#[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
+#[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct OstreePackage {
     #[serde(skip_deserializing)]

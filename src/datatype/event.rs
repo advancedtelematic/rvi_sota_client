@@ -6,7 +6,7 @@ use datatype::{DownloadComplete, Package, TufMeta, UpdateAvailable, UpdateReport
 
 
 /// System-wide events that are broadcast to all interested parties.
-#[derive(RustcEncodable, RustcDecodable, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub enum Event {
     /// General error event with a printable representation for debugging.
     Error(String),

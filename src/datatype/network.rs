@@ -1,5 +1,7 @@
 use hyper::method::Method as HyperMethod;
-use rustc_serialize::{Decoder, Decodable, Encoder, Encodable};
+use serde::de::{Deserialize, Deserializer, Error as SerdeError};
+use serde::ser::{Serialize, Serializer};
+use serde_json as json;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::net::{SocketAddr as StdSocketAddr};
 use std::ops::Deref;
@@ -13,12 +15,6 @@ use datatype::Error;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SocketAddr(pub StdSocketAddr);
 
-impl Decodable for SocketAddr {
-    fn decode<D: Decoder>(d: &mut D) -> Result<SocketAddr, D::Error> {
-        d.read_str()?.parse().or_else(|err| Err(d.error(&format!("{}", err))))
-    }
-}
-
 impl FromStr for SocketAddr {
     type Err = Error;
 
@@ -26,6 +22,16 @@ impl FromStr for SocketAddr {
         match StdSocketAddr::from_str(s) {
             Ok(addr) => Ok(SocketAddr(addr)),
             Err(err) => Err(Error::Parse(format!("couldn't parse SocketAddr: {}", err)))
+        }
+    }
+}
+
+impl Deserialize for SocketAddr {
+    fn deserialize<D: Deserializer>(de: D) -> Result<SocketAddr, D::Error> {
+        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| SerdeError::custom(format!("invalid SocketAddr: {}", err)))
+        } else {
+            Err(SerdeError::custom("Not a SocketAddr"))
         }
     }
 }
@@ -65,15 +71,19 @@ impl FromStr for Url {
     }
 }
 
-impl Decodable for Url {
-    fn decode<D: Decoder>(d: &mut D) -> Result<Url, D::Error> {
-        d.read_str()?.parse().map_err(|err: Error| d.error(&err.to_string()))
+impl Serialize for Url {
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_str(&format!("{}", self))
     }
 }
 
-impl Encodable for Url {
-    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
-        s.emit_str(&format!("{}", self))
+impl Deserialize for Url {
+    fn deserialize<D: Deserializer>(de: D) -> Result<Url, D::Error> {
+        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| SerdeError::custom(format!("invalid Url: {}", err)))
+        } else {
+            Err(SerdeError::custom("Not a Url"))
+        }
     }
 }
 

@@ -13,7 +13,7 @@ pub trait Parameter {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct Notify {
     update_available: UpdateAvailable,
     services:         BackendServices
@@ -27,7 +27,7 @@ impl Parameter for Notify {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct Start {
     update_id:   UpdateRequestId,
     chunkscount: u64,
@@ -53,7 +53,7 @@ impl Parameter for Start {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct Chunk {
     update_id: UpdateRequestId,
     bytes:     String,
@@ -84,7 +84,7 @@ impl Parameter for Chunk {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct Finish {
     update_id: UpdateRequestId,
     signature: String
@@ -114,7 +114,7 @@ impl Parameter for Finish {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct Report;
 
 impl Parameter for Report {
@@ -124,7 +124,7 @@ impl Parameter for Report {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct Abort;
 
 impl Parameter for Abort {

@@ -5,7 +5,6 @@ extern crate env_logger;
 extern crate getopts;
 extern crate hyper;
 #[macro_use] extern crate log;
-extern crate rustc_serialize;
 extern crate sota;
 extern crate time;
 
@@ -20,7 +19,7 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sota::authenticate::pkcs12;
+use sota::authenticate::{pkcs12, RegistrationPayload};
 use sota::datatype::{Auth, Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
@@ -75,7 +74,7 @@ fn main() {
         if config.gateway.dbus {
             let dbus_itx = itx.clone();
             let dbus_sub = broadcast.subscribe();
-            let mut dbus = DBus { dbus_cfg: config.dbus.clone(), itx: itx.clone() };
+            let mut dbus = DBus { cfg: config.dbus.clone() };
             scope.spawn(move || dbus.start(dbus_itx, dbus_sub));
         }
 
@@ -118,14 +117,14 @@ fn main() {
 
         let ei_sub  = broadcast.subscribe();
         let ei_ctx  = ctx.clone();
-        let ei_etx  = etx.clone();
+        let ei_loop = etx.clone();
         let ei_auth = auth.clone();
         let ei_mgr  = config.device.package_manager.clone();
         let ei_dl   = config.device.auto_download.clone();
         let ei_sys  = config.device.system_info.clone();
         let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub")));
         scope.spawn(move || EventInterpreter {
-            etx:     ei_etx,
+            loop_tx: ei_loop,
             auth:    ei_auth,
             pacman:  ei_mgr,
             auto_dl: ei_dl,
@@ -173,11 +172,9 @@ fn start_signal_handler(signals: Receiver<Signal>) {
 fn start_update_poller(interval: u64, itx: Sender<Interpret>) {
     info!("Polling for new updates every {} seconds.", interval);
     let (etx, erx) = chan::async::<Event>();
+    let etx = Arc::new(Mutex::new(etx));
     loop {
-        itx.send(Interpret {
-            command: Command::GetUpdateRequests,
-            resp_tx: Some(Arc::new(Mutex::new(etx.clone())))
-        });
+        itx.send(Interpret { cmd: Command::GetUpdateRequests, etx: Some(etx.clone()) });
         let _ = erx.recv(); // wait for the response
         thread::sleep(Duration::from_secs(interval));
     }
@@ -237,13 +234,19 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "rvi-storage-dir", "change the rvi storage directory", "PATH");
     opts.optopt("", "rvi-timeout", "change the rvi timeout", "TIMEOUT");
 
-    opts.optopt("", "tls-server", "change the TLS server", "PATH");
+    opts.optopt("", "tls-server", "change the TLS server", "URL");
     opts.optopt("", "tls-ca-file", "pin the TLS root CA certificate chain", "PATH");
     opts.optopt("", "tls-cert-file", "change the TLS certificate", "PATH");
     opts.optopt("", "tls-pkey-file", "change the TLS private key", "PASSWORD");
 
-    let matches = opts.parse(&args[1..]).unwrap_or_else(|err| panic!(err.to_string()));
+    opts.optopt("", "uptane-director-server", "change the Uptane Director server", "URL");
+    opts.optopt("", "uptane-repo-server", "change the Uptane Repo server", "URL");
+    opts.optopt("", "uptane-primary-ecu-serial", "change the primary ECU's serial", "TEXT");
+    opts.optopt("", "uptane-metadata-path", "change the directory used to save Uptane metadata.", "PATH");
+    opts.optopt("", "uptane-private-key-path", "change the path to the private key for the primary ECU", "PATH");
+    opts.optopt("", "uptane-public-key-path", "change the path to the public key for the primary ECU", "PATH");
 
+    let matches = opts.parse(&args[1..]).expect("couldn't parse args");
     if matches.opt_present("help") {
         exit!(0, "{}", opts.usage(&format!("Usage: {} [options]", program)));
     } else if matches.opt_present("version") {
@@ -347,6 +350,17 @@ fn build_config(version: &str) -> Config {
         matches.opt_str("tls-pkey-file").map(|path| tls_cfg.pkey_file = path);
     });
 
+    matches.opt_str("uptane-director-server").map(|text| {
+        config.uptane.director_server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid uptane-director-server URL: {}", err));
+    });
+    matches.opt_str("uptane-repo-server").map(|text| {
+        config.uptane.repo_server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid uptane-repo-server URL: {}", err));
+    });
+    matches.opt_str("uptane-primary-ecu-serial").map(|text| config.uptane.primary_ecu_serial = text);
+    matches.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
+    matches.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
+    matches.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
+
     if matches.opt_present("print") {
         exit!(0, "{:#?}", config);
     }
@@ -397,11 +411,10 @@ fn provision_p12(config: &Config) -> () {
     fs::remove_file("/tmp/cert").expect("couldn't remove file");
     fs::remove_file("/tmp/pkey").expect("couldn't remove file");
 
-    let server = tls.server.join("devices").clone();
-    let device = prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone();
-    let client = AuthClient::default();
-    let bundle = pkcs12(server, device, prov.expiry_days, &client)
-        .unwrap_or_else(|err| exit!(3, "couldn't get pkcs12 bundle: {}", err));
+    let bundle = pkcs12(&AuthClient::default(), tls.server.join("devices").clone(), &RegistrationPayload {
+        deviceId: prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone(),
+        ttl:      prov.expiry_days
+    }).unwrap_or_else(|err| exit!(3, "couldn't get pkcs12 bundle: {}", err));
 
     let tls_p12 = Pkcs12::from_der(&bundle, "");
     tls_p12.write_chain(&tls.ca_file);

@@ -1,5 +1,6 @@
 #[macro_use] extern crate nom; // use before log to avoid error!() macro conflict
 
+extern crate base64;
 extern crate chan;
 extern crate chrono;
 extern crate crossbeam;
@@ -12,7 +13,6 @@ extern crate pem;
 #[macro_use] extern crate log;
 extern crate rand;
 extern crate ring;
-extern crate rustc_serialize;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json;

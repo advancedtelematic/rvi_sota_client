@@ -1,16 +1,16 @@
 use chan;
 use chan::Sender;
-use rustc_serialize::{json, Decodable, Encodable};
+use serde::{Deserialize, Serialize};
+use serde_json as json;
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use time;
 
-use datatype::{ChunkReceived, DownloadStarted, Event, InstalledSoftware,
-               RpcRequest, RpcOk, RpcErr, RviConfig, UpdateReport, UpdateRequestId,
-               Url};
-use super::parameters::{Abort, Chunk, Finish, Notify, Parameter, Report, Start};
-use super::transfers::Transfers;
+use datatype::{ChunkReceived, DownloadStarted, Event, InstalledSoftware, RviConfig,
+               UpdateReport, UpdateRequestId, Url};
+use rvi::{RpcErr, RpcOk, RpcRequest, Transfers};
+use rvi::parameters::{Abort, Chunk, Finish, Notify, Parameter, Report, Start};
 
 
 /// Hold references to RVI service endpoints, currently active `Transfers`, and
@@ -78,16 +78,12 @@ impl Services {
     /// to the specific `Parameter.handle()` function, forwarding any returned
     /// `Event` to the `Services` sender.
     fn handle_message<P>(&self, id: u64, msg: &str) -> Result<RpcOk<i32>, RpcErr>
-        where P: Parameter + Encodable + Decodable
+        where P: Parameter + Serialize + Deserialize
     {
-        let request = try!(json::decode::<RpcRequest<RviMessage<P>>>(&msg).map_err(|err| {
-            error!("couldn't decode message: {}", err);
-            RpcErr::invalid_params(id, format!("couldn't decode message: {}", err))
-        }));
-        let event = try!(request.params.parameters[0].handle(&self.remote, &self.transfers).map_err(|err| {
-            error!("couldn't handle parameters: {}", err);
-            RpcErr::unspecified(request.id, format!("couldn't handle parameters: {}", err))
-        }));
+        let request = json::from_str::<RpcRequest<RviMessage<P>>>(&msg)
+            .map_err(|err| RpcErr::invalid_params(id, format!("couldn't decode message: {}", err)))?;
+        let event = request.params.parameters[0].handle(&self.remote, &self.transfers)
+            .map_err(|err| RpcErr::unspecified(request.id, format!("couldn't handle parameters: {}", err)))?;
         event.map(|ev| self.sender.lock().unwrap().send(ev));
         Ok(RpcOk::new(request.id, None))
     }
@@ -106,7 +102,7 @@ impl RemoteServices {
         RemoteServices { device_id: device_id, rvi_client: rvi_client, local: None, backend: None }
     }
 
-    fn send_message<E: Encodable>(&self, body: E, addr: &str) -> Result<String, String> {
+    fn send_message<S: Serialize>(&self, body: S, addr: &str) -> Result<String, String> {
         RpcRequest::new("message", RviMessage::new(addr, vec![body], 60)).send(self.rvi_client.clone())
     }
 
@@ -136,7 +132,7 @@ impl RemoteServices {
 }
 
 
-#[derive(Clone, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct LocalServices {
     pub start:    String,
     pub abort:    String,
@@ -145,7 +141,7 @@ pub struct LocalServices {
     pub getpackages: String,
 }
 
-#[derive(Clone, RustcDecodable, RustcEncodable)]
+#[derive(Clone, Deserialize, Serialize)]
 pub struct BackendServices {
     pub start:    String,
     pub ack:      String,
@@ -154,32 +150,32 @@ pub struct BackendServices {
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 struct UpdateReportResult {
     pub device:        String,
     pub update_report: UpdateReport
 }
 
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 struct InstalledSoftwareResult {
     device_id: String,
     installed: InstalledSoftware
 }
 
 
-#[derive(RustcDecodable, RustcEncodable)]
-pub struct RviMessage<E: Encodable> {
+#[derive(Deserialize, Serialize)]
+pub struct RviMessage<S: Serialize> {
     pub service_name: String,
-    pub parameters:   Vec<E>,
+    pub parameters:   Vec<S>,
     pub timeout:      Option<i64>
 }
 
-impl<E: Encodable> RviMessage<E> {
-    pub fn new(service: &str, parameters: Vec<E>, expire_in: i64) -> RviMessage<E> {
+impl<S: Serialize> RviMessage<S> {
+    pub fn new(service: &str, parameters: Vec<S>, expire_in: i64) -> RviMessage<S> {
         RviMessage {
-            service_name:    service.to_string(),
-            parameters: parameters,
-            timeout:    Some((time::get_time() + time::Duration::seconds(expire_in)).sec)
+            service_name: service.to_string(),
+            parameters:   parameters,
+            timeout:      Some((time::get_time() + time::Duration::seconds(expire_in)).sec)
         }
     }
 }

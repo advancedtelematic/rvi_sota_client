@@ -38,7 +38,7 @@ impl AuthClient {
     pub fn from(auth: Auth) -> Self {
         let mut client = match env::var("HTTP_PROXY") {
             Ok(ref proxy) => {
-                let url = Url::parse(proxy).unwrap_or_else(|err| panic!("couldn't parse HTTP_PROXY: {}", err));
+                let url  = Url::parse(proxy).expect("couldn't parse HTTP_PROXY");
                 let host = url.host_str().expect("couldn't parse HTTP_PROXY host").to_string();
                 let port = url.port_or_known_default().expect("couldn't parse HTTP_PROXY port");
                 HyperClient::with_proxy_config(ProxyConfig(host, port, TlsClient::new()))
@@ -168,7 +168,8 @@ impl AuthRequest {
 
 #[cfg(test)]
 mod tests {
-    use rustc_serialize::json::Json;
+    use serde_json as json;
+    use serde_json::Value;
 
     use super::*;
     use http::{Client, Response, TlsClient, TlsData};
@@ -181,13 +182,12 @@ mod tests {
 
     #[test]
     fn test_send_get_request() {
-        let client  = get_client();
-        let url     = "http://eu.httpbin.org/bytes/16?seed=123".parse().unwrap();
-        let resp_rx = client.get(url, None);
-        let resp    = resp_rx.recv().unwrap();
-        let expect  = vec![13, 22, 104, 27, 230, 9, 137, 85, 218, 40, 86, 85, 62, 0, 111, 22];
-        match resp {
-            Response::Success(data) => assert_eq!(data.body, expect),
+        let url = "http://eu.httpbin.org/bytes/16?seed=123".parse().unwrap();
+        match get_client().get(url, None).recv().unwrap() {
+            Response::Success(data) => {
+                let expect = vec![13, 22, 104, 27, 230, 9, 137, 85, 218, 40, 86, 85, 62, 0, 111, 22];
+                assert_eq!(data.body, expect);
+            }
             Response::Failed(data)  => panic!("failed response: {}", data),
             Response::Error(err)    => panic!("error response: {}", err)
         };
@@ -195,18 +195,14 @@ mod tests {
 
     #[test]
     fn test_send_post_request() {
-        let client  = get_client();
-        let url     = "https://eu.httpbin.org/post".parse().unwrap();
-        let resp_rx = client.post(url, Some(br#"foo"#.to_vec()));
-        let resp    = resp_rx.recv().unwrap();
-        let body    = match resp {
-            Response::Success(data) => String::from_utf8(data.body).unwrap(),
-            Response::Failed(data)  => panic!("failed response: {}", data),
-            Response::Error(err)    => panic!("error response: {}", err)
+        let url = "https://eu.httpbin.org/post".parse().unwrap();
+        match get_client().post(url, Some(br#"foo"#.to_vec())).recv().unwrap() {
+            Response::Success(data) => {
+                let body: Value = json::from_slice(&data.body).unwrap();
+                assert_eq!(body.get("data").unwrap(), &json::Value::String("foo".into()));
+            }
+            Response::Failed(data) => panic!("failed response: {}", data),
+            Response::Error(err)   => panic!("error response: {}", err)
         };
-        let json    = Json::from_str(&body).unwrap();
-        let obj     = json.as_object().unwrap();
-        let data    = obj.get("data").unwrap().as_string().unwrap();
-        assert_eq!(data, "foo");
     }
 }

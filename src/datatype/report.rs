@@ -1,4 +1,3 @@
-use rustc_serialize::{Encodable, Encoder};
 use serde::{Serialize, Serializer};
 use std::process::Command;
 use std::str::FromStr;
@@ -7,7 +6,7 @@ use datatype::{Error, UpdateRequestId};
 
 
 /// An encodable response of the installation outcome.
-#[derive(Serialize, Deserialize, RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct OperationResult {
     pub id:          String,
     pub result_code: UpdateResultCode,
@@ -23,7 +22,7 @@ impl OperationResult {
 
 
 /// A report of a list of installation outcomes.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct UpdateReport {
     pub update_id:         UpdateRequestId,
     pub operation_results: Vec<OperationResult>
@@ -54,7 +53,7 @@ impl UpdateReport {
 
 /// Enumerate the possible outcomes when trying to install a package.
 #[allow(non_camel_case_types)]
-#[derive(Deserialize, RustcDecodable, Clone, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Clone, Debug, PartialEq, Eq)]
 pub enum UpdateResultCode {
     /// Operation executed successfully
     OK = 0,
@@ -128,12 +127,6 @@ impl FromStr for UpdateResultCode {
     }
 }
 
-impl Encodable for UpdateResultCode {
-    fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
-        s.emit_u64(self.clone() as u64)
-    }
-}
-
 impl Serialize for UpdateResultCode {
     fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
         ser.serialize_u64(self.clone() as u64)
@@ -142,7 +135,7 @@ impl Serialize for UpdateResultCode {
 
 
 /// Encapsulates a single firmware installed on the device.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct InstalledFirmware {
     pub module:        String,
     pub firmware_id:   String,
@@ -150,7 +143,7 @@ pub struct InstalledFirmware {
 }
 
 /// Encapsulates a single package installed on the device.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Debug, PartialEq, Eq)]
 pub struct InstalledPackage {
     pub package_id:    String,
     pub name:          String,
@@ -159,7 +152,7 @@ pub struct InstalledPackage {
 }
 
 /// An encodable list of packages and firmwares to send to RVI.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct InstalledSoftware {
     pub packages:  Vec<InstalledPackage>,
     pub firmwares: Vec<InstalledFirmware>

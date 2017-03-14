@@ -1,23 +1,24 @@
-use rustc_serialize::{json, Decodable, Encodable};
+use serde::{Deserialize, Serialize};
+use serde_json as json;
 use time;
 
+use datatype::Url;
 use http::{AuthClient, Client, Response};
-use super::Url;
 
 
 /// Encode the body of a JSON-RPC call.
-#[derive(RustcDecodable, RustcEncodable)]
-pub struct RpcRequest<E: Encodable> {
+#[derive(Deserialize, Serialize)]
+pub struct RpcRequest<S: Serialize> {
     pub jsonrpc: String,
     pub id:      u64,
     pub method:  String,
-    pub params:  E
+    pub params:  S
 }
 
-impl<E: Encodable> RpcRequest<E> {
+impl<S: Serialize> RpcRequest<S> {
     /// Instantiate a new `RpcRequest` with the default version (2.0) and an id
     /// generated from the current time.
-    pub fn new(method: &str, params: E) -> RpcRequest<E> {
+    pub fn new(method: &str, params: S) -> RpcRequest<S> {
         RpcRequest {
             jsonrpc: "2.0".to_string(),
             id:      time::precise_time_ns(),
@@ -28,12 +29,8 @@ impl<E: Encodable> RpcRequest<E> {
 
     /// Send a JSON-RPC POST request to the specified URL.
     pub fn send(&self, url: Url) -> Result<String, String> {
-        let client  = AuthClient::default();
-        let body    = json::encode(self).expect("couldn't encode RpcRequest");
-        let resp_rx = client.post(url, Some(body.into_bytes()));
-        let resp    = resp_rx.recv().expect("no RpcRequest response received");
-
-        match resp {
+        let rx = AuthClient::default().post(url, Some(json::to_vec(self).expect("serialize RpcRequest")));
+        match rx.recv().expect("no RpcRequest response received") {
             Response::Success(data) => String::from_utf8(data.body).or_else(|err| Err(format!("{}", err))),
             Response::Failed(data)  => Err(format!("{}", data)),
             Response::Error(err)    => Err(format!("{}", err))
@@ -43,27 +40,23 @@ impl<E: Encodable> RpcRequest<E> {
 
 
 /// Encapsulates a successful JSON-RPC response.
-#[derive(RustcDecodable, RustcEncodable)]
-pub struct RpcOk<D: Decodable> {
+#[derive(Deserialize, Serialize)]
+pub struct RpcOk<D: Deserialize> {
     pub jsonrpc: String,
     pub id:      u64,
     pub result:  Option<D>
 }
 
-impl<D: Decodable> RpcOk<D> {
+impl<D: Deserialize> RpcOk<D> {
     /// Instantiate a new successful JSON-RPC response type.
     pub fn new(id: u64, result: Option<D>) -> RpcOk<D> {
-        RpcOk {
-            jsonrpc: "2.0".to_string(),
-            id:      id,
-            result:  result
-        }
+        RpcOk { jsonrpc: "2.0".to_string(), id: id, result: result }
     }
 }
 
 
 /// The error code as [specified by jsonrpc](http://www.jsonrpc.org/specification#error_object).
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct ErrorCode {
     pub code:    i32,
     pub message: String,
@@ -71,7 +64,7 @@ pub struct ErrorCode {
 }
 
 /// Encapsulates a failed JSON-RPC response.
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct RpcErr {
     pub jsonrpc: String,
     pub id:      u64,

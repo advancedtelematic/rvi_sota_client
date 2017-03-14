@@ -8,7 +8,7 @@ use datatype::{Auth, ClientCredentials, Error, InstalledSoftware, OstreePackage,
 
 
 /// System-wide commands that are sent to the interpreter.
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub enum Command {
     /// Authenticate with the auth server.
     Authenticate(Auth),

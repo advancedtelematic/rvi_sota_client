@@ -265,7 +265,7 @@ mod tests {
 
     #[test]
     fn test_read_manifest() {
-        let bytes = read_file("tests/uptane/manifest.json").unwrap_or_else(|err| panic!("{}", err));
+        let bytes = read_file("tests/uptane/manifest.json").expect("couldn't read manifest.json");
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "{ecu serial}");
