@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::process::Command;
 
 use datatype::{EcuCustom, EcuVersion, Error, Package, TufCustom, TufImage, TufMeta,
-               UpdateResultCode as Code};
+               UpdateResultCode as Code, Url};
 use package_manager::{Credentials, InstallOutcome, parse_package};
 
 
@@ -63,9 +63,9 @@ impl Default for OstreePackage {
 
 impl OstreePackage {
     /// Convert from TufMeta to an OstreePackage.
-    pub fn from(refname: String, hash: &str, meta: TufMeta) -> Result<Self, String> {
-        let (id, uri) = match meta.custom {
-            Some(TufCustom { ecuIdentifier: id, uri: Some(uri), .. }) => Ok((id, uri)),
+    pub fn from(refname: String, hash: &str, meta: TufMeta, treehub: &Url) -> Result<Self, String> {
+        let id = match meta.custom {
+            Some(TufCustom { ecuIdentifier: id, .. }) => Ok(id),
             _ => Err(format!("couldn't get custom for target: {}", refname))
         }?;
 
@@ -74,7 +74,7 @@ impl OstreePackage {
                 commit:      commit.clone(),
                 refName:     refname,
                 description: id,
-                pullUri:     uri
+                pullUri:     format!("{}", treehub),
             }),
 
             None => Err(format!("couldn't get sha256 hash for target: {}", refname))

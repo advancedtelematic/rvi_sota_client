@@ -1,4 +1,5 @@
 use rustc_serialize::{Encodable, Encoder};
+use serde::{Serialize, Serializer};
 use std::process::Command;
 use std::str::FromStr;
 
@@ -59,7 +60,7 @@ impl Default for UpdateReport {
 
 /// Enumerate the possible outcomes when trying to install a package.
 #[allow(non_camel_case_types)]
-#[derive(Serialize, Deserialize, RustcDecodable, Clone, Debug, PartialEq, Eq)]
+#[derive(Deserialize, RustcDecodable, Clone, Debug, PartialEq, Eq)]
 pub enum UpdateResultCode {
     /// Operation executed successfully
     OK = 0,
@@ -136,6 +137,12 @@ impl FromStr for UpdateResultCode {
 impl Encodable for UpdateResultCode {
     fn encode<S: Encoder>(&self, s: &mut S) -> Result<(), S::Error> {
         s.emit_u64(self.clone() as u64)
+    }
+}
+
+impl Serialize for UpdateResultCode {
+    fn serialize<S: Serializer>(&self, ser: S) -> Result<S::Ok, S::Error> {
+        ser.serialize_u64(self.clone() as u64)
     }
 }
 
