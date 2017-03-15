@@ -8,6 +8,7 @@ use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{Display, Formatter, Result as FmtResult};
 use std::io::Error as IoError;
+use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 use std::sync::PoisonError;
 use std::sync::mpsc::{SendError, RecvError};
@@ -36,7 +37,6 @@ pub enum Error {
     JsonEncoder(JsonEncoderError),
     JsonParser(JsonParserError),
     Openssl(OpensslErrors),
-    OstreeCommand(String),
     Package(String),
     Parse(String),
     Poison(String),
@@ -57,6 +57,7 @@ pub enum Error {
     UptaneUnknownRole,
     UptaneVerifySignatures,
     UrlParse(UrlParseError),
+    Utf8(Utf8Error),
     Verify(String),
     Websocket(WebsocketError),
 }
@@ -98,6 +99,7 @@ derive_from!([
     SerdeJsonError   => SerdeJson,
     TomlDecodeError  => TomlDecode,
     UrlParseError    => UrlParse,
+    Utf8Error        => Utf8,
     WebsocketError   => Websocket
 ]);
 
@@ -123,7 +125,6 @@ impl Display for Error {
             Error::JsonEncoder(ref e)   => format!("Failed to encode JSON: {}", e.clone()),
             Error::JsonParser(ref e)    => format!("Failed to parse JSON: {}", e.clone()),
             Error::Openssl(ref e)       => format!("OpenSSL errors: {}", e.clone()),
-            Error::OstreeCommand(ref s) => format!("OSTree command failed: {}", s.clone()),
             Error::Poison(ref e)        => format!("Poison error: {}", e.clone()),
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),
             Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),
@@ -144,6 +145,7 @@ impl Display for Error {
             Error::UptaneUnknownRole           => format!("Uptane: unknown role"),
             Error::UptaneVerifySignatures      => format!("Uptane: invalid signature"),
             Error::UrlParse(ref s)  => format!("Url parse error: {}", s.clone()),
+            Error::Utf8(ref e)      => format!("Utf8 error: {}", e.clone()),
             Error::Verify(ref s)    => format!("Verification error: {}", s.clone()),
             Error::Websocket(ref e) => format!("Websocket Error: {:?}", e.clone()),
         };

@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 
-use datatype::{DownloadComplete, Package, TufMeta, UpdateAvailable, UpdateReport,
-               UpdateRequest, UpdateRequestId};
+use datatype::{DownloadComplete, Package, OperationResult, TufMeta, UpdateAvailable,
+               UpdateReport, UpdateRequest, UpdateRequestId};
 
 
 /// System-wide events that are broadcast to all interested parties.
@@ -43,6 +43,8 @@ pub enum Event {
     InstallComplete(UpdateReport),
     /// The installation of an update failed.
     InstallFailed(UpdateReport),
+    /// Report an OSTree installation outcome.
+    OstreeInstallation(OperationResult),
 
     /// An update report was sent to the Core server.
     UpdateReportSent,

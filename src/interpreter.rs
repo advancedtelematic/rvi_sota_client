@@ -98,9 +98,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::InstallComplete(report) | Event::InstallFailed(report) => {
-                if self.pacman != PackageManager::Uptane {
-                    ctx.send(Command::SendUpdateReport(report));
-                }
+                ctx.send(Command::SendUpdateReport(report));
             }
 
             Event::UpdateReportSent => {
@@ -113,11 +111,13 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::UptaneTargetsUpdated(targets) => {
-                let treehub = self.treehub.as_ref().expect("uptane expects a treehub pullUri");
+                let treehub = self.treehub.as_ref().expect("uptane expects a treehub url");
                 for (refname, meta) in targets {
-                    match OstreePackage::from(refname, "sha256", meta, treehub) {
-                        Ok(pkg)  => ctx.send(Command::OstreeInstall(pkg)),
-                        Err(err) => error!("{}", err)
+                    if let Some(commit) = meta.hashes.get("sha256") {
+                        let pkg = OstreePackage::new(refname, commit.clone(), "".into(), treehub);
+                        ctx.send(Command::OstreeInstall(pkg));
+                    } else {
+                        error!("couldn't get sha256 for {}", refname);
                     }
                 }
             }
@@ -235,54 +235,42 @@ impl CommandInterpreter {
             Command::ListInstalledPackages => {
                 let mut packages: Vec<Package> = Vec::new();
                 if self.config.device.package_manager != PackageManager::Off {
-                    packages = try!(self.config.device.package_manager.installed_packages());
+                    packages = self.config.device.package_manager.installed_packages()?;
                 }
                 Event::FoundInstalledPackages(packages)
             }
 
             Command::ListSystemInfo => {
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                Event::FoundSystemInfo(try!(system_info(&cmd)))
+                Event::FoundSystemInfo(system_info(&cmd)?)
             }
 
             Command::OstreeInstall(pkg) => {
-                let (ok, code, out) = match pkg.install(self.get_credentials()) {
-                    Ok((code, out))  => (true, code, out),
-                    Err((code, out)) => (false, code, out),
-                };
-
+                let (code, out) = pkg.install(self.get_credentials())?;
                 let result = OperationResult::new(pkg.refName.clone(), code, out);
                 if let CommandMode::Uptane(ref mut uptane) = self.mode {
                     uptane.send_manifest = true;
                     uptane.ecu_custom = Some(EcuCustom { operation_result: result.clone() });
                 }
-
-                if ok {
-                    Event::InstallComplete(UpdateReport::from(result))
-                } else {
-                    Event::InstallFailed(UpdateReport::from(result))
-                }
+                Event::OstreeInstallation(result)
             }
 
             Command::SendInstalledPackages(packages) => {
-                try!(sota.send_installed_packages(&packages));
+                sota.send_installed_packages(&packages)?;
                 Event::InstalledPackagesSent
             }
 
             Command::SendInstalledSoftware(sw) => {
-                match self.mode {
-                    CommandMode::Rvi(ref rvi) => {
-                        let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
-                        Event::InstalledSoftwareSent
-                    }
-
-                    _ => Event::InstalledSoftwareSent
+                if let CommandMode::Rvi(ref rvi) = self.mode {
+                    let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
                 }
+                Event::InstalledSoftwareSent
             }
 
             Command::SendSystemInfo => {
-                let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                try!(sota.send_system_info(&try!(system_info(&cmd))));
+                if let Some(ref cmd) = self.config.device.system_info {
+                    sota.send_system_info(&system_info(&cmd)?)?;
+                }
                 Event::SystemInfoSent
             }
 
