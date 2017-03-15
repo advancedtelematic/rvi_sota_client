@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::process::Command;
 
 use datatype::{EcuCustom, EcuVersion, Error, Package, TufCustom, TufImage, TufMeta,
-               UpdateResultCode as Code};
+               UpdateResultCode as Code, Url};
 use package_manager::{Credentials, InstallOutcome, parse_package};
 
 
@@ -63,9 +63,9 @@ impl Default for OstreePackage {
 
 impl OstreePackage {
     /// Convert from TufMeta to an OstreePackage.
-    pub fn from(refname: String, hash: &str, meta: TufMeta) -> Result<Self, String> {
-        let (id, uri) = match meta.custom {
-            Some(TufCustom { ecuIdentifier: id, uri: Some(uri), .. }) => Ok((id, uri)),
+    pub fn from(refname: String, hash: &str, meta: TufMeta, treehub: &Url) -> Result<Self, String> {
+        let id = match meta.custom {
+            Some(TufCustom { ecuIdentifier: id, .. }) => Ok(id),
             _ => Err(format!("couldn't get custom for target: {}", refname))
         }?;
 
@@ -74,7 +74,7 @@ impl OstreePackage {
                 commit:      commit.clone(),
                 refName:     refname,
                 description: id,
-                pullUri:     uri
+                pullUri:     format!("{}", treehub),
             }),
 
             None => Err(format!("couldn't get sha256 hash for target: {}", refname))
@@ -93,6 +93,7 @@ impl OstreePackage {
         creds.access_token.map(|t| cmd.env("AUTHPLUS_ACCESS_TOKEN", t.clone()));
         creds.ca_file.map(|f| cmd.env("TLS_CA_CERT", f.clone()));
         creds.cert_file.map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
+        creds.pkey_file.map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
 
         let output = cmd.output().map_err(|err| (Code::GENERAL_ERROR, format!("ostree install: {}", err)))?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -159,12 +160,12 @@ impl Ostree {
                 let first  = branch[0].split(" ").collect::<Vec<_>>();
                 let second = branch[1].split(" ").collect::<Vec<_>>();
 
-                let (current, refname, commit) = match first.len() {
+                let (current, desc, commit) = match first.len() {
                     2 => (false, first[0], first[1]),
                     3 if first[0].trim() == "*" => (true, first[1], first[2]),
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", first)))
                 };
-                let desc = match second.len() {
+                let refname = match second.len() {
                     3 if second[0].trim() == "origin" && second[1].trim() == "refspec:" => second[2],
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", second)))
                 };
@@ -199,9 +200,10 @@ mod tests {
             .unwrap_or_else(|err| panic!("couldn't parse branches: {}", err));
         assert_eq!(branches.len(), 2);
         assert_eq!(branches[0].current, true);
-        assert_eq!(branches[0].refName, "gnome-ostree");
+        assert_eq!(branches[0].refName, "gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches[0].description, "gnome-ostree");
         assert_eq!(branches[0].commit, "67e382b11d213a402a5313e61cbc69dfd5ab93cb07");
         assert_eq!(branches[1].current, false);
-        assert_eq!(branches[1].description,"osname:gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches[1].refName,"osname:gnome-ostree/buildmaster/x86_64-runtime");
     }
 }

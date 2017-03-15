@@ -118,15 +118,17 @@ fn main() {
 
         let ei_sub  = broadcast.subscribe();
         let ei_ctx  = ctx.clone();
+        let ei_auth = auth.clone();
         let ei_mgr  = config.device.package_manager.clone();
         let ei_dl   = config.device.auto_download.clone();
         let ei_sys  = config.device.system_info.clone();
-        let ei_auth = auth.clone();
+        let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("treehub")));
         scope.spawn(move || EventInterpreter {
             initial: ei_auth,
             pacman:  ei_mgr,
             auto_dl: ei_dl,
-            sysinfo: ei_sys
+            sysinfo: ei_sys,
+            treehub: ei_tree,
         }.run(ei_sub, ei_ctx));
 
         let ii_itx = itx.clone();

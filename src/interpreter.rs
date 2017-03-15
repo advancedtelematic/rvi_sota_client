@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
                OstreePackage, Package, UpdateReport, UpdateRequestStatus as Status,
-               UpdateResultCode, system_info};
+               UpdateResultCode, Url, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use authenticate::oauth2;
@@ -35,6 +35,7 @@ pub struct EventInterpreter {
     pub pacman:  PackageManager,
     pub auto_dl: bool,
     pub sysinfo: Option<String>,
+    pub treehub: Option<Url>,
 }
 
 impl Display for EventInterpreter {
@@ -112,8 +113,9 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::UptaneTargetsUpdated(targets) => {
+                let treehub = self.treehub.as_ref().expect("uptane expects a treehub pullUri");
                 for (refname, meta) in targets {
-                    match OstreePackage::from(refname, "sha256", meta) {
+                    match OstreePackage::from(refname, "sha256", meta, treehub) {
                         Ok(pkg)  => ctx.send(Command::OstreeInstall(pkg)),
                         Err(err) => error!("{}", err)
                     }
@@ -380,10 +382,17 @@ impl CommandInterpreter {
             None
         };
 
+        let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
+            (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
+        } else {
+            (None, None, None)
+        };
+
         Credentials {
             access_token: token,
-            ca_file:      None,
-            cert_file:    None,
+            ca_file:      ca,
+            cert_file:    cert,
+            pkey_file:    pkey,
         }
     }
 }
