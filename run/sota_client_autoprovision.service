@@ -12,7 +12,6 @@ EnvironmentFile=/var/sota/sota_provisioning_url.env
 Environment=SOTA_CERT_DIR=/var/sota
 ExecStart=/usr/bin/sota_prov.sh sota_provisioning_credentials
 RemainAfterExit=true
-ExecStop=/bin/rm device.p12
 StandardOutput=journal 
 
 [Install]
