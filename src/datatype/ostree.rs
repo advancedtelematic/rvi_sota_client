@@ -160,12 +160,12 @@ impl Ostree {
                 let first  = branch[0].split(" ").collect::<Vec<_>>();
                 let second = branch[1].split(" ").collect::<Vec<_>>();
 
-                let (current, refname, commit) = match first.len() {
+                let (current, desc, commit) = match first.len() {
                     2 => (false, first[0], first[1]),
                     3 if first[0].trim() == "*" => (true, first[1], first[2]),
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", first)))
                 };
-                let desc = match second.len() {
+                let refname = match second.len() {
                     3 if second[0].trim() == "origin" && second[1].trim() == "refspec:" => second[2],
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", second)))
                 };
@@ -200,9 +200,10 @@ mod tests {
             .unwrap_or_else(|err| panic!("couldn't parse branches: {}", err));
         assert_eq!(branches.len(), 2);
         assert_eq!(branches[0].current, true);
-        assert_eq!(branches[0].refName, "gnome-ostree");
+        assert_eq!(branches[0].refName, "gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches[0].description, "gnome-ostree");
         assert_eq!(branches[0].commit, "67e382b11d213a402a5313e61cbc69dfd5ab93cb07");
         assert_eq!(branches[1].current, false);
-        assert_eq!(branches[1].description,"osname:gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches[1].refName,"osname:gnome-ostree/buildmaster/x86_64-runtime");
     }
 }
