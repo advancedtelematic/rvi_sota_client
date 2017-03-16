@@ -8,10 +8,11 @@ use std::str;
 
 use datatype::{EcuCustom, EcuVersion, Error, TufImage, TufMeta, UpdateResultCode as Code, Url};
 use package_manager::{Credentials, InstallOutcome};
-use uptane::write_file;
+use uptane::{read_file, write_file};
 
 
-const CURRENT_PACKAGE: &'static str = "/tmp/ostree-current";
+const NEW_PACKAGE: &'static str = "/tmp/sota-package";
+const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 
 
 /// Details of a remote OSTree package.
@@ -54,7 +55,7 @@ impl OstreePackage {
 
         match output.status.code() {
             Some(0) => {
-                write_file(CURRENT_PACKAGE, &json::to_vec(self)?)?;
+                write_file(NEW_PACKAGE, &json::to_vec(self)?)?;
                 Ok((Code::OK, stdout))
             }
             Some(99) => Ok((Code::ALREADY_PROCESSED, stdout)),
@@ -84,18 +85,24 @@ impl OstreePackage {
         }
     }
 
-    /// Get the current OSTree package from "/tmp/ostree-current" if it exists,
-    /// or from running `ostree admin status` otherwise.
+    /// Get the current OSTree package based on the last successful installation
+    /// if it exists, or from running `ostree admin status` otherwise.
     pub fn get_current() -> Result<Self, Error> {
-        if Path::new(CURRENT_PACKAGE).exists() {
-            debug!("getting ostree branch from `{}`", CURRENT_PACKAGE);
-            return Ok(json::from_reader(BufReader::new(File::open(CURRENT_PACKAGE)?))?);
-        }
+        let branch = if Path::new(NEW_PACKAGE).exists() {
+            debug!("getting ostree package from `{}`", NEW_PACKAGE);
+            return Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?);
+        } else if Path::new(BOOT_BRANCH).exists() {
+            debug!("getting ostree branch from `{}`", BOOT_BRANCH);
+            String::from_utf8(read_file(BOOT_BRANCH)?).unwrap_or("[error]".into())
+        } else {
+            debug!("unknown ostree branch");
+            "[error]".into()
+        };
 
         debug!("getting ostree branch with `ostree admin status`");
         Command::new("ostree").arg("admin").arg("status").output()
             .map_err(|err| Error::Command(format!("couldn't run `ostree admin status`: {}", err)))
-            .and_then(|output| OstreeBranch::parse(str::from_utf8(&output.stdout)?))
+            .and_then(|output| OstreeBranch::parse(&branch, str::from_utf8(&output.stdout)?))
             .and_then(|branches| {
                 for branch in branches {
                     if branch.current {
@@ -115,7 +122,7 @@ struct OstreeBranch {
 
 impl OstreeBranch {
     /// Parse the output from `ostree admin status`
-    fn parse(stdout: &str) -> Result<Vec<OstreeBranch>, Error> {
+    fn parse(branch_name: &str, stdout: &str) -> Result<Vec<OstreeBranch>, Error> {
         stdout.lines()
             .map(str::trim)
             .filter(|line| line.len() > 0)
@@ -130,15 +137,15 @@ impl OstreeBranch {
                     3 if first[0].trim() == "*" => (true, first[1], first[2]),
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", first)))
                 };
-                let refname = match second.len() {
+                let refspec = match second.len() {
                     3 if second[0].trim() == "origin" && second[1].trim() == "refspec:" => second[2],
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", second)))
-                };
+                }.split(":").last().expect("couldn't split refname");
 
                 Ok(OstreeBranch {
                     current: current,
                     package: OstreePackage {
-                        refName:     refname.into(),
+                        refName:     format!("{}-{}", branch_name, refspec),
                         commit:      commit.split(".").collect::<Vec<_>>()[0].into(),
                         description: desc.into(),
                         pullUri:     "".into(),
@@ -156,22 +163,26 @@ mod tests {
 
 
     const OSTREE_ADMIN_STATUS: &'static str = r#"
-        * gnome-ostree 67e382b11d213a402a5313e61cbc69dfd5ab93cb07.0
+          gnome-ostree 67e382b11d213a402a5313e61cbc69dfd5ab93cb07.0
             origin refspec: gnome-ostree/buildmaster/x86_64-runtime
-          gnome-ostree ce19c41036cc45e49b0cecf6b157523c2105c4de1c.0
+        * gnome-ostree ce19c41036cc45e49b0cecf6b157523c2105c4de1c.0
             origin refspec: osname:gnome-ostree/buildmaster/x86_64-runtime
+          gnome-ostree ce19c41036cc45e49b0cecf6b157523c2105c4de1c.0
+            origin refspec: one:two:three
         "#;
 
     #[test]
     fn test_parse_branches() {
-        let branches = OstreeBranch::parse(OSTREE_ADMIN_STATUS)
+        let branches = OstreeBranch::parse("test", OSTREE_ADMIN_STATUS)
             .unwrap_or_else(|err| panic!("couldn't parse branches: {}", err));
-        assert_eq!(branches.len(), 2);
-        assert_eq!(branches[0].current, true);
-        assert_eq!(branches[0].package.refName, "gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches.len(), 3);
+        assert_eq!(branches[0].current, false);
+        assert_eq!(branches[0].package.refName, "test-gnome-ostree/buildmaster/x86_64-runtime");
         assert_eq!(branches[0].package.description, "gnome-ostree");
         assert_eq!(branches[0].package.commit, "67e382b11d213a402a5313e61cbc69dfd5ab93cb07");
-        assert_eq!(branches[1].current, false);
-        assert_eq!(branches[1].package.refName,"osname:gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches[1].current, true);
+        assert_eq!(branches[1].package.refName,"test-gnome-ostree/buildmaster/x86_64-runtime");
+        assert_eq!(branches[2].current, false);
+        assert_eq!(branches[2].package.refName,"test-three");
     }
 }

@@ -1,10 +1,11 @@
 use chan::{Sender, Receiver};
 use std;
+use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
-               OstreePackage, Package, UpdateReport, UpdateRequestStatus as Status,
+               OstreePackage, Package, RoleName, UpdateReport, UpdateRequestStatus as Status,
                UpdateResultCode, Url, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -12,7 +13,7 @@ use authenticate::oauth2;
 use package_manager::{Credentials, PackageManager};
 use rvi::Services;
 use sota::Sota;
-use uptane::{Service, Uptane};
+use uptane::Uptane;
 
 
 /// An `Interpreter` loops over any incoming values, on receipt of which it
@@ -220,10 +221,10 @@ impl CommandInterpreter {
 
                     CommandMode::Uptane(ref mut uptane) => {
                         uptane.initialize(&*self.http)?;
-                        let (_, ts_new) = uptane.get_timestamp(&*self.http, Service::Director)?;
-                        if ts_new {
-                            let (targets, _) = uptane.get_targets(&*self.http, Service::Director)?;
-                            Event::UptaneTargetsUpdated(targets.targets)
+                        let timestamp = uptane.get_director(&*self.http, RoleName::Timestamp)?;
+                        if timestamp.is_new() {
+                            let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
+                            Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or(HashMap::new()))
                         } else {
                             Event::UptaneTimestampUpdated
                         }
@@ -250,6 +251,7 @@ impl CommandInterpreter {
                 let result = OperationResult::new(pkg.refName.clone(), code, out);
                 if let CommandMode::Uptane(ref mut uptane) = self.mode {
                     uptane.send_manifest = true;
+                    // FIXME: multiple packages
                     uptane.ecu_custom = Some(EcuCustom { operation_result: result.clone() });
                 }
                 Event::OstreeInstallation(result)
@@ -342,7 +344,7 @@ impl CommandInterpreter {
                     self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
                 }
 
-                let token = oauth2(cfg.server.join("/token"), self.http.as_ref())?;
+                let token = oauth2(cfg.server.join("token"), self.http.as_ref())?;
                 self.auth = Auth::Token(token.clone());
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Token(token)));

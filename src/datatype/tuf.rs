@@ -2,60 +2,72 @@ use chrono::{DateTime, NaiveDateTime, UTC};
 use rustc_serialize::base64::{self, ToBase64};
 use serde;
 use serde_json as json;
+use std::fmt::{self, Display, Formatter};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
-use time::Duration;
 
 use datatype::{Error, KeyType, OperationResult, SigType, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
 #[serde(tag = "_type")]
-pub enum Role {
+pub enum RoleName {
     Root,
     Targets,
     Snapshot,
     Timestamp
 }
 
-impl serde::Deserialize for Role {
-    fn deserialize<D: serde::Deserializer>(de: D) -> Result<Role, D::Error> {
+impl serde::Deserialize for RoleName {
+    fn deserialize<D: serde::Deserializer>(de: D) -> Result<RoleName, D::Error> {
         if let json::Value::String(ref s) = serde::Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| serde::de::Error::custom(format!("unknown Role: {}", err)))
+            s.parse().map_err(|err| serde::de::Error::custom(format!("unknown RoleName: {}", err)))
         } else {
-            Err(serde::de::Error::custom("Unknown `Role` from `_type` field"))
+            Err(serde::de::Error::custom("Unknown `RoleName` from `_type` field"))
         }
     }
 }
 
-impl FromStr for Role {
+impl FromStr for RoleName {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "root"      | "Root"      => Ok(Role::Root),
-            "snapshot"  | "Snapshot"  => Ok(Role::Snapshot),
-            "targets"   | "Targets"   => Ok(Role::Targets),
-            "timestamp" | "Timestamp" => Ok(Role::Timestamp),
-            _ => Err(Error::UptaneInvalidRole)
+            "root"      | "Root"      => Ok(RoleName::Root),
+            "snapshot"  | "Snapshot"  => Ok(RoleName::Snapshot),
+            "targets"   | "Targets"   => Ok(RoleName::Targets),
+            "timestamp" | "Timestamp" => Ok(RoleName::Timestamp),
+            _                         => Err(Error::UptaneInvalidRole)
+        }
+    }
+}
+
+impl Display for RoleName {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        match *self {
+            RoleName::Root      => write!(f, "{}", "root"),
+            RoleName::Targets   => write!(f, "{}", "targets"),
+            RoleName::Snapshot  => write!(f, "{}", "snapshot"),
+            RoleName::Timestamp => write!(f, "{}", "timestamp"),
         }
     }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct RoleData {
-    pub keyids:    HashSet<String>,
-    pub threshold: u64,
+    pub _type:   RoleName,
+    pub version: u64,
+    pub expires: DateTime<UTC>,
+    pub keys:    Option<HashMap<String, Key>>,        // root only
+    pub roles:   Option<HashMap<RoleName, RoleMeta>>, // root only
+    pub targets: Option<HashMap<String, TufMeta>>,    // targets only
+    pub meta:    Option<HashMap<String, TufMeta>>,    // timestamp/snapshot only
 }
 
-impl RoleData {
-    pub fn new(keyids: HashSet<String>, threshold: u64) -> Self {
-        RoleData { keyids: keyids, threshold: threshold }
-    }
-
-    pub fn valid_key(&self, id: &str) -> bool {
-        self.keyids.contains(id)
-    }
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct RoleMeta {
+    pub keyids:    HashSet<String>,
+    pub threshold: u64,
 }
 
 
@@ -86,8 +98,7 @@ pub struct TufSigned {
 
 impl TufSigned {
     pub fn sign(signed: json::Value, privkey: &PrivateKey, sigtype: SigType) -> Result<TufSigned, Error> {
-        let canonical = canonicalize_json(json::to_string(&signed)?.as_bytes())?;
-        let sig = sigtype.sign(&canonical, &privkey.der_key)?;
+        let sig = sigtype.sign(&canonicalize_json(&json::to_vec(&signed)?)?, &privkey.der_key)?;
         Ok(TufSigned {
             signatures: vec![Signature {
                 keyid:  privkey.keyid.clone(),
@@ -106,9 +117,10 @@ pub struct Signature {
     pub sig:    String,
 }
 
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TufRole {
-    pub _type:   Role,
+    pub _type:   RoleName,
     pub expires: String,
     pub version: u64,
 }
@@ -162,88 +174,4 @@ pub struct EcuVersion {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct EcuCustom {
     pub operation_result: OperationResult
-}
-
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Root {
-    pub _type:   Role,
-    pub version: u64,
-    pub expires: DateTime<UTC>,
-    pub keys:    HashMap<String, Key>,
-    pub roles:   HashMap<Role, RoleData>,
-    pub consistent_snapshot: bool
-}
-
-impl Default for Root {
-    fn default() -> Self {
-        Root {
-            _type:   Role::Root,
-            version: 0,
-            expires: UTC::now() + Duration::days(365),
-            keys:    HashMap::new(),
-            roles:   HashMap::new(),
-            consistent_snapshot: true
-        }
-    }
-}
-
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Targets {
-    pub _type:   Role,
-    pub version: u64,
-    pub expires: DateTime<UTC>,
-    pub targets: HashMap<String, TufMeta>,
-}
-
-impl Default for Targets {
-    fn default() -> Self {
-        Targets {
-            _type:   Role::Targets,
-            version: 0,
-            expires: UTC::now() + Duration::days(30),
-            targets: HashMap::new()
-        }
-    }
-}
-
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Snapshot {
-    pub _type:   Role,
-    pub version: u64,
-    pub expires: DateTime<UTC>,
-    pub meta:    HashMap<String, TufMeta>,
-}
-
-impl Default for Snapshot {
-    fn default() -> Self {
-        Snapshot {
-            _type:   Role::Snapshot,
-            version: 0,
-            expires: UTC::now() + Duration::days(7),
-            meta:    HashMap::new()
-        }
-    }
-}
-
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Timestamp {
-    pub _type:   Role,
-    pub version: u64,
-    pub expires: DateTime<UTC>,
-    pub meta:    HashMap<String, TufMeta>
-}
-
-impl Default for Timestamp {
-    fn default() -> Self {
-        Timestamp {
-            _type:   Role::Timestamp,
-            version: 0,
-            expires: UTC::now() + Duration::days(1),
-            meta:    HashMap::new()
-        }
-    }
 }

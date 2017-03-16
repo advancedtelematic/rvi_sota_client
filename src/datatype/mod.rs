@@ -26,9 +26,9 @@ pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, Downloa
                         UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
 pub use self::ostree::OstreePackage;
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyValue, PrivateKey,
-                    Role, RoleData, Root, Signature, Snapshot, Targets, Timestamp,
-                    TufCustom, TufImage, TufMeta, TufRole, TufSigned};
-pub use self::verify::{KeyType, SigType, Verifier};
+                    RoleData, RoleName, RoleMeta, Signature, TufCustom, TufImage,
+                    TufMeta, TufRole, TufSigned};
+pub use self::verify::{KeyType, SigType, Verified, Verifier};
 
 
 // TODO remove this ugly hack ASAP

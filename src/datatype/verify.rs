@@ -16,7 +16,7 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 use untrusted;
 
-use datatype::{Error, Key, Role, RoleData, TufSigned, TufRole, canonicalize_json};
+use datatype::{Error, Key, RoleData, RoleName, RoleMeta, TufSigned, TufRole, canonicalize_json};
 
 
 #[derive(Serialize, PartialEq, Eq, Debug, Clone)]
@@ -171,31 +171,48 @@ impl SigType {
 }
 
 
+pub struct Verified {
+    pub role:    RoleName,
+    pub data:    RoleData,
+    pub old_ver: u64,
+    pub new_ver: u64,
+}
+
+impl Verified {
+    pub fn is_new(&self) -> bool {
+        self.new_ver > self.old_ver
+    }
+}
+
+
+#[derive(Default)]
 pub struct Verifier {
-    keys:  HashMap<String, Key>,
-    roles: HashMap<Role, RoleData>
+    keys:     HashMap<String, Key>,
+    roles:    HashMap<RoleName, RoleMeta>,
+    versions: HashMap<RoleName, u64>,
 }
 
 impl Verifier {
-    pub fn new() -> Self {
-        Verifier {
-            keys:  HashMap::new(),
-            roles: HashMap::new(),
-        }
-    }
-
     pub fn add_key(&mut self, id: String, key: Key) {
-        debug!("inserting to verifier: {}", id);
+        trace!("inserting to verifier: {}", id);
         self.keys.insert(id, key);
     }
 
-    pub fn add_role(&mut self, role: Role, data: RoleData) {
-        debug!("inserting role to verifier: {:?}", role);
-        self.roles.insert(role, data);
+    pub fn add_meta(&mut self, role: RoleName, meta: RoleMeta) {
+        trace!("inserting role metadata to verifier: {:?}", meta);
+        self.roles.insert(role, meta);
     }
 
-    /// Return the version of the signed metadata on success.
-    pub fn verify(&self, role: &Role, signed: &TufSigned) -> Result<u64, Error> {
+    pub fn set_version(&mut self, role: &RoleName, new_ver: u64) -> u64 {
+        let old_ver = self.versions.insert(role.clone(), new_ver).unwrap_or(0);
+        if new_ver > old_ver {
+            debug!("{} version changed: {} -> {}", role, old_ver, new_ver);
+        }
+        old_ver
+    }
+
+    /// Verify the signed data then return the version.
+    pub fn verify(&self, role: &RoleName, signed: &TufSigned) -> Result<u64, Error> {
         self.verify_signatures(role, signed)?;
         let tuf_role = json::from_value::<TufRole>(signed.signed.clone())?;
         if tuf_role._type != *role {
@@ -207,7 +224,7 @@ impl Verifier {
         }
     }
 
-    pub fn verify_signatures(&self, role: &Role, signed: &TufSigned) -> Result<(), Error> {
+    pub fn verify_signatures(&self, role: &RoleName, signed: &TufSigned) -> Result<(), Error> {
         if signed.signatures.is_empty() {
             return Err(Error::UptaneMissingSignatures);
         }
@@ -246,6 +263,7 @@ impl Verifier {
             }
         }
 
+        trace!("getting role: {}", role);
         let role = self.roles.get(role).ok_or(Error::UptaneUnknownRole)?;
         if valid_count < role.threshold {
             Err(Error::UptaneRoleThreshold)
