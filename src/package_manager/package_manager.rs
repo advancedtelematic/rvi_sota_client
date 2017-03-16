@@ -10,17 +10,12 @@ use package_manager::{deb, ostree, rpm, test};
 pub type InstallOutcome = (UpdateResultCode, String);
 
 /// Optional credentials for forwarding the to package manager.
+#[derive(Default)]
 pub struct Credentials {
     pub access_token: Option<String>,
     pub ca_file:      Option<String>,
     pub cert_file:    Option<String>,
     pub pkey_file:    Option<String>,
-}
-
-impl Default for Credentials {
-    fn default() -> Self {
-        Credentials { access_token: None, ca_file: None, cert_file: None, pkey_file: None }
-    }
 }
 
 
@@ -138,25 +133,19 @@ mod tests {
 
     #[test]
     fn test_parses_normal_package() {
-        assert_eq!(parse_package("uuid-runtime 2.20.1-5.1ubuntu20.7").unwrap(),
-                   Package {
-                       name: "uuid-runtime".to_string(),
-                       version: "2.20.1-5.1ubuntu20.7".to_string()
-                   });
+        let pkg = Package { name: "uuid-runtime".to_string(), version: "2.20.1-5.1ubuntu20.7".to_string() };
+        assert_eq!(pkg, parse_package("uuid-runtime 2.20.1-5.1ubuntu20.7").unwrap())
     }
 
     #[test]
     fn test_separates_name_and_version_correctly() {
-        assert_eq!(parse_package("vim 2.1 foobar").unwrap(),
-                   Package {
-                       name: "vim".to_string(),
-                       version: "2.1 foobar".to_string()
-                   });
+        let pkg = Package { name: "vim".to_string(), version: "2.1 foobar".to_string() };
+        assert_eq!(pkg, parse_package("vim 2.1 foobar").unwrap());
     }
 
     #[test]
     fn test_rejects_bogus_input() {
-        assert_eq!(format!("{}", parse_package("foobar").unwrap_err()),
-                   "Parse error: couldn't parse package: foobar".to_string());
+        let expect = "Parse error: couldn't parse package: foobar".to_string();
+        assert_eq!(expect, format!("{}", parse_package("foobar").unwrap_err()));
     }
 }

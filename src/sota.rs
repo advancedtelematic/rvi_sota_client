@@ -149,7 +149,7 @@ mod tests {
         };
 
         let updates: Vec<UpdateRequest> = sota.get_update_requests().unwrap();
-        let ids: Vec<String> = updates.iter().map(|p| p.requestId.clone()).collect();
-        assert_eq!(ids, vec!["someid".to_string()])
+        let ids: Vec<&str> = updates.iter().map(|p| p.requestId.as_ref()).collect();
+        assert_eq!(ids, vec!["someid"])
     }
 }

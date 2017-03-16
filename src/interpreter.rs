@@ -202,7 +202,7 @@ impl CommandInterpreter {
     fn process_command(&mut self, cmd: Command, etx: &Sender<Event>) -> Result<Event, Error> {
         let mut sota = Sota::new(&self.config, self.http.as_ref());
 
-        Ok(match cmd {
+        let result = match cmd {
             Command::Authenticate(_) => Event::AlreadyAuthenticated,
 
             Command::GetUpdateRequests => {
@@ -325,11 +325,13 @@ impl CommandInterpreter {
             }
 
             Command::Shutdown => std::process::exit(0),
-        })
+        };
+
+        Ok(result)
     }
 
     fn authenticate(&mut self, cmd: Command) -> Result<Event, Error> {
-        Ok(match cmd {
+        let result = match cmd {
             Command::Authenticate(Auth::None)        |
             Command::Authenticate(Auth::Token(_))    |
             Command::Authenticate(Auth::Certificate) => Event::Authenticated,
@@ -360,7 +362,9 @@ impl CommandInterpreter {
             Command::Shutdown => std::process::exit(0),
 
             _ => Event::NotAuthenticated
-        })
+        };
+
+        Ok(result)
     }
 
     fn get_credentials(&self) -> Credentials {

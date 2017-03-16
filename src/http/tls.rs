@@ -17,18 +17,13 @@ lazy_static! {
     static ref CONNECTOR: Mutex<Option<Arc<TlsConnector>>> = Mutex::new(None);
 }
 
-
+#[derive(Default)]
 pub struct TlsData<'f> {
     pub ca_file:   Option<&'f str>,
     pub cert_file: Option<&'f str>,
     pub pkey_file: Option<&'f str>,
 }
 
-impl<'p> Default for TlsData<'p> {
-    fn default() -> Self {
-        TlsData { ca_file: None, cert_file: None, pkey_file: None }
-    }
-}
 
 /// Encapsulates a parsed PKCS#12 file.
 pub struct Pkcs12(ParsedPkcs12);

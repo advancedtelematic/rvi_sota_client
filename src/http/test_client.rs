@@ -8,14 +8,9 @@ use http::{Client, Request, Response, ResponseData};
 
 
 /// The `TestClient` will return an ordered list of successful HTTP responses.
+#[derive(Default)]
 pub struct TestClient<T> {
     responses: RefCell<VecDeque<T>>
-}
-
-impl<T> Default for TestClient<T> {
-    fn default() -> Self {
-        TestClient { responses: RefCell::new(VecDeque::new()) }
-    }
 }
 
 impl<T> TestClient<T> {

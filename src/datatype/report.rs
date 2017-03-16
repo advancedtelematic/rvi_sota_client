@@ -23,7 +23,7 @@ impl OperationResult {
 
 
 /// A report of a list of installation outcomes.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq, Default)]
 pub struct UpdateReport {
     pub update_id:         UpdateRequestId,
     pub operation_results: Vec<OperationResult>
@@ -48,12 +48,6 @@ impl UpdateReport {
             result_text: result_text
         };
         UpdateReport { update_id: update_id, operation_results: vec![result] }
-    }
-}
-
-impl Default for UpdateReport {
-    fn default() -> Self {
-        UpdateReport { update_id: "".to_string(), operation_results: Vec::new() }
     }
 }
 
@@ -165,7 +159,7 @@ pub struct InstalledPackage {
 }
 
 /// An encodable list of packages and firmwares to send to RVI.
-#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq, Default)]
 pub struct InstalledSoftware {
     pub packages:  Vec<InstalledPackage>,
     pub firmwares: Vec<InstalledFirmware>
@@ -175,12 +169,6 @@ impl InstalledSoftware {
     /// Instantiate a new list of the software installed on the device.
     pub fn new(packages: Vec<InstalledPackage>, firmwares: Vec<InstalledFirmware>) -> InstalledSoftware {
         InstalledSoftware { packages: packages, firmwares: firmwares }
-    }
-}
-
-impl Default for InstalledSoftware {
-    fn default() -> Self {
-        InstalledSoftware { packages: Vec::new(), firmwares: Vec::new() }
     }
 }
 

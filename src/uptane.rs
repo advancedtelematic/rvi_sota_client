@@ -17,17 +17,12 @@ pub enum Service {
 }
 
 /// Last known version of each metadata file.
+#[derive(Default)]
 pub struct Version {
     root:      u64,
     targets:   u64,
     snapshot:  u64,
-    timestamp: u64
-}
-
-impl Default for Version {
-    fn default() -> Self {
-        Version { root: 0, targets: 0, snapshot: 0, timestamp: 0 }
-    }
+    timestamp: u64,
 }
 
 
