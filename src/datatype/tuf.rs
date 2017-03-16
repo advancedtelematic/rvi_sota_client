@@ -161,7 +161,7 @@ pub struct EcuVersion {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct EcuCustom {
-    pub operation_result: OperationResult,
+    pub operation_result: OperationResult
 }
 
 

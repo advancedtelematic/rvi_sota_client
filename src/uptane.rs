@@ -4,8 +4,8 @@ use std::io::{Read, Write};
 use std::mem;
 use std::path::Path;
 
-use datatype::{Config, EcuCustom, EcuManifests, Error, Ostree, Role, Root, Snapshot,
-               Targets, Timestamp, TufSigned, UptaneConfig, Url, Verifier};
+use datatype::{Config, EcuCustom, EcuManifests, Error, OstreePackage, Role, Root,
+               Snapshot, Targets, Timestamp, TufSigned, UptaneConfig, Url, Verifier};
 use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
 
@@ -115,14 +115,14 @@ impl Uptane {
     /// Put a new manifest file to the Director server.
     pub fn put_manifest(&mut self, client: &Client, custom: Option<EcuCustom>) -> Result<(), Error> {
         debug!("put_manifest");
-        let branch  = Ostree::get_current_branch()?;
-        let version = branch.ecu_version(self.serial.clone(), custom);
+        let package = OstreePackage::get_current()?;
+        let version = package.ecu_version(self.serial.clone(), custom);
         let signed  = TufSigned::sign(json::to_value(version)?, &self.privkey, SigType::RsaSsaPss)?;
-        let manifests = EcuManifests {
+        let mfests  = EcuManifests {
             primary_ecu_serial:   self.serial.clone(),
             ecu_version_manifest: vec![signed],
         };
-        let signed = TufSigned::sign(json::to_value(manifests)?, &self.privkey, SigType::RsaSsaPss)?;
+        let signed = TufSigned::sign(json::to_value(mfests)?, &self.privkey, SigType::RsaSsaPss)?;
         self.put(client, Service::Director, "manifest", json::to_vec(&signed)?)
     }
 
@@ -227,7 +227,7 @@ impl Uptane {
 }
 
 
-fn read_file(path: &str) -> Result<Vec<u8>, Error> {
+pub fn read_file(path: &str) -> Result<Vec<u8>, Error> {
     let mut file = File::open(path)
         .map_err(|err| Error::Client(format!("couldn't open {}: {}", path, err)))?;
     let mut buf = Vec::new();
@@ -236,7 +236,7 @@ fn read_file(path: &str) -> Result<Vec<u8>, Error> {
     Ok(buf)
 }
 
-fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
+pub fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
     let mut file = OpenOptions::new()
         .create(true)
         .write(true)
