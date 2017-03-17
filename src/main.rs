@@ -398,7 +398,7 @@ fn provision_p12(config: &Config) -> () {
     fs::remove_file("/tmp/cert").expect("couldn't remove file");
     fs::remove_file("/tmp/pkey").expect("couldn't remove file");
 
-    let server = tls.server.join("/devices").clone();
+    let server = tls.server.join("devices").clone();
     let device = prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone();
     let client = AuthClient::default();
     let bundle = pkcs12(server, device, prov.expiry_days, &client)
