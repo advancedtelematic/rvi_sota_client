@@ -103,21 +103,22 @@ impl AuthClient {
         }
     }
 
+    /// Redirect drops the Authorization header.
     fn redirect_request(&self, req: &AuthRequest, resp: HyperResponse) -> Response {
-        match resp.headers.get::<Location>() {
-            Some(&Location(ref loc)) => {
-                // drop Authorization header
+        resp.headers
+            .get::<Location>()
+            .map_or(Response::Error(Error::Client("redirect missing Location header".into())), |loc| {
                 self.send(AuthRequest::new(&Auth::None, Request {
-                    url:    req.request.url.join(loc),
+                    url: match loc.parse() {
+                        Ok(absolute) => absolute,
+                        Err(_) if &loc[0..1] == "/" => req.request.url.join(loc), // relative
+                        Err(err) => return Response::Error(Error::Parse(format!("`{}` not a url: {}", loc, err)))
+                    },
                     method: req.request.method.clone(),
                     body:   req.request.body.clone(),
                 }))
-            },
-
-            None => Response::Error(Error::Client("redirect missing Location header".to_string()))
-        }
+            })
     }
-
 }
 
 
