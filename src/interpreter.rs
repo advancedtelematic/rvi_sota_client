@@ -50,47 +50,36 @@ impl Interpreter<Event, Command> for EventInterpreter {
         info!("EventInterpreter received: {}", event);
 
         match event {
-            Event::Authenticated => {
-                if self.pacman != PackageManager::Off {
-                    match self.pacman.installed_packages() {
-                        Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
-                        Err(err) => error!("couldn't send a list of packages: {}", err)
-                    }
+            Event::Authenticated if self.pacman != PackageManager::Off => {
+                match self.pacman.installed_packages() {
+                    Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
+                    Err(err) => error!("couldn't send a list of packages: {}", err)
                 }
-
                 self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo));
             }
 
-            Event::NotAuthenticated => {
-                info!("Trying to authenticate again...");
-                ctx.send(Command::Authenticate(self.initial.clone()));
-            }
+            Event::Authenticated => { self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo)); },
+
+            Event::NotAuthenticated => ctx.send(Command::Authenticate(self.initial.clone())),
 
             Event::UpdatesReceived(requests) => {
                 for request in requests {
                     let id = request.requestId.clone();
                     match request.status {
-                        Status::Pending if self.auto_dl => {
-                            ctx.send(Command::StartDownload(id));
-                        },
-
-                        Status::InFlight if self.pacman != PackageManager::Off => {
-                            if self.pacman.is_installed(&request.packageId) {
-                                let report = UpdateReport::single(id, UpdateResultCode::OK, "".to_string());
-                                return ctx.send(Command::SendUpdateReport(report));
-                            }
-                            ctx.send(Command::StartDownload(id));
+                        Status::Pending  if self.auto_dl => ctx.send(Command::StartDownload(id)),
+                        Status::InFlight if self.pacman == PackageManager::Off => (),
+                        Status::InFlight if self.pacman.is_installed(&request.packageId) => {
+                            let report = UpdateReport::single(id, UpdateResultCode::OK, "".to_string());
+                            ctx.send(Command::SendUpdateReport(report));
                         }
-
+                        Status::InFlight => ctx.send(Command::StartDownload(id)),
                         _ => ()
                     }
                 }
             }
 
-            Event::DownloadComplete(dl) => {
-                if self.pacman != PackageManager::Off {
-                    ctx.send(Command::StartInstall(dl.update_id.clone()));
-                }
+            Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
+                ctx.send(Command::StartInstall(dl.update_id.clone()));
             }
 
             Event::DownloadFailed(id, reason) => {
@@ -102,25 +91,21 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 ctx.send(Command::SendUpdateReport(report));
             }
 
-            Event::UpdateReportSent => {
-                if self.pacman != PackageManager::Off {
-                    match self.pacman.installed_packages() {
-                        Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
-                        Err(err) => error!("couldn't send a list of packages: {}", err)
-                    }
+            Event::UpdateReportSent if self.pacman != PackageManager::Off => {
+                match self.pacman.installed_packages() {
+                    Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
+                    Err(err) => error!("couldn't send a list of packages: {}", err)
                 }
             }
 
             Event::UptaneTargetsUpdated(targets) => {
-                let treehub = self.treehub.as_ref().expect("uptane expects a treehub url");
-                for (refname, meta) in targets {
-                    if let Some(commit) = meta.hashes.get("sha256") {
-                        let pkg = OstreePackage::new(refname, commit.clone(), "".into(), treehub);
-                        ctx.send(Command::OstreeInstall(pkg));
-                    } else {
-                        error!("couldn't get sha256 for {}", refname);
-                    }
-                }
+                let treehub  = self.treehub.as_ref().expect("uptane expects a treehub url");
+                let packages = targets.iter().filter_map(|(refname, meta)| {
+                    meta.hashes.get("sha256")
+                        .map(|commit| OstreePackage::new(refname.clone(), commit.clone(), "".into(), treehub))
+                        .or_else(|| { error!("couldn't get sha256 for {}", refname); None })
+                }).collect::<Vec<_>>();
+                ctx.send(Command::OstreeInstall(packages));
             }
 
             _ => ()
@@ -246,15 +231,19 @@ impl CommandInterpreter {
                 Event::FoundSystemInfo(system_info(&cmd)?)
             }
 
-            Command::OstreeInstall(pkg) => {
-                let (code, out) = pkg.install(self.get_credentials())?;
-                let result = OperationResult::new(pkg.refName.clone(), code, out);
+            Command::OstreeInstall(pkgs) => {
+                let creds = self.get_credentials();
                 if let CommandMode::Uptane(ref mut uptane) = self.mode {
-                    uptane.send_manifest = true;
-                    // FIXME: multiple packages
-                    uptane.ecu_custom = Some(EcuCustom { operation_result: result.clone() });
+                    uptane.ecu_versions = pkgs.iter().map(|pkg| {
+                        pkg.install(&creds)
+                            .map_err(|err| Error::Client(format!("couldn't install ostree package: {}", err)))
+                            .map(|(code, out)| {
+                                let res = OperationResult::new(pkg.refName.clone(), code, out);
+                                pkg.ecu_version(pkg.refName.clone(), Some(EcuCustom { operation_result: res }))
+                            })
+                    }).collect::<Result<Vec<_>, Error>>()?;
                 }
-                Event::OstreeInstallation(result)
+                Event::OstreeInstallComplete
             }
 
             Command::SendInstalledPackages(packages) => {
@@ -316,7 +305,7 @@ impl CommandInterpreter {
 
                     CommandMode::Sota => {
                         etx.send(Event::InstallingUpdate(id.clone()));
-                        match sota.install_update(id, self.get_credentials()) {
+                        match sota.install_update(id, &self.get_credentials()) {
                             Ok(report)  => Event::InstallComplete(report),
                             Err(report) => Event::InstallFailed(report)
                         }

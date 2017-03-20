@@ -1,12 +1,12 @@
+use ring::digest;
 use serde_json as json;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::mem;
 use std::path::Path;
 
-use datatype::{Config, EcuCustom, EcuManifests, Error, OstreePackage, RoleData,
-               RoleName, TufSigned, UptaneConfig, Url, Verified, Verifier};
+use datatype::{Config, EcuManifests, EcuVersion, Error, RoleData, RoleName,
+               TufSigned, UptaneConfig, Url, Verified, Verifier};
 use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
 
@@ -38,7 +38,7 @@ pub struct Uptane {
     pub persist_meta:  bool,
     pub fetch_root:    bool,
     pub send_manifest: bool,
-    pub ecu_custom:    Option<EcuCustom>,
+    pub ecu_versions:  Vec<EcuVersion>,
 }
 
 impl Uptane {
@@ -52,23 +52,22 @@ impl Uptane {
             verifier:   Verifier::default(),
             serial:     config.uptane.primary_ecu_serial.clone(),
             privkey:    PrivateKey {
-                // FIXME: keyid
-                keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
+                keyid:   String::from_utf8(digest::digest(&digest::SHA256, &der_key).as_ref().into())?,
                 der_key: der_key
             },
 
             persist_meta:  true,
             fetch_root:    true,
             send_manifest: true,
-            ecu_custom:    None,
+            ecu_versions:  Vec::new(),
         })
     }
 
+    /// Send latest manifest or fetch latest Director root.json.
     pub fn initialize(&mut self, client: &Client) -> Result<(), Error> {
         if self.send_manifest {
             self.send_manifest = false;
-            let custom = mem::replace(&mut self.ecu_custom, None);
-            self.put_manifest(client, custom)?;
+            self.put_manifest(client)?;
         }
 
         if self.fetch_root {
@@ -171,16 +170,14 @@ impl Uptane {
     }
 
     /// Put a new manifest file to the Director server.
-    pub fn put_manifest(&mut self, client: &Client, custom: Option<EcuCustom>) -> Result<(), Error> {
-        let package = OstreePackage::get_current()?;
-        let version = package.ecu_version(self.serial.clone(), custom);
-        let signed  = TufSigned::sign(json::to_value(version)?, &self.privkey, SigType::RsaSsaPss)?;
-        let mfests  = EcuManifests {
-            primary_ecu_serial:   self.serial.clone(),
-            ecu_version_manifest: vec![signed],
-        };
-        let signed = TufSigned::sign(json::to_value(mfests)?, &self.privkey, SigType::RsaSsaPss)?;
-        self.put(client, &Service::Director, "manifest", json::to_vec(&signed)?)
+    pub fn put_manifest(&mut self, client: &Client) -> Result<(), Error> {
+        let sigs = self.ecu_versions.iter()
+            .map(|ver| TufSigned::sign(json::to_value(ver)?, &self.privkey, SigType::RsaSsaPss))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let ecus = EcuManifests { primary_ecu_serial: self.serial.clone(), ecu_version_manifest: sigs };
+        let sign = TufSigned::sign(json::to_value(ecus)?, &self.privkey, SigType::RsaSsaPss)?;
+        self.put(client, &Service::Director, "manifest", json::to_vec(&sign)?)?;
+        Ok(self.ecu_versions.clear())
     }
 }
 
@@ -242,7 +239,7 @@ mod tests {
             persist_meta:  false,
             fetch_root:    true,
             send_manifest: true,
-            ecu_custom:    None,
+            ecu_versions:  Vec::new(),
         }
     }
 
