@@ -19,7 +19,7 @@ pub fn installed_packages() -> Result<Vec<Package>, Error> {
         .collect::<Result<Vec<Package>, _>>()
 }
 
-pub fn install_package(path: &str, creds: Credentials) -> Result<InstallOutcome, InstallOutcome> {
+pub fn install_package(path: &str, creds: &Credentials) -> Result<InstallOutcome, InstallOutcome> {
     let mut file = File::open(path)
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("open file: {:?}", err)))?;
     let mut content = String::new();

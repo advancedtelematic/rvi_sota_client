@@ -36,7 +36,7 @@ impl OstreePackage {
     }
 
     /// Shell out to the ostree command to install this package.
-    pub fn install(&self, creds: Credentials) -> Result<InstallOutcome, Error> {
+    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, Error> {
         debug!("installing ostree package: {:?}", self);
 
         let mut cmd = Command::new("sota_ostree.sh");
@@ -44,10 +44,10 @@ impl OstreePackage {
         cmd.env("REF_NAME", self.refName.clone());
         cmd.env("DESCRIPTION", self.description.clone());
         cmd.env("PULL_URI", self.pullUri.clone());
-        creds.access_token.map(|t| cmd.env("AUTHPLUS_ACCESS_TOKEN", t.clone()));
-        creds.ca_file.map(|f| cmd.env("TLS_CA_CERT", f.clone()));
-        creds.cert_file.map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
-        creds.pkey_file.map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
+        creds.access_token.as_ref().map(|t| cmd.env("AUTHPLUS_ACCESS_TOKEN", t.clone()));
+        creds.ca_file.as_ref().map(|f| cmd.env("TLS_CA_CERT", f.clone()));
+        creds.cert_file.as_ref().map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
+        creds.pkey_file.as_ref().map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
 
         let output = cmd.output()?;
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
@@ -63,16 +63,16 @@ impl OstreePackage {
         }
     }
 
-    /// Create a new EcuVersion from the current OstreePackage.
-    pub fn ecu_version(self, ecu_serial: String, custom: Option<EcuCustom>) -> EcuVersion {
+    /// Consume the current OstreePackage and return an EcuVersion.
+    pub fn ecu_version(&self, ecu_serial: String, custom: Option<EcuCustom>) -> EcuVersion {
         let mut hashes = HashMap::new();
-        hashes.insert("sha256".to_string(), self.commit);
+        hashes.insert("sha256".to_string(), self.commit.clone());
 
         EcuVersion {
             attacks_detected: "".to_string(),
             ecu_serial: ecu_serial,
             installed_image: TufImage {
-                filepath: self.refName,
+                filepath: self.refName.clone(),
                 fileinfo: TufMeta {
                     length: 0,
                     hashes: hashes,
