@@ -104,12 +104,10 @@ impl OstreePackage {
             .map_err(|err| Error::Command(format!("couldn't run `ostree admin status`: {}", err)))
             .and_then(|output| OstreeBranch::parse(&branch, str::from_utf8(&output.stdout)?))
             .and_then(|branches| {
-                for branch in branches {
-                    if branch.current {
-                        return Ok(branch.package);
-                    }
-                }
-                Err(Error::Command("current branch unknown".to_string()))
+                branches.into_iter()
+                    .filter_map(|branch| if branch.current { Some(branch.package) } else { None })
+                    .nth(0)
+                    .ok_or_else(|| Error::Command("current branch unknown".to_string()))
             })
     }
 }
