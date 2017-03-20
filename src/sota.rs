@@ -73,7 +73,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Install an update using the package manager.
-    pub fn install_update<'t>(&mut self, id: UpdateRequestId, creds: Credentials) -> Result<UpdateReport, UpdateReport> {
+    pub fn install_update<'t>(&mut self, id: UpdateRequestId, creds: &Credentials) -> Result<UpdateReport, UpdateReport> {
         let path = self.package_path(id.clone()).expect("install_update expects a valid path");
         match self.config.device.package_manager.install_package(&path, creds) {
             Ok((code, output)) => {
