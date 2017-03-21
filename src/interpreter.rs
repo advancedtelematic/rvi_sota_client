@@ -344,7 +344,7 @@ impl CommandInterpreter {
                     self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
                 }
 
-                let token = oauth2(cfg.server.join("token"), self.http.as_ref())?;
+                let token = oauth2(cfg.server.join("/token"), self.http.as_ref())?;
                 self.auth = Auth::Token(token.clone());
                 if !self.http.is_testing() {
                     self.http = Box::new(AuthClient::from(Auth::Token(token)));

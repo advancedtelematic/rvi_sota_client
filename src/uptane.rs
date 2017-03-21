@@ -83,8 +83,8 @@ impl Uptane {
     fn endpoint(&self, service: &Service, endpoint: &str) -> Url {
         let ref cfg = self.uptane_cfg;
         match *service {
-            Service::Director => cfg.director_server.join(&format!("{}", endpoint)),
-            Service::Repo     => cfg.repo_server.join(&format!("{}/{}", self.deviceid, endpoint))
+            Service::Director => cfg.director_server.join(&format!("/{}", endpoint)),
+            Service::Repo     => cfg.repo_server.join(&format!("/{}/{}", self.deviceid, endpoint))
         }
     }
 

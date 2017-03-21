@@ -50,14 +50,10 @@ impl Display for SocketAddr {
 pub struct Url(pub url::Url);
 
 impl Url {
-    /// Append the string suffix to this URL.
+    /// Append the string suffix to this URL. Will panic on parse failure.
     pub fn join(&self, suffix: &str) -> Url {
-        let mut url = self.0.clone();
-        url.path_segments_mut()
-            .expect("couldn't get url segments")
-            .pop_if_empty() // drop trailing slash before extending
-            .extend(suffix.split("/"));
-        Url(url)
+        Url(url::Url::parse(&format!("{}{}", self.0, suffix))
+            .expect(&format!("couldn't join `{}` with `{}`", self.0, suffix)))
     }
 }
 
@@ -138,11 +134,14 @@ mod tests {
 
     #[test]
     fn test_join_url() {
-        let slash:    Url = "http://localhost:1234/foo/".parse().unwrap();
-        let no_slash: Url = "http://localhost:1234/foo".parse().unwrap();
-        let expect:   Url = "http://localhost:1234/foo/bar".parse().unwrap();
-        assert_eq!(slash.join("bar"), expect);
-        assert_eq!(no_slash.join("bar"), expect);
+        let slash: Url = "http://localhost:1234/foo/".parse().unwrap();
+        assert_eq!(slash.join("bar"), "http://localhost:1234/foo/bar".parse().unwrap());
+        assert_eq!(slash.join("/double"), "http://localhost:1234/foo//double".parse().unwrap());
         assert_eq!(slash.join("a/b"), "http://localhost:1234/foo/a/b".parse().unwrap());
+
+        let no_slash: Url = "http://localhost:1234/foo".parse().unwrap();
+        assert_eq!(no_slash.join("bar"), "http://localhost:1234/foobar".parse().unwrap());
+        assert_eq!(no_slash.join("/two"), "http://localhost:1234/foo/two".parse().unwrap());
+        assert_eq!(no_slash.join("/query%25?x=1"), "http://localhost:1234/foo/query%25?x=1".parse().unwrap());
     }
 }

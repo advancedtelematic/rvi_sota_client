@@ -122,7 +122,7 @@ fn main() {
         let ei_mgr  = config.device.package_manager.clone();
         let ei_dl   = config.device.auto_download.clone();
         let ei_sys  = config.device.system_info.clone();
-        let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("treehub")));
+        let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub")));
         scope.spawn(move || EventInterpreter {
             initial: ei_auth,
             pacman:  ei_mgr,
