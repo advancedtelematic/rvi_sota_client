@@ -142,6 +142,7 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
         Command::OstreeInstall(_) => match args.len() {
             0 | 1 | 2 => Err(Error::Command("usage: osti <uri> <refname> <commit>".to_string())),
             3 => Ok(Command::OstreeInstall(vec![OstreePackage {
+                ecu_serial:  "".to_string(),
                 commit:      args[2].to_string(),
                 refName:     args[1].to_string(),
                 description: "".to_string(),
@@ -277,6 +278,7 @@ mod tests {
     fn ostree_install_test() {
         assert_eq!("OstreeInstall uri ref commit".parse::<Command>().unwrap(),
                    Command::OstreeInstall(vec![OstreePackage {
+                       ecu_serial:  "".to_string(),
                        commit:      "commit".to_string(),
                        refName:     "ref".to_string(),
                        description: "".to_string(),
@@ -284,6 +286,7 @@ mod tests {
                    }]));
         assert_eq!("osti 123 456 789".parse::<Command>().unwrap(),
                    Command::OstreeInstall(vec![OstreePackage {
+                       ecu_serial:  "".to_string(),
                        commit:      "789".to_string(),
                        refName:     "456".to_string(),
                        description: "".to_string(),

@@ -32,7 +32,7 @@ pub trait Interpreter<I, O>: Display {
 
 /// The `EventInterpreter` listens for `Event`s and may respond `Command`s.
 pub struct EventInterpreter {
-    pub initial: Auth,
+    pub auth:    Auth,
     pub pacman:  PackageManager,
     pub auto_dl: bool,
     pub sysinfo: Option<String>,
@@ -50,17 +50,33 @@ impl Interpreter<Event, Command> for EventInterpreter {
         info!("EventInterpreter received: {}", event);
 
         match event {
-            Event::Authenticated if self.pacman != PackageManager::Off => {
+            Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
+                ctx.send(Command::StartInstall(dl.update_id.clone()));
+            }
+
+            Event::DownloadFailed(id, reason) => {
+                let report = UpdateReport::single(id, UpdateResultCode::GENERAL_ERROR, reason);
+                ctx.send(Command::SendUpdateReport(report));
+            }
+
+            Event::InstallComplete(report) | Event::InstallFailed(report) => {
+                ctx.send(Command::SendUpdateReport(report));
+            }
+
+            Event::InstalledPackagesNeeded if self.pacman != PackageManager::Off => {
                 match self.pacman.installed_packages() {
                     Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
                     Err(err) => error!("couldn't send a list of packages: {}", err)
                 }
-                self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo));
             }
 
-            Event::Authenticated => { self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo)); },
+            Event::NotAuthenticated => {
+                ctx.send(Command::Authenticate(self.auth.clone()));
+            }
 
-            Event::NotAuthenticated => ctx.send(Command::Authenticate(self.initial.clone())),
+            Event::SystemInfoNeeded => {
+                self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo));
+            }
 
             Event::UpdatesReceived(requests) => {
                 for request in requests {
@@ -78,32 +94,15 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 }
             }
 
-            Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
-                ctx.send(Command::StartInstall(dl.update_id.clone()));
-            }
-
-            Event::DownloadFailed(id, reason) => {
-                let report = UpdateReport::single(id, UpdateResultCode::GENERAL_ERROR, reason);
-                ctx.send(Command::SendUpdateReport(report));
-            }
-
-            Event::InstallComplete(report) | Event::InstallFailed(report) => {
-                ctx.send(Command::SendUpdateReport(report));
-            }
-
-            Event::UpdateReportSent if self.pacman != PackageManager::Off => {
-                match self.pacman.installed_packages() {
-                    Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
-                    Err(err) => error!("couldn't send a list of packages: {}", err)
-                }
-            }
-
             Event::UptaneTargetsUpdated(targets) => {
                 let treehub  = self.treehub.as_ref().expect("uptane expects a treehub url");
                 let packages = targets.iter().filter_map(|(refname, meta)| {
                     meta.hashes.get("sha256")
-                        .map(|commit| OstreePackage::new(refname.clone(), commit.clone(), "".into(), treehub))
                         .or_else(|| { error!("couldn't get sha256 for {}", refname); None })
+                        .map(|commit| {
+                            let ref ecu = meta.custom.as_ref().expect("no custom field").ecuIdentifier;
+                            OstreePackage::new(ecu.clone(), refname.clone(), commit.clone(), "".into(), treehub)
+                        })
                 }).collect::<Vec<_>>();
                 ctx.send(Command::OstreeInstall(packages));
             }
@@ -128,7 +127,7 @@ impl Display for IntermediateInterpreter {
 
 impl Interpreter<Command, Interpret> for IntermediateInterpreter {
     fn interpret(&mut self, cmd: Command, itx: &Sender<Interpret>) {
-        info!("IntermediateInterpreter received: {}", &cmd);
+        trace!("IntermediateInterpreter received: {}", &cmd);
         itx.send(Interpret { command: cmd, resp_tx: self.resp_tx.clone() });
     }
 }
@@ -235,15 +234,15 @@ impl CommandInterpreter {
                 let creds = self.get_credentials();
                 if let CommandMode::Uptane(ref mut uptane) = self.mode {
                     uptane.ecu_versions = pkgs.iter().map(|pkg| {
-                        pkg.install(&creds)
-                            .map_err(|err| Error::Client(format!("couldn't install ostree package: {}", err)))
-                            .map(|(code, out)| {
-                                let res = OperationResult::new(pkg.refName.clone(), code, out);
-                                pkg.ecu_version(pkg.refName.clone(), Some(EcuCustom { operation_result: res }))
-                            })
-                    }).collect::<Result<Vec<_>, Error>>()?;
+                        let result = match pkg.install(&creds) {
+                            Ok((code,  out)) => OperationResult::new(pkg.refName.clone(), code, out),
+                            Err((code, out)) => OperationResult::new(pkg.refName.clone(), code, out),
+                        };
+                        pkg.ecu_version(Some(EcuCustom { operation_result: result }))
+                    }).collect::<Vec<_>>();
+                    uptane.send_manifest = true;
                 }
-                Event::OstreeInstallComplete
+                Event::InstalledPackagesNeeded
             }
 
             Command::SendInstalledPackages(packages) => {
@@ -266,17 +265,12 @@ impl CommandInterpreter {
             }
 
             Command::SendUpdateReport(report) => {
-                match self.mode {
-                    CommandMode::Rvi(ref rvi) => {
-                        let _ = rvi.remote.lock().unwrap().send_update_report(report);
-                        Event::UpdateReportSent
-                    }
-
-                    _ => {
-                        sota.send_update_report(&report)?;
-                        Event::UpdateReportSent
-                    }
+                if let CommandMode::Rvi(ref rvi) = self.mode {
+                    let _ = rvi.remote.lock().unwrap().send_update_report(report);
+                } else {
+                    sota.send_update_report(&report)?;
                 }
+                Event::InstalledPackagesNeeded
             }
 
             Command::StartDownload(id) => {

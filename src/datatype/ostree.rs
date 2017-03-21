@@ -19,6 +19,8 @@ const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 #[derive(RustcDecodable, RustcEncodable, Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct OstreePackage {
+    #[serde(skip_deserializing)]
+    pub ecu_serial:  String,
     pub refName:     String,
     pub commit:      String,
     pub description: String,
@@ -26,8 +28,9 @@ pub struct OstreePackage {
 }
 
 impl OstreePackage {
-    pub fn new(refname: String, commit: String, desc: String, treehub: &Url) -> Self {
+    pub fn new(ecu_serial: String, refname: String, commit: String, desc: String, treehub: &Url) -> Self {
         OstreePackage {
+            ecu_serial:  ecu_serial,
             refName:     refname,
             commit:      commit,
             description: desc,
@@ -36,9 +39,7 @@ impl OstreePackage {
     }
 
     /// Shell out to the ostree command to install this package.
-    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, Error> {
-        debug!("installing ostree package: {:?}", self);
-
+    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, InstallOutcome> {
         let mut cmd = Command::new("sota_ostree.sh");
         cmd.env("COMMIT", self.commit.clone());
         cmd.env("REF_NAME", self.refName.clone());
@@ -49,28 +50,31 @@ impl OstreePackage {
         creds.cert_file.as_ref().map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
         creds.pkey_file.as_ref().map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
 
-        let output = cmd.output()?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-        match output.status.code() {
-            Some(0) => {
-                write_file(NEW_PACKAGE, &json::to_vec(self)?)?;
-                Ok((Code::OK, stdout))
-            }
-            Some(99) => Ok((Code::ALREADY_PROCESSED, stdout)),
-            _        => Ok((Code::INSTALL_FAILED, format!("stdout: {}\nstderr: {}", stdout, stderr)))
-        }
+        cmd.output()
+            .map_err(|err| (Code::GENERAL_ERROR, format!("{}", err)))
+            .and_then(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                match output.status.code() {
+                    Some(0) => {
+                        let _ = write_file(NEW_PACKAGE, &json::to_vec(self).expect("couldn't jsonify OstreePackage"))
+                            .map_err(|err| error!("couldn't save package info: {}", err));
+                        Ok((Code::OK, stdout))
+                    }
+                    Some(99) => Ok((Code::ALREADY_PROCESSED, stdout)),
+                    _        => Err((Code::INSTALL_FAILED, format!("stdout: {}\nstderr: {}", stdout, stderr)))
+                }
+            })
     }
 
-    /// Consume the current OstreePackage and return an EcuVersion.
-    pub fn ecu_version(&self, ecu_serial: String, custom: Option<EcuCustom>) -> EcuVersion {
+    /// Create a new EcuVersion from the current OstreePackage.
+    pub fn ecu_version(&self, custom: Option<EcuCustom>) -> EcuVersion {
         let mut hashes = HashMap::new();
         hashes.insert("sha256".to_string(), self.commit.clone());
 
         EcuVersion {
             attacks_detected: "".to_string(),
-            ecu_serial: ecu_serial,
+            ecu_serial: self.ecu_serial.clone(),
             installed_image: TufImage {
                 filepath: self.refName.clone(),
                 fileinfo: TufMeta {
@@ -87,7 +91,7 @@ impl OstreePackage {
 
     /// Get the current OSTree package based on the last successful installation
     /// if it exists, or from running `ostree admin status` otherwise.
-    pub fn get_current() -> Result<Self, Error> {
+    pub fn get_ecu(serial: &str) -> Result<Self, Error> {
         let branch = if Path::new(NEW_PACKAGE).exists() {
             debug!("getting ostree package from `{}`", NEW_PACKAGE);
             return Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?);
@@ -102,10 +106,11 @@ impl OstreePackage {
         debug!("getting ostree branch with `ostree admin status`");
         Command::new("ostree").arg("admin").arg("status").output()
             .map_err(|err| Error::Command(format!("couldn't run `ostree admin status`: {}", err)))
-            .and_then(|output| OstreeBranch::parse(&branch, str::from_utf8(&output.stdout)?))
+            .and_then(|output| OstreeBranch::parse(serial, &branch, str::from_utf8(&output.stdout)?))
             .and_then(|branches| {
                 branches.into_iter()
-                    .filter_map(|branch| if branch.current { Some(branch.package) } else { None })
+                    .filter(|branch| branch.current)
+                    .map(|branch| branch.package)
                     .nth(0)
                     .ok_or_else(|| Error::Command("current branch unknown".to_string()))
             })
@@ -113,14 +118,16 @@ impl OstreePackage {
 }
 
 
+#[derive(Debug)]
 struct OstreeBranch {
     current: bool,
+    os_name: String,
     package: OstreePackage,
 }
 
 impl OstreeBranch {
     /// Parse the output from `ostree admin status`
-    fn parse(branch_name: &str, stdout: &str) -> Result<Vec<OstreeBranch>, Error> {
+    fn parse(ecu_serial: &str, branch_name: &str, stdout: &str) -> Result<Vec<OstreeBranch>, Error> {
         stdout.lines()
             .map(str::trim)
             .filter(|line| line.len() > 0)
@@ -130,21 +137,24 @@ impl OstreeBranch {
                 let first  = branch[0].split(" ").collect::<Vec<_>>();
                 let second = branch[1].split(" ").collect::<Vec<_>>();
 
-                let (current, desc, commit) = match first.len() {
+                let (current, os_name, commit_name) = match first.len() {
                     2 => (false, first[0], first[1]),
                     3 if first[0].trim() == "*" => (true, first[1], first[2]),
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", first)))
                 };
-                let refspec = match second.len() {
+                let commit = commit_name.split(".").collect::<Vec<_>>()[0];
+                let desc = match second.len() {
                     3 if second[0].trim() == "origin" && second[1].trim() == "refspec:" => second[2],
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", second)))
-                }.split(":").last().expect("couldn't split refname");
+                };
 
                 Ok(OstreeBranch {
                     current: current,
+                    os_name: os_name.into(),
                     package: OstreePackage {
-                        refName:     format!("{}-{}", branch_name, refspec),
-                        commit:      commit.split(".").collect::<Vec<_>>()[0].into(),
+                        ecu_serial:  ecu_serial.into(),
+                        refName:     format!("{}-{}", branch_name, commit),
+                        commit:      commit.into(),
                         description: desc.into(),
                         pullUri:     "".into(),
                     },
@@ -165,22 +175,18 @@ mod tests {
             origin refspec: gnome-ostree/buildmaster/x86_64-runtime
         * gnome-ostree ce19c41036cc45e49b0cecf6b157523c2105c4de1c.0
             origin refspec: osname:gnome-ostree/buildmaster/x86_64-runtime
-          gnome-ostree ce19c41036cc45e49b0cecf6b157523c2105c4de1c.0
-            origin refspec: one:two:three
         "#;
 
     #[test]
     fn test_parse_branches() {
-        let branches = OstreeBranch::parse("test", OSTREE_ADMIN_STATUS)
-            .unwrap_or_else(|err| panic!("couldn't parse branches: {}", err));
-        assert_eq!(branches.len(), 3);
+        let branches = OstreeBranch::parse("test-serial".into(), "<branch>", OSTREE_ADMIN_STATUS).expect("couldn't parse branches");
+        assert_eq!(branches.len(), 2);
         assert_eq!(branches[0].current, false);
-        assert_eq!(branches[0].package.refName, "test-gnome-ostree/buildmaster/x86_64-runtime");
-        assert_eq!(branches[0].package.description, "gnome-ostree");
+        assert_eq!(branches[0].os_name, "gnome-ostree");
         assert_eq!(branches[0].package.commit, "67e382b11d213a402a5313e61cbc69dfd5ab93cb07");
+        assert_eq!(branches[0].package.refName, "<branch>-67e382b11d213a402a5313e61cbc69dfd5ab93cb07");
+        assert_eq!(branches[0].package.description, "gnome-ostree/buildmaster/x86_64-runtime");
         assert_eq!(branches[1].current, true);
-        assert_eq!(branches[1].package.refName,"test-gnome-ostree/buildmaster/x86_64-runtime");
-        assert_eq!(branches[2].current, false);
-        assert_eq!(branches[2].package.refName,"test-three");
+        assert_eq!(branches[1].package.refName, "<branch>-ce19c41036cc45e49b0cecf6b157523c2105c4de1c");
     }
 }

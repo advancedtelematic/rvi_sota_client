@@ -5,8 +5,8 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 
-use datatype::{Config, EcuManifests, EcuVersion, Error, RoleData, RoleName,
-               TufSigned, UptaneConfig, Url, Verified, Verifier};
+use datatype::{Config, EcuManifests, EcuVersion, Error, OstreePackage, RoleData,
+               RoleName, TufSigned, UptaneConfig, Url, Verified, Verifier};
 use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
 
@@ -43,8 +43,12 @@ pub struct Uptane {
 
 impl Uptane {
     pub fn new(config: &Config) -> Result<Self, Error> {
-        let der_key = read_file(&config.uptane.private_key_path)
+        let private = read_file(&config.uptane.private_key_path)
             .map_err(|err| Error::Client(format!("couldn't read uptane.private_key_path: {}", err)))?;
+        let priv_id = digest::digest(&digest::SHA256, &private).as_ref().iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
+        let primary = OstreePackage::get_ecu(&config.uptane.primary_ecu_serial)?;
 
         Ok(Uptane {
             uptane_cfg: config.uptane.clone(),
@@ -52,14 +56,13 @@ impl Uptane {
             verifier:   Verifier::default(),
             serial:     config.uptane.primary_ecu_serial.clone(),
             privkey:    PrivateKey {
-                keyid:   String::from_utf8(digest::digest(&digest::SHA256, &der_key).as_ref().into())?,
-                der_key: der_key
+                keyid:   priv_id,
+                der_key: private,
             },
-
             persist_meta:  true,
             fetch_root:    true,
             send_manifest: true,
-            ecu_versions:  Vec::new(),
+            ecu_versions:  vec![primary.ecu_version(None)],
         })
     }
 

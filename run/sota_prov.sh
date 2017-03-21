@@ -91,6 +91,7 @@ echo "Writing SOTA Client config file to $certdir/sota.toml"
 cat > sota.toml <<EOF
 [device]
 package_manager = "off"
+system_info = "sota_sysinfo.sh"
 
 [tls]
 server = "$SOTA_GATEWAY_URI"

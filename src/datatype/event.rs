@@ -43,20 +43,19 @@ pub enum Event {
     InstallComplete(UpdateReport),
     /// The installation of an update failed.
     InstallFailed(UpdateReport),
-    /// A status to signal the completion of an Ostree package installation.
-    OstreeInstallComplete,
 
-    /// An update report was sent to the Core server.
-    UpdateReportSent,
-    /// A list of installed packages was sent to the Core server.
+    /// An event requesting an update on all installed packages.
+    InstalledPackagesNeeded,
+    /// A list of installed packages was sent.
     InstalledPackagesSent,
-    /// A list of installed software was sent to the Core server.
-    InstalledSoftwareSent,
-    /// The system information was sent to the Core server.
-    SystemInfoSent,
-
-    /// A broadcast event requesting an update on externally installed software.
+    /// An event requesting an update on all installed software.
     InstalledSoftwareNeeded,
+    /// A list of installed software was sent.
+    InstalledSoftwareSent,
+    /// An event requesting an update on the system information.
+    SystemInfoNeeded,
+    /// The system information was sent.
+    SystemInfoSent,
 
     /// A new Uptane client was created.
     UptaneInitialised,

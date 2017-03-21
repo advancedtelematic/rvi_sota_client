@@ -51,6 +51,9 @@ fn main() {
     let (itx, irx) = chan::async::<Interpret>();
     let mut broadcast = Broadcast::new(erx);
 
+    etx.send(Event::InstalledPackagesNeeded);
+    etx.send(Event::SystemInfoNeeded);
+
     crossbeam::scope(|scope| {
         // subscribe to signals first
         let signals = chan_signal::notify(&[Signal::INT, Signal::TERM]);
@@ -124,7 +127,7 @@ fn main() {
         let ei_sys  = config.device.system_info.clone();
         let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub")));
         scope.spawn(move || EventInterpreter {
-            initial: ei_auth,
+            auth:    ei_auth,
             pacman:  ei_mgr,
             auto_dl: ei_dl,
             sysinfo: ei_sys,
