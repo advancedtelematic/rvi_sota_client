@@ -1,11 +1,11 @@
+use ring::digest;
 use serde_json as json;
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
-use std::mem;
 use std::path::Path;
 
-use datatype::{Config, EcuCustom, EcuManifests, Error, OstreePackage, RoleData,
+use datatype::{Config, EcuManifests, EcuVersion, Error, OstreePackage, RoleData,
                RoleName, TufSigned, UptaneConfig, Url, Verified, Verifier};
 use http::{Client, Response};
 use datatype::{SigType, PrivateKey};
@@ -38,13 +38,17 @@ pub struct Uptane {
     pub persist_meta:  bool,
     pub fetch_root:    bool,
     pub send_manifest: bool,
-    pub ecu_custom:    Option<EcuCustom>,
+    pub ecu_versions:  Vec<EcuVersion>,
 }
 
 impl Uptane {
     pub fn new(config: &Config) -> Result<Self, Error> {
-        let der_key = read_file(&config.uptane.private_key_path)
+        let private = read_file(&config.uptane.private_key_path)
             .map_err(|err| Error::Client(format!("couldn't read uptane.private_key_path: {}", err)))?;
+        let priv_id = digest::digest(&digest::SHA256, &private).as_ref().iter()
+            .map(|b| format!("{:02x}", b))
+            .collect::<String>();
+        let primary = OstreePackage::get_ecu(&config.uptane.primary_ecu_serial)?;
 
         Ok(Uptane {
             uptane_cfg: config.uptane.clone(),
@@ -52,23 +56,21 @@ impl Uptane {
             verifier:   Verifier::default(),
             serial:     config.uptane.primary_ecu_serial.clone(),
             privkey:    PrivateKey {
-                // FIXME: keyid
-                keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
-                der_key: der_key
+                keyid:   priv_id,
+                der_key: private,
             },
-
             persist_meta:  true,
             fetch_root:    true,
             send_manifest: true,
-            ecu_custom:    None,
+            ecu_versions:  vec![primary.ecu_version(None)],
         })
     }
 
+    /// Send latest manifest or fetch latest Director root.json.
     pub fn initialize(&mut self, client: &Client) -> Result<(), Error> {
         if self.send_manifest {
             self.send_manifest = false;
-            let custom = mem::replace(&mut self.ecu_custom, None);
-            self.put_manifest(client, custom)?;
+            self.put_manifest(client)?;
         }
 
         if self.fetch_root {
@@ -171,16 +173,14 @@ impl Uptane {
     }
 
     /// Put a new manifest file to the Director server.
-    pub fn put_manifest(&mut self, client: &Client, custom: Option<EcuCustom>) -> Result<(), Error> {
-        let package = OstreePackage::get_current()?;
-        let version = package.ecu_version(self.serial.clone(), custom);
-        let signed  = TufSigned::sign(json::to_value(version)?, &self.privkey, SigType::RsaSsaPss)?;
-        let mfests  = EcuManifests {
-            primary_ecu_serial:   self.serial.clone(),
-            ecu_version_manifest: vec![signed],
-        };
-        let signed = TufSigned::sign(json::to_value(mfests)?, &self.privkey, SigType::RsaSsaPss)?;
-        self.put(client, &Service::Director, "manifest", json::to_vec(&signed)?)
+    pub fn put_manifest(&mut self, client: &Client) -> Result<(), Error> {
+        let sigs = self.ecu_versions.iter()
+            .map(|ver| TufSigned::sign(json::to_value(ver)?, &self.privkey, SigType::RsaSsaPss))
+            .collect::<Result<Vec<_>, Error>>()?;
+        let ecus = EcuManifests { primary_ecu_serial: self.serial.clone(), ecu_version_manifest: sigs };
+        let sign = TufSigned::sign(json::to_value(ecus)?, &self.privkey, SigType::RsaSsaPss)?;
+        self.put(client, &Service::Director, "manifest", json::to_vec(&sign)?)?;
+        Ok(self.ecu_versions.clear())
     }
 }
 
@@ -242,7 +242,7 @@ mod tests {
             persist_meta:  false,
             fetch_root:    true,
             send_manifest: true,
-            ecu_custom:    None,
+            ecu_versions:  Vec::new(),
         }
     }
 

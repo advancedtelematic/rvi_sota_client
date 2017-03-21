@@ -36,7 +36,7 @@ impl PackageManager {
     /// of installed packages.
     pub fn installed_packages(&self) -> Result<Vec<Package>, Error> {
         match *self {
-            PackageManager::Off => panic!("no package manager"),
+            PackageManager::Off => unreachable!("no package manager"),
             PackageManager::Deb => deb::installed_packages(),
             PackageManager::Rpm => rpm::installed_packages(),
 
@@ -49,9 +49,9 @@ impl PackageManager {
 
     /// Delegates to the package manager specific function for installing a new
     /// package on the device.
-    pub fn install_package(&self, path: &str, creds: Credentials) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install_package(&self, path: &str, creds: &Credentials) -> Result<InstallOutcome, InstallOutcome> {
         match *self {
-            PackageManager::Off => panic!("no package manager"),
+            PackageManager::Off => unreachable!("no package manager"),
             PackageManager::Deb => deb::install_package(path),
             PackageManager::Rpm => rpm::install_package(path),
 
@@ -73,7 +73,7 @@ impl PackageManager {
     /// Returns a string representation of the package manager's extension.
     pub fn extension(&self) -> String {
         match *self {
-            PackageManager::Off => panic!("no package manager"),
+            PackageManager::Off => unreachable!("no package manager"),
             PackageManager::Deb => "deb".to_string(),
             PackageManager::Rpm => "rpm".to_string(),
             PackageManager::Ostree => "ostree".to_string(),
