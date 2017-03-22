@@ -1,4 +1,4 @@
-use rustc_serialize::json;
+use serde_json as json;
 use std::fs::File;
 use std::io::prelude::*;
 
@@ -24,7 +24,7 @@ pub fn install_package(path: &str, creds: &Credentials) -> Result<InstallOutcome
     let mut content = String::new();
     file.read_to_string(&mut content)
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("reading file: {:?}", err)))?;
-    let pkg = json::decode::<OstreePackage>(&content)
+    let pkg = json::from_str::<OstreePackage>(&content)
         .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("parsing file: {:?}", err)))?;
     pkg.install(creds)
 }
