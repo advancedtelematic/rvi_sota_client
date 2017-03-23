@@ -32,6 +32,7 @@ pub trait Interpreter<I, O>: Display {
 
 /// The `EventInterpreter` listens for `Event`s and may respond `Command`s.
 pub struct EventInterpreter {
+    pub etx:     Sender<Event>,
     pub auth:    Auth,
     pub pacman:  PackageManager,
     pub auto_dl: bool,
@@ -50,6 +51,11 @@ impl Interpreter<Event, Command> for EventInterpreter {
         info!("EventInterpreter received: {}", event);
 
         match event {
+            Event::Authenticated => {
+                self.etx.send(Event::InstalledPackagesNeeded);
+                self.etx.send(Event::SystemInfoNeeded);
+            }
+
             Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
                 ctx.send(Command::StartInstall(dl.update_id.clone()));
             }
@@ -115,6 +121,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
 /// The `IntermediateInterpreter` listens for `Command`s and wraps them with a
 /// response channel for sending to the `CommandInterpreter`.
+#[derive(Default)]
 pub struct IntermediateInterpreter {
     pub resp_tx: Option<Arc<Mutex<Sender<Event>>>>
 }
