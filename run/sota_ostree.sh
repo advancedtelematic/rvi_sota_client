@@ -27,11 +27,11 @@ if [ -z "$COMMIT" ]; then
 fi
 
 if [ "$AUTHPLUS_ACCESS_TOKEN" ]; then
-    auth_header_option=--http-header="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN"
+    auth_header_option=(--http-header="Authorization=Bearer $AUTHPLUS_ACCESS_TOKEN")
 fi
 
 if [[ -n "$TLS_CLIENT_KEY" && -n "$TLS_CA_CERT" ]]; then
-    tls_option=--set="tls-client-cert-path=$TLS_CLIENT_KEY"\ --set="tls-client-key-path=$TLS_CLIENT_KEY"\ --set="tls-ca-path=$TLS_CA_CERT"
+    tls_option=(--set="tls-client-cert-path=$TLS_CLIENT_KEY" --set="tls-client-key-path=$TLS_CLIENT_KEY" --set="tls-ca-path=$TLS_CA_CERT")
 fi
 
 mkdir -p /var/sota_ostree/
@@ -47,8 +47,8 @@ fi
 
 rm -f /etc/ostree/remotes.d/agl-remote.conf
 
-ostree remote add --no-gpg-verify $tls_option agl-remote "$PULL_URI"
-ostree pull agl-remote $auth_header_option "$COMMIT"
+ostree remote add --no-gpg-verify "${tls_option[@]}" agl-remote "$PULL_URI"
+ostree pull agl-remote "${auth_header_option[@]" "$COMMIT"
 ostree admin deploy "$COMMIT" && echo -n "$COMMIT" > /var/sota_ostree/staging
 
 sync
