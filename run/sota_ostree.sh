@@ -48,7 +48,7 @@ fi
 rm -f /etc/ostree/remotes.d/agl-remote.conf
 
 ostree remote add --no-gpg-verify "${tls_option[@]}" agl-remote "$PULL_URI"
-ostree pull agl-remote "${auth_header_option[@]" "$COMMIT"
+ostree pull agl-remote "${auth_header_option[@]}" "$COMMIT"
 ostree admin deploy "$COMMIT" && echo -n "$COMMIT" > /var/sota_ostree/staging
 
 sync
