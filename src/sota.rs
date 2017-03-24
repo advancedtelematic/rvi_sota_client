@@ -1,4 +1,4 @@
-use rustc_serialize::json;
+use serde_json as json;
 use std::{fs, io};
 use std::fs::File;
 use std::path::PathBuf;
@@ -42,20 +42,18 @@ impl<'c, 'h> Sota<'c, 'h> {
 
     /// Query the Core server for any pending or in-flight package updates.
     pub fn get_update_requests(&mut self) -> Result<Vec<UpdateRequest>, Error> {
-        let rx   = self.client.get(self.endpoint("updates"), None);
-        let data = match rx.recv().ok_or(Error::Client("couldn't get update requests".to_string()))? {
-            Response::Success(data) => data,
-            Response::Failed(data)  => return Err(Error::from(data)),
-            Response::Error(err)    => return Err(err)
-        };
-        Ok(json::decode::<Vec<UpdateRequest>>(&String::from_utf8(data.body)?)?)
+        let rx = self.client.get(self.endpoint("updates"), None);
+        match rx.recv().expect("couldn't get update requests") {
+            Response::Success(data) => Ok(json::from_slice::<Vec<UpdateRequest>>(&data.body)?),
+            Response::Failed(data)  => Err(Error::from(data)),
+            Response::Error(err)    => Err(err)
+        }
     }
 
     /// Download a specific update from the Core server.
     pub fn download_update(&mut self, id: UpdateRequestId) -> Result<DownloadComplete, Error> {
-        let url  = self.endpoint(&format!("updates/{}/download", id));
-        let rx   = self.client.get(url, None);
-        let data = match rx.recv().ok_or(Error::Client("couldn't download update".to_string()))? {
+        let rx   = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
+        let data = match rx.recv().expect("couldn't download update") {
             Response::Success(data) => data,
             Response::Failed(data)  => return Err(Error::from(data)),
             Response::Error(err)    => return Err(err)
@@ -65,6 +63,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let mut file = File::create(&path)
             .map_err(|err| Error::Client(format!("couldn't create path {}: {}", path, err)))?;
         let _ = io::copy(&mut &*data.body, &mut file)?;
+
         Ok(DownloadComplete {
             update_id:    id,
             update_image: path.to_string(),
@@ -87,9 +86,8 @@ impl<'c, 'h> Sota<'c, 'h> {
 
     /// Send a list of the currently installed packages to the Core server.
     pub fn send_installed_packages(&mut self, packages: &Vec<Package>) -> Result<(), Error> {
-        let body = json::encode(packages)?;
-        let rx   = self.client.put(self.endpoint("installed"), Some(body.into_bytes()));
-        match rx.recv().ok_or(Error::Client("couldn't send installed packages".to_string()))? {
+        let rx = self.client.put(self.endpoint("installed"), Some(json::to_vec(packages)?));
+        match rx.recv().expect("couldn't send installed packages") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(Error::from(data)),
             Response::Error(err)   => Err(err)
@@ -97,11 +95,10 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Send the outcome of a package update to the Core server.
-    pub fn send_update_report(&mut self, update_report: &UpdateReport) -> Result<(), Error> {
-        let body = json::encode(&update_report.operation_results)?;
-        let url  = self.endpoint(&format!("updates/{}", update_report.update_id));
-        let rx   = self.client.post(url, Some(body.into_bytes()));
-        match rx.recv().ok_or(Error::Client("couldn't send update report".to_string()))? {
+    pub fn send_update_report(&mut self, report: &UpdateReport) -> Result<(), Error> {
+        let url = self.endpoint(&format!("updates/{}", report.update_id));
+        let rx  = self.client.post(url, Some(json::to_vec(&report.operation_results)?));
+        match rx.recv().expect("couldn't send update report") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(Error::from(data)),
             Response::Error(err)   => Err(err)
@@ -109,9 +106,9 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Send system information from the device to the Core server.
-    pub fn send_system_info(&mut self, body: &str) -> Result<(), Error> {
-        let rx = self.client.put(self.endpoint("system_info"), Some(body.as_bytes().to_vec()));
-        match rx.recv().ok_or(Error::Client("couldn't send system info".to_string()))? {
+    pub fn send_system_info(&mut self, body: Vec<u8>) -> Result<(), Error> {
+        let rx = self.client.put(self.endpoint("system_info"), Some(body));
+        match rx.recv().expect("couldn't send system info") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(Error::from(data)),
             Response::Error(err)   => Err(err)
@@ -122,7 +119,7 @@ impl<'c, 'h> Sota<'c, 'h> {
 
 #[cfg(test)]
 mod tests {
-    use rustc_serialize::json;
+    use serde_json as json;
 
     use super::*;
     use datatype::{Config, Package, UpdateRequest, UpdateRequestStatus};
@@ -142,7 +139,7 @@ mod tests {
             createdAt: "2010-01-01".to_string()
         };
 
-        let json = format!("[{}]", json::encode(&pending_update).unwrap());
+        let json = format!("[{}]", json::to_string(&pending_update).unwrap());
         let mut sota = Sota {
             config: &Config::default(),
             client: &mut TestClient::from(vec![json.to_string()]),

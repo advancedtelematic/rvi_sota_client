@@ -1,8 +1,6 @@
-use chan;
-use chan::Sender;
+use chan::{self, Sender, Receiver};
 use std::{io, thread};
 use std::io::Write;
-use std::string::ToString;
 use std::sync::{Arc, Mutex};
 
 use datatype::{Command, Error, Event};
@@ -13,27 +11,20 @@ use super::gateway::{Gateway, Interpret};
 pub struct Console;
 
 impl Gateway for Console {
-    fn initialize(&mut self, itx: Sender<Interpret>) -> Result<(), String> {
+    fn start(&mut self, itx: Sender<Interpret>, _: Receiver<Event>) {
+        info!("Starting Console gateway.");
         let (etx, erx) = chan::sync::<Event>(0);
-        let etx        = Arc::new(Mutex::new(etx));
+        let etx = Arc::new(Mutex::new(etx));
 
-        thread::spawn(move || {
-            loop {
-                match get_input() {
-                    Ok(cmd)  => itx.send(Interpret { command: cmd, resp_tx: Some(etx.clone()) }),
-                    Err(err) => error!("Console Error: {:?}", err)
-                }
-            }
+        thread::spawn(move || loop {
+            let _ = get_input()
+                .map(|cmd| itx.send(Interpret { cmd: cmd, etx: Some(etx.clone()) }))
+                .map_err(|err| error!("Console: {:?}", err));
         });
 
-        thread::spawn(move || {
-            loop {
-                let e = erx.recv().expect("all console event transmitters are closed");
-                info!("Console Response: {}", e.to_string());
-            }
+        thread::spawn(move || loop {
+            info!("Console: {}", erx.recv().expect("etx closed"));
         });
-
-        Ok(info!("Console gateway started."))
     }
 }
 

@@ -1,10 +1,8 @@
 pub mod auth;
 pub mod command;
 pub mod config;
-pub mod dbus;
 pub mod error;
 pub mod event;
-pub mod json_rpc;
 pub mod network;
 pub mod report;
 pub mod request;
@@ -18,7 +16,6 @@ pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
                        GatewayConfig, RviConfig, TlsConfig, UptaneConfig};
 pub use self::error::Error;
 pub use self::event::Event;
-pub use self::json_rpc::{RpcRequest, RpcOk, RpcErr};
 pub use self::network::{Method, SocketAddr, Url};
 pub use self::report::{InstalledFirmware, InstalledPackage, InstalledSoftware,
                        OperationResult, UpdateResultCode, UpdateReport, system_info};

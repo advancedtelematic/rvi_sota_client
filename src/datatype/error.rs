@@ -1,9 +1,6 @@
 use chrono::ParseError as ChronoParseError;
 use hyper::error::Error as HyperError;
 use openssl::error::ErrorStack as OpensslErrors;
-use rustc_serialize::json::{EncoderError as JsonEncoderError,
-                            DecoderError as JsonDecoderError,
-                            ParserError as JsonParserError};
 use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{Display, Formatter, Result as FmtResult};
@@ -12,7 +9,7 @@ use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 use std::sync::PoisonError;
 use std::sync::mpsc::{SendError, RecvError};
-use toml::{ParserError as TomlParserError, DecodeError as TomlDecodeError};
+use toml::de::Error as TomlError;
 use url::ParseError as UrlParseError;
 
 use datatype::Event;
@@ -33,9 +30,6 @@ pub enum Error {
     HttpAuth(ResponseData),
     Hyper(HyperError),
     Io(IoError),
-    JsonDecoder(JsonDecoderError),
-    JsonEncoder(JsonEncoderError),
-    JsonParser(JsonParserError),
     Openssl(OpensslErrors),
     Package(String),
     Parse(String),
@@ -46,8 +40,7 @@ pub enum Error {
     SerdeJson(SerdeJsonError),
     Socket(String),
     SystemInfo(String),
-    TomlParser(Vec<TomlParserError>),
-    TomlDecode(TomlDecodeError),
+    Toml(TomlError),
     UptaneExpired,
     UptaneInvalidKeyType(String),
     UptaneInvalidSigType(String),
@@ -84,7 +77,7 @@ macro_rules! derive_from {
                 Error::$to(e)
             }
         })*
-    }
+    };
 }
 
 derive_from!([
@@ -92,13 +85,11 @@ derive_from!([
     FromUtf8Error    => FromUtf8,
     HyperError       => Hyper,
     IoError          => Io,
-    JsonEncoderError => JsonEncoder,
-    JsonDecoderError => JsonDecoder,
     OpensslErrors    => Openssl,
     RecvError        => Recv,
     ResponseData     => Http,
     SerdeJsonError   => SerdeJson,
-    TomlDecodeError  => TomlDecode,
+    TomlError        => Toml,
     UrlParseError    => UrlParse,
     Utf8Error        => Utf8,
     WebsocketError   => Websocket
@@ -106,8 +97,7 @@ derive_from!([
 
 derive_from!([
     SendError<Event>     => SendEvent,
-    SendError<Interpret> => SendInterpret,
-    Vec<TomlParserError> => TomlParser
+    SendError<Interpret> => SendInterpret
 ]);
 
 impl Display for Error {
@@ -122,9 +112,6 @@ impl Display for Error {
             Error::HttpAuth(ref r)      => format!("HTTP authorization error: {}", r.clone()),
             Error::Hyper(ref e)         => format!("Hyper error: {}", e.clone()),
             Error::Io(ref e)            => format!("IO error: {}", e.clone()),
-            Error::JsonDecoder(ref e)   => format!("Failed to decode JSON: {}", e.clone()),
-            Error::JsonEncoder(ref e)   => format!("Failed to encode JSON: {}", e.clone()),
-            Error::JsonParser(ref e)    => format!("Failed to parse JSON: {}", e.clone()),
             Error::Openssl(ref e)       => format!("OpenSSL errors: {}", e.clone()),
             Error::Poison(ref e)        => format!("Poison error: {}", e.clone()),
             Error::Package(ref s)       => format!("Package error: {}", s.clone()),
@@ -135,8 +122,7 @@ impl Display for Error {
             Error::SerdeJson(ref e)     => format!("Serde JSON error: {}", e.clone()),
             Error::Socket(ref s)        => format!("Unix Domain Socket error: {}", s.clone()),
             Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
-            Error::TomlDecode(ref e)    => format!("Toml decode error: {}", e.clone()),
-            Error::TomlParser(ref e)    => format!("Toml parser errors: {:?}", e.clone()),
+            Error::Toml(ref e)          => format!("TOML error: {:?}", e.clone()),
             Error::UptaneExpired               => format!("Uptane: expired"),
             Error::UptaneInvalidKeyType(ref s) => format!("Uptane: invalid key type: {}", s),
             Error::UptaneInvalidSigType(ref s) => format!("Uptane: invalid signature type: {}", s),

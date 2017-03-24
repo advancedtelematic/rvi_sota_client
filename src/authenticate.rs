@@ -1,21 +1,20 @@
-use rustc_serialize::json;
+use serde_json as json;
 
 use datatype::{AccessToken, Error, Url};
 use http::{Client, Response};
 
 
-#[derive(RustcEncodable)]
+#[derive(Serialize)]
 #[allow(non_snake_case)]
-struct RegistrationPayload {
-    deviceId: String,
-    ttl: u32
+pub struct RegistrationPayload {
+    pub deviceId: String,
+    pub ttl:      u32
 }
 
 /// Register with the specified auth gateway server to retrieve a new pkcs#12 bundle.
-pub fn pkcs12(server: Url, device_id: String, ttl: u32, client: &Client) -> Result<Vec<u8>, Error> {
+pub fn pkcs12(client: &Client, server: Url, payload: &RegistrationPayload) -> Result<Vec<u8>, Error> {
     info!("PKCS#12 registration server: {}", server);
-    let body = json::encode(&RegistrationPayload { deviceId: device_id, ttl: ttl })?;
-    let rx   = client.post(server, Some(body.into_bytes()));
+    let rx = client.post(server, Some(json::to_vec(payload)?));
     match rx.recv().expect("no authenticate response received") {
         Response::Success(data) => Ok(data.body),
         Response::Failed(data)  => Err(Error::from(data)),
@@ -27,13 +26,12 @@ pub fn pkcs12(server: Url, device_id: String, ttl: u32, client: &Client) -> Resu
 /// Authenticate with the specified OAuth2 server to retrieve a new `AccessToken`.
 pub fn oauth2(server: Url, client: &Client) -> Result<AccessToken, Error> {
     info!("OAuth2 authentication server: {}", server);
-    let rx   = client.post(server, Some(br#"grant_type=client_credentials"#.to_vec()));
-    let body = match rx.recv().expect("no authenticate response received") {
-        Response::Success(data) => String::from_utf8(data.body)?,
-        Response::Failed(data)  => return Err(Error::from(data)),
-        Response::Error(err)    => return Err(err)
-    };
-    Ok(json::decode(&body)?)
+    let rx = client.post(server, Some(br#"grant_type=client_credentials"#.to_vec()));
+    match rx.recv().expect("no authenticate response received") {
+        Response::Success(data) => Ok(json::from_slice(&data.body)?),
+        Response::Failed(data)  => Err(Error::from(data)),
+        Response::Error(err)    => Err(err)
+    }
 }
 
 
@@ -51,8 +49,8 @@ mod tests {
     #[test]
     fn test_register() {
         let client = TestClient::from(vec![vec![12u8]]);
-        let expect = vec![12u8];
-        assert_eq!(expect, pkcs12(test_server(), "device_id".to_string(), 12, &client).unwrap());
+        let body   = RegistrationPayload { deviceId: "device_id".to_string(), ttl: 1 };
+        assert_eq!(vec![12u8], pkcs12(&client, test_server(), &body).unwrap());
     }
 
     #[test]
@@ -76,7 +74,6 @@ mod tests {
     #[test]
     fn test_oauth2_bad_json() {
         let client = TestClient::from(vec![r#"{"apa": 1}"#.to_string()]);
-        let expect = r#"Failed to decode JSON: MissingFieldError("access_token")"#;
-        assert_eq!(expect, format!("{}", oauth2(test_server(), &client).unwrap_err()));
+        assert!(oauth2(test_server(), &client).is_err());
     }
 }

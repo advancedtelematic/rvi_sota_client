@@ -1,8 +1,7 @@
-use rustc_serialize::Decodable;
 use std::fs::File;
 use std::io::prelude::*;
 use std::ops::Deref;
-use toml::{Decoder, Parser, Table};
+use toml;
 
 use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
 use http::TlsData;
@@ -10,7 +9,7 @@ use package_manager::PackageManager;
 
 
 /// A container for all parsed configs.
-#[derive(Default, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Default, PartialEq, Eq, Debug, Clone)]
 pub struct Config {
     pub auth:      Option<AuthConfig>,
     pub core:      CoreConfig,
@@ -23,6 +22,7 @@ pub struct Config {
     pub tls:       Option<TlsConfig>,
     pub uptane:    UptaneConfig,
 }
+
 
 impl Config {
     /// Read a toml config file using default values for missing sections or fields.
@@ -37,36 +37,10 @@ impl Config {
     }
 
     /// Parse a toml config using default values for missing sections or fields.
-    #[allow(unused_mut)]
     pub fn parse(toml: &str) -> Result<Config, Error> {
-        let table = parse_table(&toml)?;
-
-        let mut auth:      Option<ParsedAuthConfig>      = maybe_parse_section(&table, "auth")?;
-        let mut provision: Option<ParsedProvisionConfig> = maybe_parse_section(&table, "provision")?;
-        let mut tls:       Option<ParsedTlsConfig>       = maybe_parse_section(&table, "tls")?;
-
-        let mut core:    ParsedCoreConfig    = parse_section(&table, "core")?;
-        let mut dbus:    ParsedDBusConfig    = parse_section(&table, "dbus")?;
-        let mut device:  ParsedDeviceConfig  = parse_section(&table, "device")?;
-        let mut gateway: ParsedGatewayConfig = parse_section(&table, "gateway")?;
-        let mut network: ParsedNetworkConfig = parse_section(&table, "network")?;
-        let mut rvi:     ParsedRviConfig     = parse_section(&table, "rvi")?;
-        let mut uptane:  ParsedUptaneConfig  = parse_section(&table, "uptane")?;
-
-        backwards_compatibility(&mut core, &mut device)?;
-
-        Ok(Config {
-            auth:      auth.map(|mut cfg| cfg.defaultify()),
-            core:      core.defaultify(),
-            dbus:      dbus.defaultify(),
-            device:    device.defaultify(),
-            gateway:   gateway.defaultify(),
-            network:   network.defaultify(),
-            provision: provision.map(|mut cfg| cfg.defaultify()),
-            rvi:       rvi.defaultify(),
-            tls:       tls.map(|mut cfg| cfg.defaultify()),
-            uptane:    uptane.defaultify()
-        })
+        let mut partial: PartialConfig = toml::from_str(toml)?;
+        partial.backwards_compatibility()?;
+        Ok(partial.to_config())
     }
 
     /// Return the initial Auth type from the current Config.
@@ -103,68 +77,74 @@ impl Config {
 }
 
 
-fn parse_table(toml: &str) -> Result<Table, Error> {
-    let mut parser = Parser::new(toml);
-    Ok(parser.parse().ok_or_else(move || parser.errors)?)
+#[derive(Deserialize)]
+struct PartialConfig {
+    pub auth:      Option<ParsedAuthConfig>,
+    pub core:      Option<ParsedCoreConfig>,
+    pub dbus:      Option<ParsedDBusConfig>,
+    pub device:    Option<ParsedDeviceConfig>,
+    pub gateway:   Option<ParsedGatewayConfig>,
+    pub network:   Option<ParsedNetworkConfig>,
+    pub provision: Option<ParsedProvisionConfig>,
+    pub rvi:       Option<ParsedRviConfig>,
+    pub tls:       Option<ParsedTlsConfig>,
+    pub uptane:    Option<ParsedUptaneConfig>,
 }
 
-fn parse_section<T: Decodable + Default>(table: &Table, section: &str) -> Result<T, Error> {
-    Ok(maybe_parse_section(table, section)?.unwrap_or(T::default()))
-}
-
-fn maybe_parse_section<T: Decodable>(table: &Table, section: &str) -> Result<Option<T>, Error> {
-    table.get(section).map_or(Ok(None), |sect| {
-        let mut decoder = Decoder::new(sect.clone());
-        Ok(Some(T::decode(&mut decoder)?))
-    })
-}
-
-fn backwards_compatibility(core:   &mut ParsedCoreConfig,
-                           device: &mut ParsedDeviceConfig) -> Result<(), Error> {
-
-    // device.polling_interval -> core.polling_sec
-    match (device.polling_interval, core.polling_sec) {
-        (Some(_), Some(_)) => {
-            return Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string()))
+impl PartialConfig {
+    fn to_config(self) -> Config {
+        Config {
+            auth:      self.auth.map(|cfg| cfg.defaultify()),
+            core:      self.core.map(|cfg| cfg.defaultify()).unwrap_or(CoreConfig::default()),
+            dbus:      self.dbus.map(|cfg| cfg.defaultify()).unwrap_or(DBusConfig::default()),
+            device:    self.device.map(|cfg| cfg.defaultify()).unwrap_or(DeviceConfig::default()),
+            gateway:   self.gateway.map(|cfg| cfg.defaultify()).unwrap_or(GatewayConfig::default()),
+            network:   self.network.map(|cfg| cfg.defaultify()).unwrap_or(NetworkConfig::default()),
+            provision: self.provision.map(|cfg| cfg.defaultify()),
+            rvi:       self.rvi.map(|cfg| cfg.defaultify()).unwrap_or(RviConfig::default()),
+            tls:       self.tls.map(|cfg| cfg.defaultify()),
+            uptane:    self.uptane.map(|cfg| cfg.defaultify()).unwrap_or(UptaneConfig::default()),
         }
+    }
 
-        (Some(interval), None) => {
-            if interval > 0 {
-                core.polling     = Some(true);
-                core.polling_sec = Some(interval);
-            } else {
-                core.polling = Some(false);
+    fn backwards_compatibility(&mut self) -> Result<(), Error> {
+        match (self.core.as_mut(), self.device.as_mut()) {
+            (Some(ref mut core), Some(ref mut device)) => {
+                // device.polling_interval -> core.polling_sec
+                match (device.polling_interval, core.polling_sec) {
+                    (Some(time), None) => if time > 0 {
+                        core.polling     = Some(true);
+                        core.polling_sec = Some(time);
+                    } else {
+                        core.polling = Some(false);
+                    },
+                    (Some(_), Some(_)) => return Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string())),
+                    _ => ()
+                }
+
+                // device.certificates_path -> core.ca_file
+                match (device.certificates_path.as_mut(), core.ca_file.as_mut()) {
+                    (Some(path), None) => { core.ca_file = Some(path.clone()) }
+                    (Some(_), Some(_)) => return Err(Error::Config("core.ca_file and device.certificates_path both set".to_string())),
+                    _ => ()
+                }
             }
+            _ => ()
         }
 
-        _ => ()
+        Ok(())
     }
-
-    // device.certificates_path -> core.ca_file
-    match (&device.certificates_path, &core.ca_file) {
-        (&Some(_), &Some(_)) => {
-            return Err(Error::Config("core.ca_file and device.certificates_path both set".to_string()))
-        }
-
-        (&Some(ref path), &None) => {
-            core.ca_file = Some(path.clone());
-        },
-
-        _ => ()
-    }
-
-    Ok(())
 }
 
 
 /// Trait used to overwrite any `None` fields in a config with its default value.
 trait Defaultify<T: Default> {
-    fn defaultify(&mut self) -> T;
+    fn defaultify(self) -> T;
 }
 
 
 /// The [auth] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct AuthConfig {
     pub server:        Url,
     pub client_id:     String,
@@ -181,37 +161,27 @@ impl Default for AuthConfig {
     }
 }
 
-#[derive(RustcDecodable, Debug)]
+#[derive(Deserialize, Default)]
 struct ParsedAuthConfig {
     server:        Option<Url>,
     client_id:     Option<String>,
     client_secret: Option<String>
 }
 
-impl Default for ParsedAuthConfig {
-    fn default() -> Self {
-        ParsedAuthConfig {
-            server:        None,
-            client_id:     None,
-            client_secret: None
-        }
-    }
-}
-
 impl Defaultify<AuthConfig> for ParsedAuthConfig {
-    fn defaultify(&mut self) -> AuthConfig {
+    fn defaultify(self) -> AuthConfig {
         let default = AuthConfig::default();
         AuthConfig {
-            server:        self.server.take().unwrap_or(default.server),
-            client_id:     self.client_id.take().unwrap_or(default.client_id),
-            client_secret: self.client_secret.take().unwrap_or(default.client_secret)
+            server:        self.server.unwrap_or(default.server),
+            client_id:     self.client_id.unwrap_or(default.client_id),
+            client_secret: self.client_secret.unwrap_or(default.client_secret)
         }
     }
 }
 
 
 /// The [core] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct CoreConfig {
     pub server:      Url,
     pub polling:     bool,
@@ -230,7 +200,7 @@ impl Default for CoreConfig {
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedCoreConfig {
     server:      Option<Url>,
     polling:     Option<bool>,
@@ -238,32 +208,21 @@ struct ParsedCoreConfig {
     ca_file:     Option<String>,
 }
 
-impl Default for ParsedCoreConfig {
-    fn default() -> Self {
-        ParsedCoreConfig {
-            server:      None,
-            polling:     None,
-            polling_sec: None,
-            ca_file:     None,
-        }
-    }
-}
-
 impl Defaultify<CoreConfig> for ParsedCoreConfig {
-    fn defaultify(&mut self) -> CoreConfig {
+    fn defaultify(self) -> CoreConfig {
         let default = CoreConfig::default();
         CoreConfig {
-            server:      self.server.take().unwrap_or(default.server),
-            polling:     self.polling.take().unwrap_or(default.polling),
-            polling_sec: self.polling_sec.take().unwrap_or(default.polling_sec),
-            ca_file:     self.ca_file.take().or(default.ca_file),
+            server:      self.server.unwrap_or(default.server),
+            polling:     self.polling.unwrap_or(default.polling),
+            polling_sec: self.polling_sec.unwrap_or(default.polling_sec),
+            ca_file:     self.ca_file.or(default.ca_file),
         }
     }
 }
 
 
 /// The [dbus] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct DBusConfig {
     pub name:                  String,
     pub path:                  String,
@@ -286,7 +245,7 @@ impl Default for DBusConfig {
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedDBusConfig {
     name:                  Option<String>,
     path:                  Option<String>,
@@ -296,36 +255,23 @@ struct ParsedDBusConfig {
     timeout:               Option<i32>,
 }
 
-impl Default for ParsedDBusConfig {
-    fn default() -> Self {
-        ParsedDBusConfig {
-            name:                  None,
-            path:                  None,
-            interface:             None,
-            software_manager:      None,
-            software_manager_path: None,
-            timeout:               None
-        }
-    }
-}
-
 impl Defaultify<DBusConfig> for ParsedDBusConfig {
-    fn defaultify(&mut self) -> DBusConfig {
+    fn defaultify(self) -> DBusConfig {
         let default = DBusConfig::default();
         DBusConfig {
-            name:                  self.name.take().unwrap_or(default.name),
-            path:                  self.path.take().unwrap_or(default.path),
-            interface:             self.interface.take().unwrap_or(default.interface),
-            software_manager:      self.software_manager.take().unwrap_or(default.software_manager),
-            software_manager_path: self.software_manager_path.take().unwrap_or(default.software_manager_path),
-            timeout:               self.timeout.take().unwrap_or(default.timeout)
+            name:                  self.name.unwrap_or(default.name),
+            path:                  self.path.unwrap_or(default.path),
+            interface:             self.interface.unwrap_or(default.interface),
+            software_manager:      self.software_manager.unwrap_or(default.software_manager),
+            software_manager_path: self.software_manager_path.unwrap_or(default.software_manager_path),
+            timeout:               self.timeout.unwrap_or(default.timeout)
         }
     }
 }
 
 
 /// The [device] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct DeviceConfig {
     pub uuid:              String,
     pub packages_dir:      String,
@@ -346,7 +292,7 @@ impl Default for DeviceConfig {
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedDeviceConfig {
     pub uuid:              Option<String>,
     pub packages_dir:      Option<String>,
@@ -357,36 +303,22 @@ struct ParsedDeviceConfig {
     pub certificates_path: Option<String>,
 }
 
-impl Default for ParsedDeviceConfig {
-    fn default() -> Self {
-        ParsedDeviceConfig {
-            uuid:              None,
-            packages_dir:      None,
-            package_manager:   None,
-            auto_download:     None,
-            system_info:       None,
-            polling_interval:  None,
-            certificates_path: None,
-        }
-    }
-}
-
 impl Defaultify<DeviceConfig> for ParsedDeviceConfig {
-    fn defaultify(&mut self) -> DeviceConfig {
+    fn defaultify(self) -> DeviceConfig {
         let default = DeviceConfig::default();
         DeviceConfig {
-            uuid:            self.uuid.take().unwrap_or(default.uuid),
-            packages_dir:    self.packages_dir.take().unwrap_or(default.packages_dir),
-            package_manager: self.package_manager.take().unwrap_or(default.package_manager),
-            auto_download:   self.auto_download.take().unwrap_or(default.auto_download),
-            system_info:     self.system_info.take().or(default.system_info),
+            uuid:            self.uuid.unwrap_or(default.uuid),
+            packages_dir:    self.packages_dir.unwrap_or(default.packages_dir),
+            package_manager: self.package_manager.unwrap_or(default.package_manager),
+            auto_download:   self.auto_download.unwrap_or(default.auto_download),
+            system_info:     self.system_info.or(default.system_info),
         }
     }
 }
 
 
 /// The [gateway] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 pub struct GatewayConfig {
     pub console:   bool,
     pub dbus:      bool,
@@ -396,20 +328,7 @@ pub struct GatewayConfig {
     pub websocket: bool,
 }
 
-impl Default for GatewayConfig {
-    fn default() -> GatewayConfig {
-        GatewayConfig {
-            console:   false,
-            dbus:      false,
-            http:      false,
-            rvi:       false,
-            socket:    false,
-            websocket: false,
-        }
-    }
-}
-
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedGatewayConfig {
     console:   Option<bool>,
     dbus:      Option<bool>,
@@ -419,36 +338,23 @@ struct ParsedGatewayConfig {
     websocket: Option<bool>,
 }
 
-impl Default for ParsedGatewayConfig {
-    fn default() -> Self {
-        ParsedGatewayConfig {
-            console:   None,
-            dbus:      None,
-            http:      None,
-            rvi:       None,
-            socket:    None,
-            websocket: None
-        }
-    }
-}
-
 impl Defaultify<GatewayConfig> for ParsedGatewayConfig {
-    fn defaultify(&mut self) -> GatewayConfig {
+    fn defaultify(self) -> GatewayConfig {
         let default = GatewayConfig::default();
         GatewayConfig {
-            console:   self.console.take().unwrap_or(default.console),
-            dbus:      self.dbus.take().unwrap_or(default.dbus),
-            http:      self.http.take().unwrap_or(default.http),
-            rvi:       self.rvi.take().unwrap_or(default.rvi),
-            socket:    self.socket.take().unwrap_or(default.socket),
-            websocket: self.websocket.take().unwrap_or(default.websocket)
+            console:   self.console.unwrap_or(default.console),
+            dbus:      self.dbus.unwrap_or(default.dbus),
+            http:      self.http.unwrap_or(default.http),
+            rvi:       self.rvi.unwrap_or(default.rvi),
+            socket:    self.socket.unwrap_or(default.socket),
+            websocket: self.websocket.unwrap_or(default.websocket)
         }
     }
 }
 
 
 /// The [network] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct NetworkConfig {
     pub http_server:          SocketAddr,
     pub rvi_edge_server:      SocketAddr,
@@ -469,7 +375,7 @@ impl Default for NetworkConfig {
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedNetworkConfig {
     http_server:          Option<SocketAddr>,
     rvi_edge_server:      Option<SocketAddr>,
@@ -478,34 +384,22 @@ struct ParsedNetworkConfig {
     websocket_server:     Option<String>
 }
 
-impl Default for ParsedNetworkConfig {
-    fn default() -> Self {
-        ParsedNetworkConfig {
-            http_server:          None,
-            rvi_edge_server:      None,
-            socket_commands_path: None,
-            socket_events_path:   None,
-            websocket_server:     None
-        }
-    }
-}
-
 impl Defaultify<NetworkConfig> for ParsedNetworkConfig {
-    fn defaultify(&mut self) -> NetworkConfig {
+    fn defaultify(self) -> NetworkConfig {
         let default = NetworkConfig::default();
         NetworkConfig {
-            http_server:          self.http_server.take().unwrap_or(default.http_server),
-            rvi_edge_server:      self.rvi_edge_server.take().unwrap_or(default.rvi_edge_server),
-            socket_commands_path: self.socket_commands_path.take().unwrap_or(default.socket_commands_path),
-            socket_events_path:   self.socket_events_path.take().unwrap_or(default.socket_events_path),
-            websocket_server:     self.websocket_server.take().unwrap_or(default.websocket_server)
+            http_server:          self.http_server.unwrap_or(default.http_server),
+            rvi_edge_server:      self.rvi_edge_server.unwrap_or(default.rvi_edge_server),
+            socket_commands_path: self.socket_commands_path.unwrap_or(default.socket_commands_path),
+            socket_events_path:   self.socket_events_path.unwrap_or(default.socket_events_path),
+            websocket_server:     self.websocket_server.unwrap_or(default.websocket_server)
         }
     }
 }
 
 
 /// The [provision] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct ProvisionConfig {
     pub p12_path:     String,
     pub p12_password: String,
@@ -524,7 +418,7 @@ impl Default for ProvisionConfig {
     }
 }
 
-#[derive(RustcDecodable, Debug)]
+#[derive(Deserialize, Default)]
 struct ParsedProvisionConfig {
     p12_path:     Option<String>,
     p12_password: Option<String>,
@@ -532,32 +426,21 @@ struct ParsedProvisionConfig {
     device_id:    Option<String>,
 }
 
-impl Default for ParsedProvisionConfig {
-    fn default() -> Self {
-        ParsedProvisionConfig {
-            p12_path:     None,
-            p12_password: None,
-            expiry_days:  None,
-            device_id:    None,
-        }
-    }
-}
-
 impl Defaultify<ProvisionConfig> for ParsedProvisionConfig {
-    fn defaultify(&mut self) -> ProvisionConfig {
+    fn defaultify(self) -> ProvisionConfig {
         let default = ProvisionConfig::default();
         ProvisionConfig {
-            p12_path:     self.p12_path.take().unwrap_or(default.p12_path),
-            p12_password: self.p12_password.take().unwrap_or(default.p12_password),
-            expiry_days:  self.expiry_days.take().unwrap_or(default.expiry_days),
-            device_id:    self.device_id.take().or(default.device_id),
+            p12_path:     self.p12_path.unwrap_or(default.p12_path),
+            p12_password: self.p12_password.unwrap_or(default.p12_password),
+            expiry_days:  self.expiry_days.unwrap_or(default.expiry_days),
+            device_id:    self.device_id.or(default.device_id),
         }
     }
 }
 
 
 /// The [rvi] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct RviConfig {
     pub client:      Url,
     pub storage_dir: String,
@@ -574,37 +457,27 @@ impl Default for RviConfig {
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedRviConfig {
     client:      Option<Url>,
     storage_dir: Option<String>,
     timeout:     Option<i64>,
 }
 
-impl Default for ParsedRviConfig {
-    fn default() -> Self {
-        ParsedRviConfig {
-            client:      None,
-            storage_dir: None,
-            timeout:     None
-        }
-    }
-}
-
 impl Defaultify<RviConfig> for ParsedRviConfig {
-    fn defaultify(&mut self) -> RviConfig {
+    fn defaultify(self) -> RviConfig {
         let default = RviConfig::default();
         RviConfig {
-            client:      self.client.take().unwrap_or(default.client),
-            storage_dir: self.storage_dir.take().unwrap_or(default.storage_dir),
-            timeout:     self.timeout.take().or(default.timeout)
+            client:      self.client.unwrap_or(default.client),
+            storage_dir: self.storage_dir.unwrap_or(default.storage_dir),
+            timeout:     self.timeout.or(default.timeout)
         }
     }
 }
 
 
 /// The [tls] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct TlsConfig {
     pub server:    Url,
     pub ca_file:   String,
@@ -623,7 +496,7 @@ impl Default for TlsConfig {
     }
 }
 
-#[derive(RustcDecodable, Debug)]
+#[derive(Deserialize, Default)]
 struct ParsedTlsConfig {
     server:    Option<Url>,
     ca_file:   Option<String>,
@@ -631,32 +504,21 @@ struct ParsedTlsConfig {
     pkey_file: Option<String>,
 }
 
-impl Default for ParsedTlsConfig {
-    fn default() -> Self {
-        ParsedTlsConfig {
-            server:    None,
-            ca_file:   None,
-            cert_file: None,
-            pkey_file: None,
-        }
-    }
-}
-
 impl Defaultify<TlsConfig> for ParsedTlsConfig {
-    fn defaultify(&mut self) -> TlsConfig {
+    fn defaultify(self) -> TlsConfig {
         let default = TlsConfig::default();
         TlsConfig {
-            server:    self.server.take().unwrap_or(default.server),
-            ca_file:   self.ca_file.take().unwrap_or(default.ca_file),
-            cert_file: self.cert_file.take().unwrap_or(default.cert_file),
-            pkey_file: self.pkey_file.take().unwrap_or(default.pkey_file),
+            server:    self.server.unwrap_or(default.server),
+            ca_file:   self.ca_file.unwrap_or(default.ca_file),
+            cert_file: self.cert_file.unwrap_or(default.cert_file),
+            pkey_file: self.pkey_file.unwrap_or(default.pkey_file),
         }
     }
 }
 
 
 /// The [uptane] configuration section.
-#[derive(RustcDecodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct UptaneConfig {
     pub director_server:    Url,
     pub repo_server:        Url,
@@ -679,7 +541,7 @@ impl Default for UptaneConfig {
     }
 }
 
-#[derive(RustcDecodable)]
+#[derive(Deserialize, Default)]
 struct ParsedUptaneConfig {
     director_server:    Option<Url>,
     repo_server:        Option<Url>,
@@ -689,29 +551,16 @@ struct ParsedUptaneConfig {
     public_key_path:    Option<String>,
 }
 
-impl Default for ParsedUptaneConfig {
-    fn default() -> ParsedUptaneConfig {
-        ParsedUptaneConfig {
-            director_server:    None,
-            repo_server:        None,
-            primary_ecu_serial: None,
-            metadata_path:      None,
-            private_key_path:   None,
-            public_key_path:    None,
-        }
-    }
-}
-
 impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
-    fn defaultify(&mut self) -> UptaneConfig {
+    fn defaultify(self) -> UptaneConfig {
         let default = UptaneConfig::default();
         UptaneConfig {
-            director_server:    self.director_server.take().unwrap_or(default.director_server),
-            repo_server:        self.repo_server.take().unwrap_or(default.repo_server),
-            primary_ecu_serial: self.primary_ecu_serial.take().unwrap_or(default.primary_ecu_serial),
-            metadata_path:      self.metadata_path.take().unwrap_or(default.metadata_path),
-            private_key_path:   self.private_key_path.take().unwrap_or(default.private_key_path),
-            public_key_path:    self.public_key_path.take().unwrap_or(default.public_key_path),
+            director_server:    self.director_server.unwrap_or(default.director_server),
+            repo_server:        self.repo_server.unwrap_or(default.repo_server),
+            primary_ecu_serial: self.primary_ecu_serial.unwrap_or(default.primary_ecu_serial),
+            metadata_path:      self.metadata_path.unwrap_or(default.metadata_path),
+            private_key_path:   self.private_key_path.unwrap_or(default.private_key_path),
+            public_key_path:    self.public_key_path.unwrap_or(default.public_key_path),
         }
     }
 }

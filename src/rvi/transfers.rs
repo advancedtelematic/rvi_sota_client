@@ -1,6 +1,6 @@
+use base64;
 use crypto::digest::Digest;
 use crypto::sha1::Sha1;
-use rustc_serialize::base64::FromBase64;
 use std::fs;
 use std::collections::HashMap;
 use std::fs::File;
@@ -89,7 +89,7 @@ impl Transfer {
         path.push(index.to_string());
         let mut file = try!(File::create(path).map_err(|err| format!("couldn't open chunk file: {}", err)));
 
-        let data = try!(data.from_base64().map_err(|err| format!("couldn't decode chunk {}: {}", index, err)));
+        let data = try!(base64::decode(data).map_err(|err| format!("couldn't decode chunk {}: {}", index, err)));
         try!(file.write_all(&data)
              .map_err(|err| format!("couldn't write chunk {} for update_id {}: {}", index, self.update_id, err)));
         try!(file.flush().map_err(|err| format!("couldn't flush file: {}", err)));
@@ -193,10 +193,8 @@ impl Drop for Transfer {
 
 #[cfg(test)]
 mod test {
-    use rand;
-    use rand::Rng;
-    use rustc_serialize::base64;
-    use rustc_serialize::base64::ToBase64;
+    use base64;
+    use rand::{self, Rng};
     use std::path::PathBuf;
     use std::fs::File;
     use std::io::prelude::*;
@@ -218,14 +216,7 @@ mod test {
         }
 
         pub fn assert_chunk_written(&mut self, test_dir: &TestDir, index: u64, data: &[u8]) {
-            let encoded = data.to_base64(base64::Config {
-                char_set:    base64::CharacterSet::UrlSafe,
-                newline:     base64::Newline::LF,
-                pad:         true,
-                line_length: None
-            });
-            self.write_chunk(encoded.as_ref(), index).expect("couldn't write chunk");
-
+            self.write_chunk(&base64::encode_config(data, base64::URL_SAFE), index).expect("couldn't write chunk");
             let path     = PathBuf::from(format!("{}/downloads/{}/{}", test_dir.0.clone(), self.update_id, index));
             let mut file = File::open(path).map_err(|err| panic!("couldn't open file: {}", err)).unwrap();
             let mut buf  = Vec::new();

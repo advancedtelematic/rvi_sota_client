@@ -1,7 +1,6 @@
 use chan::{Sender, Receiver};
 use std;
 use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
 use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
@@ -18,11 +17,10 @@ use uptane::Uptane;
 
 /// An `Interpreter` loops over any incoming values, on receipt of which it
 /// delegates to the `interpret` function which will respond with output values.
-pub trait Interpreter<I, O>: Display {
+pub trait Interpreter<I, O> {
     fn interpret(&mut self, input: I, otx: &Sender<O>);
 
     fn run(&mut self, irx: Receiver<I>, otx: Sender<O>) {
-        debug!("starting {}", self);
         loop {
             self.interpret(irx.recv().expect("interpreter sender closed"), &otx);
         }
@@ -32,18 +30,12 @@ pub trait Interpreter<I, O>: Display {
 
 /// The `EventInterpreter` listens for `Event`s and may respond `Command`s.
 pub struct EventInterpreter {
-    pub etx:     Sender<Event>,
+    pub loop_tx: Sender<Event>,
     pub auth:    Auth,
     pub pacman:  PackageManager,
     pub auto_dl: bool,
     pub sysinfo: Option<String>,
     pub treehub: Option<Url>,
-}
-
-impl Display for EventInterpreter {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", "EventInterpreter")
-    }
 }
 
 impl Interpreter<Event, Command> for EventInterpreter {
@@ -52,8 +44,8 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
         match event {
             Event::Authenticated => {
-                self.etx.send(Event::InstalledPackagesNeeded);
-                self.etx.send(Event::SystemInfoNeeded);
+                self.loop_tx.send(Event::InstalledPackagesNeeded);
+                self.loop_tx.send(Event::SystemInfoNeeded);
             }
 
             Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
@@ -126,16 +118,10 @@ pub struct IntermediateInterpreter {
     pub resp_tx: Option<Arc<Mutex<Sender<Event>>>>
 }
 
-impl Display for IntermediateInterpreter {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", "IntermediateInterpreter")
-    }
-}
-
 impl Interpreter<Command, Interpret> for IntermediateInterpreter {
     fn interpret(&mut self, cmd: Command, itx: &Sender<Interpret>) {
         trace!("IntermediateInterpreter received: {}", &cmd);
-        itx.send(Interpret { command: cmd, resp_tx: self.resp_tx.clone() });
+        itx.send(Interpret { cmd: cmd, etx: self.resp_tx.clone() });
     }
 }
 
@@ -157,22 +143,16 @@ pub struct CommandInterpreter {
     pub http:   Box<Client>
 }
 
-impl Display for CommandInterpreter {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{}", "CommandInterpreter")
-    }
-}
-
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
-        info!("CommandInterpreter received: {}", &interpret.command);
+        info!("CommandInterpreter received: {}", &interpret.cmd);
         let outcome = match self.auth {
             Auth::None        |
             Auth::Token(_)    |
-            Auth::Certificate => self.process_command(interpret.command, etx),
+            Auth::Certificate => self.process_command(interpret.cmd, etx),
 
             Auth::Provision      |
-            Auth::Credentials(_) => self.authenticate(interpret.command)
+            Auth::Credentials(_) => self.authenticate(interpret.cmd)
         };
 
         let final_ev = match outcome {
@@ -186,7 +166,7 @@ impl Interpreter<Interpret, Event> for CommandInterpreter {
             Err(err) => Event::Error(format!("{}", err))
         };
         etx.send(final_ev.clone());
-        interpret.resp_tx.map(|tx| tx.lock().unwrap().send(final_ev));
+        interpret.etx.map(|tx| tx.lock().unwrap().send(final_ev));
     }
 }
 
@@ -266,7 +246,7 @@ impl CommandInterpreter {
 
             Command::SendSystemInfo => {
                 if let Some(ref cmd) = self.config.device.system_info {
-                    sota.send_system_info(&system_info(&cmd)?)?;
+                    sota.send_system_info(system_info(&cmd)?.into_bytes())?;
                 }
                 Event::SystemInfoSent
             }
@@ -400,12 +380,10 @@ mod tests {
         let (etx, erx) = chan::sync::<Event>(0);
         let (ctx, crx) = chan::sync::<Command>(0);
 
-        thread::spawn(move || {
-            loop {
-                match crx.recv() {
-                    Some(cmd) => ci.interpret(Interpret { command: cmd, resp_tx: None }, &etx),
-                    None      => break
-                }
+        thread::spawn(move || loop {
+            match crx.recv() {
+                Some(cmd) => ci.interpret(Interpret { cmd: cmd, etx: None }, &etx),
+                None      => break
             }
         });
 

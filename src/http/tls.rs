@@ -167,17 +167,15 @@ impl<S: Read + Write> TlsStream<S> {
     pub fn shutdown(&mut self) -> io::Result<()> {
         loop {
             match self.0.shutdown() {
-                Ok(ShutdownResult::Sent)     => {},
-                Ok(ShutdownResult::Received) => break,
-                Err(SslError::ZeroReturn)    => break,
+                Ok(ShutdownResult::Sent)     => continue,
+                Ok(ShutdownResult::Received) => return Ok(()),
+                Err(SslError::ZeroReturn)    => return Ok(()),
                 Err(SslError::Stream(e))     => return Err(e),
                 Err(SslError::WantRead(e))   => return Err(e),
                 Err(SslError::WantWrite(e))  => return Err(e),
                 Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
             }
         }
-
-        Ok(())
     }
 
     pub fn get_ref(&self) -> &S {

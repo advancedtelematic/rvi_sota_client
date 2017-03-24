@@ -1,9 +1,9 @@
 [Unit]
 Description=SOTA Client Autoprovisioning
-Wants=network-online.target
-After=network.target network-online.target
-Before=sota_client.service
 Requires=network-online.target
+After=network-online.target
+Requires=sota_client.service
+Before=sota_client.service
 
 [Service]
 Type=oneshot
@@ -12,7 +12,7 @@ EnvironmentFile=/var/sota/sota_provisioning_url.env
 Environment=SOTA_CERT_DIR=/var/sota
 ExecStart=/usr/bin/sota_prov.sh sota_provisioning_credentials
 RemainAfterExit=true
-StandardOutput=journal 
+StandardOutput=journal
 
 [Install]
 WantedBy=multi-user.target

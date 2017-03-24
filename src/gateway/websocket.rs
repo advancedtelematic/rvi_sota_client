@@ -1,6 +1,5 @@
-use chan;
-use chan::Sender;
-use rustc_serialize::json;
+use chan::{self, Sender, Receiver};
+use serde_json as json;
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -20,28 +19,29 @@ pub struct Websocket {
 }
 
 impl Gateway for Websocket {
-    fn initialize(&mut self, itx: Sender<Interpret>) -> Result<(), String> {
-        let clients = self.clients.clone();
-        let addr    = self.server.clone();
+    fn start(&mut self, itx: Sender<Interpret>, erx: Receiver<Event>) {
+        info!("Starting Websocket gateway at {}.", self.server);
+
+        let addr = self.server.clone();
+        let clients1 = self.clients.clone();
+        let clients2 = self.clients.clone();
 
         thread::spawn(move || {
             ws::listen(&addr as &str, |out| {
                 WebsocketHandler {
                     out:     out,
                     itx:     itx.clone(),
-                    clients: clients.clone()
+                    clients: clients1.clone()
                 }
             }).expect("couldn't start websocket listener");
         });
 
-        Ok(info!("Websocket gateway started at {}.", self.server))
-    }
-
-    fn pulse(&self, event: Event) {
-        let json = encode(event);
-        for (_, out) in self.clients.lock().unwrap().iter() {
-            let _ = out.send(Message::Text(json.clone()));
-        }
+        thread::spawn(move || loop {
+            let ev = encode(erx.recv().expect("websocket etx closed"));
+            for (_, out) in clients2.lock().unwrap().iter() {
+                let _ = out.send(Message::Text(ev.clone()));
+            }
+        });
     }
 }
 
@@ -88,19 +88,17 @@ impl Handler for WebsocketHandler {
 impl WebsocketHandler {
     fn forward_command(&self, cmd: Command) {
         let (etx, erx) = chan::sync::<Event>(0);
-        let etx = Arc::new(Mutex::new(etx.clone()));
-        self.itx.send(Interpret { command: cmd, resp_tx: Some(etx) });
-        let e = erx.recv().expect("websocket resp_tx is closed");
-        let _ = self.out.send(Message::Text(encode(e)));
+        self.itx.send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx.clone()))) });
+        let _ = self.out.send(Message::Text(encode(erx.recv().expect("handler etx closed"))));
     }
 }
 
 fn encode(event: Event) -> String {
-    json::encode(&event).expect("Error encoding event into JSON")
+    json::to_string(&event).expect("Error encoding event into JSON")
 }
 
 fn decode(s: &str) -> Result<Command, Error> {
-    Ok(try!(json::decode::<Command>(s)))
+    Ok(json::from_str::<Command>(s)?)
 }
 
 
@@ -108,7 +106,7 @@ fn decode(s: &str) -> Result<Command, Error> {
 mod tests {
     use chan;
     use crossbeam;
-    use rustc_serialize::json;
+    use serde_json as json;
     use std::thread;
     use std::collections::HashMap;
     use std::sync::{Arc, Mutex};
@@ -134,13 +132,13 @@ mod tests {
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                let interpret = irx.recv().expect("gtx is closed");
-                match interpret.command {
+                let interpret = irx.recv().unwrap();
+                match interpret.cmd {
                     Command::StartDownload(id) => {
-                        let tx = interpret.resp_tx.unwrap();
-                        tx.lock().unwrap().send(Event::FoundSystemInfo(id));
+                        let resp_tx = interpret.etx.unwrap();
+                        resp_tx.lock().unwrap().send(Event::FoundSystemInfo(id));
                     }
-                    _ => panic!("expected AcceptUpdates"),
+                    _ => panic!("expected StartDownload"),
                 }
             }
         });
@@ -153,7 +151,7 @@ mod tests {
                         out.send(msg).expect("couldn't write to websocket");
 
                         move |msg: ws::Message| {
-                            let ev: Event = json::decode(&format!("{}", msg)).unwrap();
+                            let ev: Event = json::from_str(&format!("{}", msg)).unwrap();
                             assert_eq!(ev, Event::FoundSystemInfo(format!("{}", id)));
                             out.close(CloseCode::Normal)
                         }

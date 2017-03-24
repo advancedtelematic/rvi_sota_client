@@ -8,7 +8,7 @@ pub type UpdateRequestId = String;
 
 /// A device update request from Core to be installed by the client.
 #[allow(non_snake_case)]
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct UpdateRequest {
     pub requestId:  UpdateRequestId,
     pub status:     UpdateRequestStatus,
@@ -18,7 +18,7 @@ pub struct UpdateRequest {
 }
 
 /// The status of an `UpdateRequest` from Core.
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub enum UpdateRequestStatus {
     Pending,
     InFlight,
@@ -29,7 +29,7 @@ pub enum UpdateRequestStatus {
 
 
 /// Encodes the name and version of a specific package.
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct Package {
     pub name:    String,
     pub version: String
@@ -43,7 +43,7 @@ impl Display for Package {
 
 
 /// A notification from RVI that a new update is available.
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct UpdateAvailable {
     pub update_id:            String,
     pub signature:            String,
@@ -53,7 +53,7 @@ pub struct UpdateAvailable {
 }
 
 /// A JSON-RPC request type to notify RVI that a new package download has started.
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct DownloadStarted {
     pub device:    String,
     pub update_id: UpdateRequestId,
@@ -61,7 +61,7 @@ pub struct DownloadStarted {
 }
 
 /// A JSON-RPC request type to notify RVI that a new package chunk was received.
-#[derive(RustcDecodable, RustcEncodable)]
+#[derive(Deserialize, Serialize)]
 pub struct ChunkReceived {
     pub device:    String,
     pub update_id: UpdateRequestId,
@@ -69,7 +69,7 @@ pub struct ChunkReceived {
 }
 
 /// A notification to an external package manager that the package was downloaded.
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct DownloadComplete {
     pub update_id:    String,
     pub update_image: String,
@@ -77,7 +77,7 @@ pub struct DownloadComplete {
 }
 
 /// A notification to an external package manager that the package download failed.
-#[derive(RustcDecodable, RustcEncodable, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct DownloadFailed {
     pub update_id: String,
     pub reason:    String

@@ -2,7 +2,7 @@ use std::fmt::{self, Display, Formatter};
 
 
 /// The available authentication types for communicating with the Auth server.
-#[derive(Clone, PartialEq, Eq, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Auth {
     // ready for interpreter
     None,
@@ -29,7 +29,7 @@ impl Display for Auth {
 
 
 /// Encapsulates the client id and secret used during authentication.
-#[derive(Clone, PartialEq, Eq, Debug, RustcEncodable, RustcDecodable)]
+#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub struct ClientCredentials {
     pub client_id:     String,
     pub client_secret: String,
@@ -37,7 +37,7 @@ pub struct ClientCredentials {
 
 
 /// Stores the returned access token data following a successful authentication.
-#[derive(RustcEncodable, RustcDecodable, Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]
 pub struct AccessToken {
     pub access_token: String,
     pub token_type:   String,

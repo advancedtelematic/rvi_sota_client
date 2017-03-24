@@ -1,6 +1,6 @@
+use base64;
 use chrono::{DateTime, NaiveDateTime, UTC};
-use rustc_serialize::base64::{self, ToBase64};
-use serde;
+use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde_json as json;
 use std::fmt::{self, Display, Formatter};
 use std::collections::{HashMap, HashSet};
@@ -16,16 +16,6 @@ pub enum RoleName {
     Targets,
     Snapshot,
     Timestamp
-}
-
-impl serde::Deserialize for RoleName {
-    fn deserialize<D: serde::Deserializer>(de: D) -> Result<RoleName, D::Error> {
-        if let json::Value::String(ref s) = serde::Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| serde::de::Error::custom(format!("unknown RoleName: {}", err)))
-        } else {
-            Err(serde::de::Error::custom("Unknown `RoleName` from `_type` field"))
-        }
-    }
 }
 
 impl FromStr for RoleName {
@@ -52,6 +42,17 @@ impl Display for RoleName {
         }
     }
 }
+
+impl Deserialize for RoleName {
+    fn deserialize<D: Deserializer>(de: D) -> Result<RoleName, D::Error> {
+        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| SerdeError::custom(format!("unknown RoleName: {}", err)))
+        } else {
+            Err(SerdeError::custom("Unknown `RoleName` from `_type` field"))
+        }
+    }
+}
+
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct RoleData {
@@ -103,7 +104,7 @@ impl TufSigned {
             signatures: vec![Signature {
                 keyid:  privkey.keyid.clone(),
                 method: sigtype,
-                sig:    sig.to_base64(base64::STANDARD)
+                sig:    base64::encode(&sig),
             }],
             signed: signed,
         })
@@ -138,7 +139,7 @@ pub struct TufImage {
     pub fileinfo: TufMeta
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TufMeta {
     pub length: u64,
     pub hashes: HashMap<String, String>,
@@ -147,7 +148,7 @@ pub struct TufMeta {
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, RustcEncodable, RustcDecodable)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
 pub struct TufCustom {
     pub ecuIdentifier: String,
     pub uri: Option<String>,

@@ -1,4 +1,5 @@
-use rustc_serialize::{Decoder, Decodable};
+use serde::de::{Deserialize, Deserializer, Error as SerdeError};
+use serde_json as json;
 use std::str::FromStr;
 
 use datatype::{Error, Package, UpdateResultCode};
@@ -105,9 +106,13 @@ impl FromStr for PackageManager {
     }
 }
 
-impl Decodable for PackageManager {
-    fn decode<D: Decoder>(d: &mut D) -> Result<PackageManager, D::Error> {
-        d.read_str().and_then(|s| Ok(s.parse::<PackageManager>().expect("couldn't parse PackageManager")))
+impl Deserialize for PackageManager {
+    fn deserialize<D: Deserializer>(de: D) -> Result<PackageManager, D::Error> {
+        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| SerdeError::custom(format!("invalid PackageManager: {}", err)))
+        } else {
+            Err(SerdeError::custom("Not a PackageManager"))
+        }
     }
 }
 
