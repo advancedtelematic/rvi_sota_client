@@ -1,16 +1,14 @@
 use std::fmt::{Display, Formatter, Result as FmtResult};
+use uuid::Uuid;
 
 use rvi::LocalServices;
 
-
-/// Encapsulate a `String` type as the id of a specific update request.
-pub type UpdateRequestId = String;
 
 /// A device update request from Core to be installed by the client.
 #[allow(non_snake_case)]
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct UpdateRequest {
-    pub requestId:  UpdateRequestId,
+    pub requestId:  Uuid,
     pub status:     UpdateRequestStatus,
     pub packageId:  Package,
     pub installPos: i32,
@@ -56,7 +54,7 @@ pub struct UpdateAvailable {
 #[derive(Deserialize, Serialize)]
 pub struct DownloadStarted {
     pub device:    String,
-    pub update_id: UpdateRequestId,
+    pub update_id: Uuid,
     pub services:  LocalServices,
 }
 
@@ -64,14 +62,14 @@ pub struct DownloadStarted {
 #[derive(Deserialize, Serialize)]
 pub struct ChunkReceived {
     pub device:    String,
-    pub update_id: UpdateRequestId,
+    pub update_id: Uuid,
     pub chunks:    Vec<u64>,
 }
 
 /// A notification to an external package manager that the package was downloaded.
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct DownloadComplete {
-    pub update_id:    String,
+    pub update_id:    Uuid,
     pub update_image: String,
     pub signature:    String
 }
@@ -79,6 +77,6 @@ pub struct DownloadComplete {
 /// A notification to an external package manager that the package download failed.
 #[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
 pub struct DownloadFailed {
-    pub update_id: String,
+    pub update_id: Uuid,
     pub reason:    String
 }

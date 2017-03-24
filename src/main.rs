@@ -14,7 +14,6 @@ use env_logger::LogBuilder;
 use getopts::Options;
 use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -104,10 +103,9 @@ fn main() {
         }
 
         if config.gateway.websocket {
-            let ws_srv = config.network.websocket_server.clone();
             let ws_itx = itx.clone();
             let ws_sub = broadcast.subscribe();
-            let mut ws = Websocket { server: ws_srv, clients: Arc::new(Mutex::new(HashMap::new())) };
+            let mut ws = Websocket { server: config.network.websocket_server.clone() };
             scope.spawn(move || ws.start(ws_itx, ws_sub));
         }
 

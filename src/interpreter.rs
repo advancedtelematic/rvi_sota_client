@@ -53,7 +53,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::DownloadFailed(id, reason) => {
-                let report = UpdateReport::single(id, UpdateResultCode::GENERAL_ERROR, reason);
+                let report = UpdateReport::single(format!("{}", id), UpdateResultCode::GENERAL_ERROR, reason);
                 ctx.send(Command::SendUpdateReport(report));
             }
 
@@ -83,7 +83,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
                         Status::Pending  if self.auto_dl => ctx.send(Command::StartDownload(id)),
                         Status::InFlight if self.pacman == PackageManager::Off => (),
                         Status::InFlight if self.pacman.is_installed(&request.packageId) => {
-                            let report = UpdateReport::single(id, UpdateResultCode::OK, "".to_string());
+                            let report = UpdateReport::single(format!("{}", id), UpdateResultCode::OK, "".to_string());
                             ctx.send(Command::SendUpdateReport(report));
                         }
                         Status::InFlight => ctx.send(Command::StartDownload(id)),
@@ -367,6 +367,7 @@ mod tests {
     use chan;
     use chan::{Sender, Receiver};
     use std::thread;
+    use uuid::Uuid;
 
     use super::*;
     use datatype::{Auth, Command, Config, DownloadComplete, Event,
@@ -417,12 +418,12 @@ mod tests {
         ci.config.device.package_manager = PackageManager::new_tpm(true);
         let (ctx, erx) = new_interpreter(ci);
 
-        ctx.send(Command::StartDownload("1".to_string()));
+        ctx.send(Command::StartDownload(Uuid::default()));
         assert_rx(erx, &[
-            Event::DownloadingUpdate("1".to_string()),
+            Event::DownloadingUpdate(Uuid::default()),
             Event::DownloadComplete(DownloadComplete {
-                update_id:    "1".to_string(),
-                update_image: "/tmp/1".to_string(),
+                update_id:    Uuid::default(),
+                update_image: format!("/tmp/{}", Uuid::default()),
                 signature:    "".to_string()
             })
         ]);
@@ -439,12 +440,10 @@ mod tests {
         ci.config.device.package_manager = PackageManager::new_tpm(true);
         let (ctx, erx) = new_interpreter(ci);
 
-        ctx.send(Command::StartInstall("1".to_string()));
+        ctx.send(Command::StartInstall(Uuid::default()));
         assert_rx(erx, &[
-            Event::InstallingUpdate("1".to_string()),
-            Event::InstallComplete(
-                UpdateReport::single("1".to_string(), UpdateResultCode::OK, "".to_string())
-            )
+            Event::InstallingUpdate(Uuid::default()),
+            Event::InstallComplete(UpdateReport::single(format!("{}", Uuid::default()), UpdateResultCode::OK, "".to_string()))
         ]);
     }
 
@@ -459,12 +458,10 @@ mod tests {
         ci.config.device.package_manager = PackageManager::new_tpm(false);
         let (ctx, erx) = new_interpreter(ci);
 
-        ctx.send(Command::StartInstall("1".to_string()));
+        ctx.send(Command::StartInstall(Uuid::default()));
         assert_rx(erx, &[
-            Event::InstallingUpdate("1".to_string()),
-            Event::InstallFailed(
-                UpdateReport::single("1".to_string(), UpdateResultCode::INSTALL_FAILED, "failed".to_string())
-            )
+            Event::InstallingUpdate(Uuid::default()),
+            Event::InstallFailed(UpdateReport::single(format!("{}", Uuid::default()), UpdateResultCode::INSTALL_FAILED, "failed".to_string()))
         ]);
     }
 }

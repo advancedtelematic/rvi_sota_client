@@ -4,7 +4,7 @@ use hyper::client::{Body, Client as HyperClient, ProxyConfig, RedirectPolicy,
 use hyper::header::{Authorization, Basic, Bearer, Connection, ContentLength,
                     ContentType, Headers, Location};
 use hyper::mime::{Attr, Mime, TopLevel, SubLevel, Value};
-use hyper::net::{HttpsConnector};
+use hyper::net::{HttpConnector, HttpsConnector};
 use hyper::status::StatusCode;
 use std::{env, str};
 use std::io::Read;
@@ -36,16 +36,13 @@ impl Client for AuthClient {
 impl AuthClient {
     /// Create a new HTTP client for the given `Auth` type.
     pub fn from(auth: Auth) -> Self {
-        let mut client = match env::var("HTTP_PROXY") {
-            Ok(ref proxy) => {
-                let url  = Url::parse(proxy).expect("couldn't parse HTTP_PROXY");
-                let host = url.host_str().expect("couldn't parse HTTP_PROXY host").to_string();
-                let port = url.port_or_known_default().expect("couldn't parse HTTP_PROXY port");
-                HyperClient::with_proxy_config(ProxyConfig(host, port, TlsClient::new()))
-            },
-
-            Err(_) => HyperClient::with_connector(HttpsConnector::new(TlsClient::new()))
-        };
+        let mut client = env::var("HTTP_PROXY").map(|ref proxy| {
+            let url = Url::parse(proxy).expect("couldn't parse HTTP_PROXY");
+            let host = url.host_str().expect("couldn't parse HTTP_PROXY host").to_string();
+            let port = url.port_or_known_default().expect("couldn't parse HTTP_PROXY port");
+            let proxy = ProxyConfig::new(url.scheme(), host, port, HttpConnector::default(), TlsClient::new());
+            HyperClient::with_proxy_config(proxy)
+        }).unwrap_or_else(|_| HyperClient::with_connector(HttpsConnector::new(TlsClient::new())));
 
         client.set_redirect_policy(RedirectPolicy::FollowNone);
 
@@ -53,11 +50,6 @@ impl AuthClient {
             auth:   auth,
             client: client,
         }
-    }
-
-    /// Set the Authorization headers that are used for each outgoing request.
-    pub fn set_auth(&mut self, auth: Auth) {
-        self.auth = auth;
     }
 
     fn send(&self, req: AuthRequest) -> Response {

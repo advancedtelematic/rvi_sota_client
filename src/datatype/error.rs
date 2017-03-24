@@ -10,12 +10,12 @@ use std::string::FromUtf8Error;
 use std::sync::PoisonError;
 use std::sync::mpsc::{SendError, RecvError};
 use toml::de::Error as TomlError;
+use tungstenite::Error as WebsocketError;
 use url::ParseError as UrlParseError;
 
 use datatype::Event;
 use http::ResponseData;
 use gateway::Interpret;
-use ws::Error as WebsocketError;
 
 
 /// System-wide errors that are returned from `Result` type failures.

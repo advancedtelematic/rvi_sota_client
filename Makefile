@@ -14,6 +14,7 @@ TARGET := x86_64-unknown-linux-gnu
 DOCKER_RUN := \
 	@docker run --rm \
 		--env RUST_LOG=$(RUST_LOG) \
+		--env RUST_BACKTRACE=$(RUST_BACKTRACE) \
 		--env SOTA_VERSION=$(SOTA_VERSION) \
 		--env PACKAGE_VERSION=$(PACKAGE_VERSION) \
 		--env CONFIG_PATH=$(CONFIG_PATH) \
@@ -21,7 +22,6 @@ DOCKER_RUN := \
 		--env CORE_SERVER=$(CORE_SERVER) \
 		--env REGISTRY_SERVER=$(REGISTRY_SERVER) \
 		--env DEVICE_UUID=$(DEVICE_UUID) \
-		--env RUST_BACKTRACE=1 \
 		--volume ~/.cargo/git:/root/.cargo/git \
 		--volume ~/.cargo/registry:/root/.cargo/registry \
 		--volume $(CURDIR):/src \

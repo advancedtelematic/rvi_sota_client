@@ -5,6 +5,7 @@ use datatype::{Command, Event};
 
 
 /// Forwards a `Command` for processing and optionally listens for the outcome `Event`.
+#[derive(Debug)]
 pub struct Interpret {
     pub cmd: Command,
     pub etx: Option<Arc<Mutex<Sender<Event>>>>,

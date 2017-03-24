@@ -20,7 +20,7 @@ pub use self::network::{Method, SocketAddr, Url};
 pub use self::report::{InstalledFirmware, InstalledPackage, InstalledSoftware,
                        OperationResult, UpdateResultCode, UpdateReport, system_info};
 pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, DownloadStarted, Package,
-                        UpdateAvailable, UpdateRequest, UpdateRequestId, UpdateRequestStatus};
+                        UpdateAvailable, UpdateRequest, UpdateRequestStatus};
 pub use self::ostree::OstreePackage;
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyValue, PrivateKey,
                     RoleData, RoleName, RoleMeta, Signature, TufCustom, TufImage,

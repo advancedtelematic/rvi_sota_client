@@ -2,9 +2,9 @@ use serde_json as json;
 use std::{fs, io};
 use std::fs::File;
 use std::path::PathBuf;
+use uuid::Uuid;
 
-use datatype::{Config, DownloadComplete, Error, Package, UpdateReport, UpdateRequest,
-               UpdateRequestId, Url};
+use datatype::{Config, DownloadComplete, Error, Package, UpdateReport, UpdateRequest, Url};
 use http::{Client, Response};
 use package_manager::Credentials;
 
@@ -33,10 +33,10 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Returns the path to a package on the device.
-    fn package_path(&self, id: UpdateRequestId) -> Result<String, Error> {
+    fn package_path(&self, id: &Uuid) -> Result<String, Error> {
         let mut path = PathBuf::new();
         path.push(&self.config.device.packages_dir);
-        path.push(id);
+        path.push(format!("{}", id));
         Ok(path.to_str().ok_or(Error::Parse(format!("Path is not valid UTF-8: {:?}", path)))?.to_string())
     }
 
@@ -51,7 +51,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Download a specific update from the Core server.
-    pub fn download_update(&mut self, id: UpdateRequestId) -> Result<DownloadComplete, Error> {
+    pub fn download_update(&mut self, id: Uuid) -> Result<DownloadComplete, Error> {
         let rx   = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
         let data = match rx.recv().expect("couldn't download update") {
             Response::Success(data) => data,
@@ -59,7 +59,7 @@ impl<'c, 'h> Sota<'c, 'h> {
             Response::Error(err)    => return Err(err)
         };
 
-        let path = self.package_path(id.clone())?;
+        let path = self.package_path(&id)?;
         let mut file = File::create(&path)
             .map_err(|err| Error::Client(format!("couldn't create path {}: {}", path, err)))?;
         let _ = io::copy(&mut &*data.body, &mut file)?;
@@ -72,15 +72,15 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Install an update using the package manager.
-    pub fn install_update<'t>(&mut self, id: UpdateRequestId, creds: &Credentials) -> Result<UpdateReport, UpdateReport> {
-        let path = self.package_path(id.clone()).expect("install_update expects a valid path");
+    pub fn install_update<'t>(&mut self, id: Uuid, creds: &Credentials) -> Result<UpdateReport, UpdateReport> {
+        let path = self.package_path(&id).expect("install_update expects a valid path");
         match self.config.device.package_manager.install_package(&path, creds) {
             Ok((code, output)) => {
                 let _ = fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
-                Ok(UpdateReport::single(id.clone(), code, output))
+                Ok(UpdateReport::single(format!("{}", id), code, output))
             }
 
-            Err((code, output)) => Err(UpdateReport::single(id.clone(), code, output))
+            Err((code, output)) => Err(UpdateReport::single(format!("{}", id), code, output))
         }
     }
 
@@ -119,9 +119,9 @@ impl<'c, 'h> Sota<'c, 'h> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
     use serde_json as json;
 
-    use super::*;
     use datatype::{Config, Package, UpdateRequest, UpdateRequestStatus};
     use http::TestClient;
 
@@ -129,7 +129,7 @@ mod tests {
     #[test]
     fn test_get_update_requests() {
         let pending_update = UpdateRequest {
-            requestId: "someid".to_string(),
+            requestId: Uuid::default(),
             status: UpdateRequestStatus::Pending,
             packageId: Package {
                 name: "fake-pkg".to_string(),
@@ -146,7 +146,7 @@ mod tests {
         };
 
         let updates: Vec<UpdateRequest> = sota.get_update_requests().unwrap();
-        let ids: Vec<&str> = updates.iter().map(|p| p.requestId.as_ref()).collect();
-        assert_eq!(ids, vec!["someid"])
+        let ids: Vec<Uuid> = updates.iter().map(|p| p.requestId).collect();
+        assert_eq!(ids, vec![Uuid::default()])
     }
 }

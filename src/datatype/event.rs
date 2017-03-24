@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
+use uuid::Uuid;
 
-use datatype::{DownloadComplete, Package, TufMeta, UpdateAvailable, UpdateReport,
-               UpdateRequest, UpdateRequestId};
+use datatype::{DownloadComplete, Package, TufMeta, UpdateAvailable, UpdateReport, UpdateRequest};
 
 
 /// System-wide events that are broadcast to all interested parties.
@@ -31,14 +31,14 @@ pub enum Event {
     FoundSystemInfo(String),
 
     /// Downloading an update.
-    DownloadingUpdate(UpdateRequestId),
+    DownloadingUpdate(Uuid),
     /// An update was downloaded.
     DownloadComplete(DownloadComplete),
     /// Downloading an update failed.
-    DownloadFailed(UpdateRequestId, String),
+    DownloadFailed(Uuid, String),
 
     /// Installing an update.
-    InstallingUpdate(UpdateRequestId),
+    InstallingUpdate(Uuid),
     /// An update was installed.
     InstallComplete(UpdateReport),
     /// The installation of an update failed.

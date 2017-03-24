@@ -6,9 +6,10 @@ use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use time;
+use uuid::Uuid;
 
 use datatype::{ChunkReceived, DownloadStarted, Event, InstalledSoftware, RviConfig,
-               UpdateReport, UpdateRequestId, Url};
+               UpdateReport, Url};
 use rvi::{RpcErr, RpcOk, RpcRequest, Transfers};
 use rvi::parameters::{Abort, Chunk, Finish, Notify, Parameter, Report, Start};
 
@@ -106,7 +107,7 @@ impl RemoteServices {
         RpcRequest::new("message", RviMessage::new(addr, vec![body], 60)).send(self.rvi_client.clone())
     }
 
-    pub fn send_download_started(&self, update_id: UpdateRequestId) -> Result<String, String> {
+    pub fn send_download_started(&self, update_id: Uuid) -> Result<String, String> {
         let backend = try!(self.backend.as_ref().ok_or("BackendServices not set"));
         let local   = try!(self.local.as_ref().ok_or("LocalServices not set"));
         let start   = DownloadStarted { device: self.device_id.clone(), update_id: update_id, services: local.clone() };

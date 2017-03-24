@@ -1,8 +1,9 @@
 use std::sync::Mutex;
+use uuid::Uuid;
 
-use datatype::{ChunkReceived, Event, DownloadComplete, UpdateRequestId, UpdateAvailable};
-use super::services::{BackendServices, RemoteServices};
-use super::transfers::Transfers;
+use datatype::{ChunkReceived, Event, DownloadComplete, UpdateAvailable};
+use rvi::services::{BackendServices, RemoteServices};
+use rvi::transfers::Transfers;
 
 
 /// Each `Parameter` implementation handles a specific kind of RVI client request,
@@ -29,7 +30,7 @@ impl Parameter for Notify {
 
 #[derive(Deserialize, Serialize)]
 pub struct Start {
-    update_id:   UpdateRequestId,
+    update_id:   Uuid,
     chunkscount: u64,
     checksum:    String
 }
@@ -55,7 +56,7 @@ impl Parameter for Start {
 
 #[derive(Deserialize, Serialize)]
 pub struct Chunk {
-    update_id: UpdateRequestId,
+    update_id: Uuid,
     bytes:     String,
     index:     u64
 }
@@ -86,7 +87,7 @@ impl Parameter for Chunk {
 
 #[derive(Deserialize, Serialize)]
 pub struct Finish {
-    update_id: UpdateRequestId,
+    update_id: Uuid,
     signature: String
 }
 
