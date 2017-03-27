@@ -114,75 +114,63 @@ impl<S: Serialize> EventWrapper<S> {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use chan;
     use crossbeam;
     use serde_json as json;
     use std::{fs, thread};
-    use std::io::{Read, Write};
+    use std::io::Write;
     use std::net::Shutdown;
-    use std::time::Duration;
+    use uuid::Uuid;
 
     use datatype::{Command, DownloadComplete, Event};
     use gateway::{Gateway, Interpret};
-    use super::*;
     use unix_socket::{UnixListener, UnixStream};
 
+
+    const CMD_SOCK: &'static str = "/tmp/sota-commands.socket";
+    const EV_SOCK:  &'static str = "/tmp/sota-events.socket";
 
     #[test]
     fn socket_commands_and_events() {
         let (etx, erx) = chan::sync::<Event>(0);
         let (itx, irx) = chan::sync::<Interpret>(0);
+        let mut socket = Socket { commands_path: CMD_SOCK.into(), events_path: EV_SOCK.into() };
+        thread::spawn(move || socket.start(itx, erx));
 
-        thread::spawn(move || Socket {
-            commands_path: "/tmp/sota-commands.socket".to_string(),
-            events_path:   "/tmp/sota-events.socket".to_string(),
-        }.start(itx, erx));
-        thread::sleep(Duration::from_millis(100)); // wait until socket gateway is created
-
-        let path = "/tmp/sota-events.socket";
-        let _ = fs::remove_file(&path);
-        let server = UnixListener::bind(&path).expect("couldn't create events socket for testing");
-
-        let send = DownloadComplete {
-            update_id:    "1".to_string(),
-            update_image: "/foo/bar".to_string(),
-            signature:    "abc".to_string()
-        };
+        let _ = fs::remove_file(EV_SOCK);
+        let serv = UnixListener::bind(EV_SOCK).expect("open events socket");
+        let send = DownloadComplete { update_id: Uuid::default(), update_image: "/foo".into(), signature: "sig".into() };
         etx.send(Event::DownloadComplete(send.clone()));
 
-        let (mut stream, _) = server.accept().expect("couldn't read from events socket");
-        let mut text = String::new();
-        stream.read_to_string(&mut text).unwrap();
-        let receive: EventWrapper<DownloadComplete> = json::from_str(&text).expect("couldn't decode Event");
-        assert_eq!(receive.version, "0.1".to_string());
-        assert_eq!(receive.event, "DownloadComplete".to_string());
-        assert_eq!(receive.data, send);
+        let (stream, _) = serv.accept().expect("read events socket");
+        let recv: EventWrapper<DownloadComplete> = json::from_reader(&stream).expect("recv event");
+        assert_eq!(recv.version, "0.1".to_string());
+        assert_eq!(recv.event, "DownloadComplete".to_string());
+        assert_eq!(recv.data, send);
 
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                let interpret = irx.recv().unwrap();
-                match interpret.cmd {
-                    Command::StartDownload(id) => {
-                        let resp_tx = interpret.etx.unwrap();
-                        resp_tx.lock().unwrap().send(Event::FoundSystemInfo(id));
+                match irx.recv() {
+                    Some(Interpret { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
+                        etx.lock().unwrap().send(Event::InstallingUpdate(id));
                     }
-                    _ => panic!("expected StartDownload"),
+                    Some(_) => panic!("expected StartInstall"),
+                    None    => break
                 }
             }
         });
 
         crossbeam::scope(|scope| {
-            for id in 0..10 {
+            for n in 0..10 {
                 scope.spawn(move || {
-                    let mut stream = UnixStream::connect("/tmp/sota-commands.socket").expect("couldn't connect to socket");
-                    let _ = stream.write_all(&format!("dl {}", id).into_bytes()).expect("couldn't write to stream");
-                    stream.shutdown(Shutdown::Write).expect("couldn't shut down writing");
-
-                    let mut resp = String::new();
-                    stream.read_to_string(&mut resp).expect("couldn't read from stream");
-                    let ev: Event = json::from_str(&resp).expect("couldn't decode json event");
-                    assert_eq!(ev, Event::FoundSystemInfo(format!("{}", id)));
+                    let id = format!("00000000-0000-0000-0000-00000000000{}", n).parse::<Uuid>().unwrap();
+                    let mut stream = UnixStream::connect(CMD_SOCK).expect("open command socket");
+                    let _ = stream.write_all(&format!("inst {}", id).into_bytes()).expect("write to stream");
+                    stream.shutdown(Shutdown::Write).expect("shut down writing");
+                    assert_eq!(Event::InstallingUpdate(id), json::from_reader(&stream).expect("read event"));
                 });
             }
         });

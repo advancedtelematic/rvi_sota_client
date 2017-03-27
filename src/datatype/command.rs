@@ -1,10 +1,11 @@
 use std::fmt::{self, Display, Formatter};
 use std::str;
 use std::str::FromStr;
+use uuid::Uuid;
 
 use nom::{IResult, space, eof};
 use datatype::{Auth, ClientCredentials, Error, InstalledSoftware, OstreePackage,
-               Package, UpdateReport, UpdateRequestId, UpdateResultCode};
+               Package, UpdateReport, UpdateResultCode};
 
 
 /// System-wide commands that are sent to the interpreter.
@@ -24,9 +25,9 @@ pub enum Command {
     ListSystemInfo,
 
     /// Start downloading an update.
-    StartDownload(UpdateRequestId),
+    StartDownload(Uuid),
     /// Start installing an update.
-    StartInstall(UpdateRequestId),
+    StartInstall(Uuid),
 
     /// Install an OSTree package.
     OstreeInstall(Vec<OstreePackage>),
@@ -88,9 +89,9 @@ named!(command <(Command, Vec<&str>)>, chain!(
         | alt_complete!(tag!("SendUpdateReport") | tag!("sendup"))
             => { |_| Command::SendUpdateReport(UpdateReport::default()) }
         | alt_complete!(tag!("StartDownload") | tag!("dl"))
-            => { |_| Command::StartDownload("".to_string()) }
+            => { |_| Command::StartDownload(Uuid::default()) }
         | alt_complete!(tag!("StartInstall") | tag!("inst"))
-            => { |_| Command::StartInstall("".to_string()) }
+            => { |_| Command::StartInstall(Uuid::default()) }
     )
         ~ args: arguments
         ~ alt!(eof | tag!("\r") | tag!("\n") | tag!(";")),
@@ -179,11 +180,8 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
         Command::SendUpdateReport(_) => match args.len() {
             0 | 1 => Err(Error::Command("usage: sendup <update-id> <result-code>".to_string())),
             2 => {
-                if let Ok(code) = args[1].parse::<UpdateResultCode>() {
-                    Ok(Command::SendUpdateReport(UpdateReport::single(args[0].to_string(), code, "".to_string())))
-                } else {
-                    Err(Error::Command("couldn't parse 2nd argument as an UpdateResultCode".to_string()))
-                }
+                let code = args[1].parse::<UpdateResultCode>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultCode: {}", err)))?;
+                Ok(Command::SendUpdateReport(UpdateReport::single(args[0].into(), code, "".to_string())))
             }
             _ => Err(Error::Command(format!("unexpected SendUpdateReport args: {:?}", args))),
         },
@@ -195,13 +193,19 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
 
         Command::StartDownload(_) => match args.len() {
             0 => Err(Error::Command("usage: dl <id>".to_string())),
-            1 => Ok(Command::StartDownload(args[0].to_string())),
+            1 => {
+                let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
+                Ok(Command::StartDownload(uuid))
+            }
             _ => Err(Error::Command(format!("unexpected StartDownload args: {:?}", args))),
         },
 
         Command::StartInstall(_) => match args.len() {
             0 => Err(Error::Command("usage: inst <id>".to_string())),
-            1 => Ok(Command::StartInstall(args[0].to_string())),
+            1 => {
+                let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
+                Ok(Command::StartInstall(uuid))
+            }
             _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
         },
     }
@@ -210,18 +214,20 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
 
 #[cfg(test)]
 mod tests {
-    use super::{command, arguments};
+    use super::*;
     use datatype::{Auth, Command, ClientCredentials, OstreePackage, Package,
                    UpdateReport, UpdateResultCode};
     use nom::IResult;
 
+
+    const DEFAULT_UUID: &'static str = "00000000-0000-0000-0000-000000000000";
 
     #[test]
     fn parse_command_test() {
         assert_eq!(command(&b"auth foo bar"[..]),
                    IResult::Done(&b""[..], (Command::Authenticate(Auth::None), vec!["foo", "bar"])));
         assert_eq!(command(&b"dl 1"[..]),
-                   IResult::Done(&b""[..], (Command::StartDownload("".to_string()), vec!["1"])));
+                   IResult::Done(&b""[..], (Command::StartDownload(Uuid::default()), vec!["1"])));
         assert_eq!(command(&b"ls;\n"[..]),
                    IResult::Done(&b"\n"[..], (Command::ListInstalledPackages, Vec::new())));
     }
@@ -331,13 +337,13 @@ mod tests {
 
     #[test]
     fn send_update_report_test() {
-        assert_eq!("SendUpdateReport myid OK".parse::<Command>().unwrap(), Command::SendUpdateReport(
-            UpdateReport::single("myid".to_string(), UpdateResultCode::OK, "".to_string())));
-        assert_eq!("sendup myid 19".parse::<Command>().unwrap(), Command::SendUpdateReport(
-            UpdateReport::single("myid".to_string(), UpdateResultCode::GENERAL_ERROR, "".to_string())));
-        assert!("sendup myid 20".parse::<Command>().is_err());
+        assert_eq!("SendUpdateReport id 0".parse::<Command>().unwrap(),
+                   Command::SendUpdateReport(UpdateReport::single("id".into(), UpdateResultCode::OK, "".to_string())));
+        assert_eq!("sendup 123 19".parse::<Command>().unwrap(),
+                   Command::SendUpdateReport(UpdateReport::single("123".into(), UpdateResultCode::GENERAL_ERROR, "".to_string())));
+        assert!("sendup id 20".parse::<Command>().is_err());
         assert!("SendInstalledPackages".parse::<Command>().is_err());
-        assert!("sendup 1 2 3".parse::<Command>().is_err());
+        assert!("sendup id 0 extra".parse::<Command>().is_err());
     }
 
     #[test]
@@ -350,17 +356,21 @@ mod tests {
 
     #[test]
     fn start_download_test() {
-        assert_eq!("StartDownload this".parse::<Command>().unwrap(), Command::StartDownload("this".to_string()));
-        assert_eq!("dl that".parse::<Command>().unwrap(), Command::StartDownload("that".to_string()));
-        assert!("StartDownload this and that".parse::<Command>().is_err());
+        assert_eq!(format!("StartDownload {}", DEFAULT_UUID).parse::<Command>().unwrap(),
+                   Command::StartDownload(Uuid::default()));
+        assert_eq!(format!("dl {}", DEFAULT_UUID).parse::<Command>().unwrap(),
+                   Command::StartDownload(Uuid::default()));
+        assert!(format!("StartDownload {} extra", DEFAULT_UUID).parse::<Command>().is_err());
         assert!("dl".parse::<Command>().is_err());
     }
 
     #[test]
     fn start_install_test() {
-        assert_eq!("StartInstall 123".parse::<Command>().unwrap(), Command::StartInstall("123".to_string()));
-        assert_eq!("inst this".parse::<Command>().unwrap(), Command::StartInstall("this".to_string()));
+        assert_eq!(format!("StartInstall {}", DEFAULT_UUID).parse::<Command>().unwrap(),
+                   Command::StartInstall(Uuid::default()));
+        assert_eq!(format!("inst {}", DEFAULT_UUID).parse::<Command>().unwrap(),
+                   Command::StartInstall(Uuid::default()));
         assert!("StartInstall".parse::<Command>().is_err());
-        assert!("inst more than one".parse::<Command>().is_err());
+        assert!(format!("inst {} extra", DEFAULT_UUID).parse::<Command>().is_err());
     }
 }

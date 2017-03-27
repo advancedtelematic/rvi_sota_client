@@ -4,6 +4,8 @@ use dbus::arg::{Arg, ArgType, Get, Iter};
 use dbus::tree::{Argument, Factory};
 use std::thread;
 use std::convert::From;
+use std::str::FromStr;
+use uuid::Uuid;
 
 use datatype::{Command, DBusConfig, Event, InstalledFirmware, InstalledPackage,
                InstalledSoftware, OperationResult, UpdateReport};
@@ -37,8 +39,9 @@ impl Gateway for DBus {
                 fact.interface(cfg.interface, ())
                     .add_m(fact.method("initiateDownload", (), move |info| {
                         debug!("dbus initiateDownload called: {:?}", info);
-                        let update_id = info.msg.read1()?;
-                        itx1.send(Interpret { cmd: Command::StartDownload(update_id), etx: None });
+                        let uuid = Uuid::from_str(info.msg.read1()?)
+                            .map_err(|err| dbus::Error::new_custom("read1", &format!("{}", err)))?;
+                        itx1.send(Interpret { cmd: Command::StartDownload(uuid), etx: None });
                         Ok(Vec::new())
                     }).in_arg(arg0))
 

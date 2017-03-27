@@ -9,13 +9,12 @@ use std::path::PathBuf;
 use std::str::FromStr;
 use std::vec::Vec;
 use time;
+use uuid::Uuid;
 
-use datatype::UpdateRequestId;
 
-
-/// Holds all currently active transfers where each is referenced by `UpdateRequestId`.
+/// All currently active transfers.
 pub struct Transfers {
-    items:       HashMap<UpdateRequestId, Transfer>,
+    items:       HashMap<Uuid, Transfer>,
     storage_dir: String
 }
 
@@ -24,20 +23,20 @@ impl Transfers {
         Transfers { items: HashMap::new(), storage_dir: storage_dir }
     }
 
-    pub fn get(&self, update_id: UpdateRequestId) -> Option<&Transfer> {
+    pub fn get(&self, update_id: Uuid) -> Option<&Transfer> {
         self.items.get(&update_id)
     }
 
-    pub fn get_mut(&mut self, update_id: UpdateRequestId) -> Option<&mut Transfer> {
+    pub fn get_mut(&mut self, update_id: Uuid) -> Option<&mut Transfer> {
         self.items.get_mut(&update_id)
     }
 
-    pub fn push(&mut self, update_id: UpdateRequestId, checksum: String) {
+    pub fn push(&mut self, update_id: Uuid, checksum: String) {
         let transfer = Transfer::new(self.storage_dir.to_string(), update_id.clone(), checksum);
         self.items.insert(update_id, transfer);
     }
 
-    pub fn remove(&mut self, update_id: UpdateRequestId) {
+    pub fn remove(&mut self, update_id: Uuid) {
         self.items.remove(&update_id);
     }
 
@@ -61,9 +60,9 @@ impl Transfers {
 }
 
 
-/// Holds the details of the transferred chunks relating to an `UpdateRequestId`.
+/// Holds the details of the transferred chunks relating to an `Uuid`.
 pub struct Transfer {
-    pub update_id:           UpdateRequestId,
+    pub update_id:           Uuid,
     pub checksum:            String,
     pub transferred_chunks:  Vec<u64>,
     pub storage_dir:         String,
@@ -72,7 +71,7 @@ pub struct Transfer {
 
 impl Transfer {
     /// Prepare for the transfer of a new package.
-    pub fn new(storage_dir: String, update_id: UpdateRequestId, checksum: String) -> Transfer {
+    pub fn new(storage_dir: String, update_id: Uuid, checksum: String) -> Transfer {
         Transfer {
             update_id:           update_id,
             checksum:            checksum,
@@ -158,7 +157,7 @@ impl Transfer {
     fn get_chunk_dir(&self) -> Result<PathBuf, String> {
         let mut path = PathBuf::from(&self.storage_dir);
         path.push("downloads");
-        path.push(self.update_id.clone());
+        path.push(format!("{}", self.update_id));
         fs::create_dir_all(&path)
            .map(|_| path)
            .map_err(|err| format!("couldn't create chunk dir: {}", err))
@@ -193,21 +192,20 @@ impl Drop for Transfer {
 
 #[cfg(test)]
 mod test {
+    use super::*;
+
     use base64;
-    use rand::{self, Rng};
     use std::path::PathBuf;
     use std::fs::File;
-    use std::io::prelude::*;
     use time;
 
-    use super::*;
     use package_manager::TestDir;
 
 
     impl Transfer {
         pub fn new_test(test_dir: &TestDir) -> Transfer {
             Transfer {
-                update_id:           rand::thread_rng().gen_ascii_chars().take(10).collect::<String>(),
+                update_id:           Uuid::new_v4(),
                 checksum:            "".to_string(),
                 transferred_chunks:  Vec::new(),
                 storage_dir:         test_dir.0.clone(),
@@ -216,11 +214,10 @@ mod test {
         }
 
         pub fn assert_chunk_written(&mut self, test_dir: &TestDir, index: u64, data: &[u8]) {
-            self.write_chunk(&base64::encode_config(data, base64::URL_SAFE), index).expect("couldn't write chunk");
-            let path     = PathBuf::from(format!("{}/downloads/{}/{}", test_dir.0.clone(), self.update_id, index));
-            let mut file = File::open(path).map_err(|err| panic!("couldn't open file: {}", err)).unwrap();
+            self.write_chunk(&base64::encode_config(data, base64::URL_SAFE_NO_PAD), index).expect("write chunk");
+            let mut file = File::open(&format!("{}/downloads/{}/{}", test_dir.0.clone(), self.update_id, index)).expect("open file");
             let mut buf  = Vec::new();
-            let _        = file.read_to_end(&mut buf).expect("couldn't read file");
+            let _        = file.read_to_end(&mut buf).expect("read file");
             assert_eq!(data.to_vec(), buf);
         }
     }
@@ -246,7 +243,7 @@ mod test {
         assert!(transfer.verify().is_ok());
 
         transfer.checksum = "invalid".to_string();
-        assert!(!transfer.verify().is_ok());
+        assert!(transfer.verify().is_err());
     }
 
     #[test]
@@ -255,8 +252,8 @@ mod test {
         let mut transfer = Transfer::new_test(&test_dir);
         let mut assembly = String::new();
         for index in 1..20 {
-            let data = rand::thread_rng().gen_ascii_chars().take(index).collect::<String>();
-            assembly.push_str(&data);
+            let data = format!("{}", time::precise_time_ns());
+            assembly.push_str(&format!("{}", data));
             transfer.assert_chunk_written(&test_dir, index as u64, data.as_bytes());
         }
 

@@ -64,6 +64,7 @@ mod tests {
     use serde_json as json;
     use std::thread;
     use std::time::Duration;
+    use uuid::Uuid;
 
     use super::*;
     use gateway::{Gateway, Interpret};
@@ -79,32 +80,30 @@ mod tests {
         let (itx, irx) = chan::sync::<Interpret>(0);
 
         thread::spawn(move || Http { server: "127.0.0.1:8888".parse().unwrap() }.start(itx, erx));
-        thread::sleep(Duration::from_millis(100)); // add delay for http gateway starting
+        thread::sleep(Duration::from_millis(100)); // wait before connecting
 
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                let interpret = irx.recv().unwrap();
-                match interpret.cmd {
-                    Command::StartDownload(id) => {
-                        let resp_tx = interpret.etx.unwrap();
-                        resp_tx.lock().unwrap().send(Event::FoundSystemInfo(id));
+                match irx.recv() {
+                    Some(Interpret { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
+                        etx.lock().unwrap().send(Event::InstallingUpdate(id));
                     }
-                    _ => panic!("expected StartDownload")
+                    Some(_) => panic!("expected StartInstall"),
+                    None    => break
                 }
             }
         });
 
         crossbeam::scope(|scope| {
-            for id in 0..10 {
+            for n in 0..10 {
                 scope.spawn(move || {
-                    let cmd = Command::StartDownload(format!("{}", id));
-                    let url = "http://127.0.0.1:8888".parse().unwrap();
-                    let rx  = AuthClient::default().post(url, Some(json::to_vec(&cmd).unwrap()));
-                    match rx.recv().unwrap() {
+                    let id = format!("00000000-0000-0000-0000-00000000000{}", n).parse::<Uuid>().unwrap();
+                    let body = json::to_vec(&Command::StartInstall(id)).expect("body");
+                    let rx = AuthClient::default().post("http://127.0.0.1:8888".parse().unwrap(), Some(body));
+                    match rx.recv().expect("http resp") {
                         Response::Success(data) => {
-                            let event = json::from_slice::<Event>(&data.body).unwrap();
-                            assert_eq!(event, Event::FoundSystemInfo(format!("{}", id)));
+                            assert_eq!(Event::InstallingUpdate(id), json::from_slice(&data.body).unwrap());
                         },
                         Response::Failed(data) => panic!("failed response: {}", data),
                         Response::Error(err)   => panic!("error response: {}", err)

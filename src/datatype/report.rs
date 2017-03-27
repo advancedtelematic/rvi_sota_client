@@ -2,7 +2,7 @@ use serde::{Serialize, Serializer};
 use std::process::Command;
 use std::str::FromStr;
 
-use datatype::{Error, UpdateRequestId};
+use datatype::Error;
 
 
 /// An encodable response of the installation outcome.
@@ -24,7 +24,7 @@ impl OperationResult {
 /// A report of a list of installation outcomes.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq, Default)]
 pub struct UpdateReport {
-    pub update_id:         UpdateRequestId,
+    pub update_id:         String,
     pub operation_results: Vec<OperationResult>
 }
 
@@ -40,7 +40,7 @@ impl UpdateReport {
     }
 
     /// Create a new report with a single installation outcome.
-    pub fn single(update_id: UpdateRequestId, result_code: UpdateResultCode, result_text: String) -> UpdateReport {
+    pub fn single(update_id: String, result_code: UpdateResultCode, result_text: String) -> UpdateReport {
         let result = OperationResult {
             id: update_id.clone(),
             result_code: result_code,
