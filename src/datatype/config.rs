@@ -5,22 +5,21 @@ use toml;
 
 use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
 use http::TlsData;
-use pacman::PackageManager;
+use pacman::PacMan;
 
 
 /// A container for all parsed configs.
 #[derive(Deserialize, Default, PartialEq, Eq, Debug, Clone)]
 pub struct Config {
-    pub auth:      Option<AuthConfig>,
-    pub core:      CoreConfig,
-    pub dbus:      DBusConfig,
-    pub device:    DeviceConfig,
-    pub gateway:   GatewayConfig,
-    pub network:   NetworkConfig,
-    pub provision: Option<ProvisionConfig>,
-    pub rvi:       RviConfig,
-    pub tls:       Option<TlsConfig>,
-    pub uptane:    UptaneConfig,
+    pub auth:    Option<AuthConfig>,
+    pub core:    CoreConfig,
+    pub dbus:    DBusConfig,
+    pub device:  DeviceConfig,
+    pub gateway: GatewayConfig,
+    pub network: NetworkConfig,
+    pub rvi:     RviConfig,
+    pub tls:     Option<TlsConfig>,
+    pub uptane:  UptaneConfig,
 }
 
 impl Config {
@@ -44,14 +43,11 @@ impl Config {
 
     /// Return the initial Auth type from the current Config.
     pub fn initial_auth(&self) -> Result<Auth, &'static str> {
-        match (self.auth.as_ref(), self.tls.as_ref(), self.provision.as_ref()) {
-            (Some(_), Some(_), _)       => Err("Need one of [auth] or [tls] section only."),
-            (Some(_), _,       Some(_)) => Err("Need one of [auth] or [provision] section only."),
-            (None,    None,    None)    => Ok(Auth::None),
-            (None,    Some(_), None)    => Ok(Auth::Certificate),
-            (None,    _,       Some(_)) => Ok(Auth::Provision),
-
-            (Some(&AuthConfig { client_id: ref id, client_secret: ref secret, .. }), _, _) => {
+        match (self.auth.as_ref(), self.tls.as_ref()) {
+            (None,    None)    => Ok(Auth::None),
+            (None,    Some(_)) => Ok(Auth::Certificate),
+            (Some(_), Some(_)) => Err("Need one of [auth] or [tls] section only."),
+            (Some(&AuthConfig { client_id: ref id, client_secret: ref secret, .. }), None) => {
                 Ok(Auth::Credentials(ClientCredentials { client_id: id.clone(), client_secret: secret.clone() }))
             }
         }
@@ -78,31 +74,29 @@ impl Config {
 
 #[derive(Deserialize)]
 struct PartialConfig {
-    pub auth:      Option<ParsedAuthConfig>,
-    pub core:      Option<ParsedCoreConfig>,
-    pub dbus:      Option<ParsedDBusConfig>,
-    pub device:    Option<ParsedDeviceConfig>,
-    pub gateway:   Option<ParsedGatewayConfig>,
-    pub network:   Option<ParsedNetworkConfig>,
-    pub provision: Option<ParsedProvisionConfig>,
-    pub rvi:       Option<ParsedRviConfig>,
-    pub tls:       Option<ParsedTlsConfig>,
-    pub uptane:    Option<ParsedUptaneConfig>,
+    pub auth:    Option<ParsedAuthConfig>,
+    pub core:    Option<ParsedCoreConfig>,
+    pub dbus:    Option<ParsedDBusConfig>,
+    pub device:  Option<ParsedDeviceConfig>,
+    pub gateway: Option<ParsedGatewayConfig>,
+    pub network: Option<ParsedNetworkConfig>,
+    pub rvi:     Option<ParsedRviConfig>,
+    pub tls:     Option<ParsedTlsConfig>,
+    pub uptane:  Option<ParsedUptaneConfig>,
 }
 
 impl PartialConfig {
     fn generate_config(self) -> Config {
         Config {
-            auth:      self.auth.map(|cfg| cfg.defaultify()),
-            core:      self.core.map(|cfg| cfg.defaultify()).unwrap_or_default(),
-            dbus:      self.dbus.map(|cfg| cfg.defaultify()).unwrap_or_default(),
-            device:    self.device.map(|cfg| cfg.defaultify()).unwrap_or_default(),
-            gateway:   self.gateway.map(|cfg| cfg.defaultify()).unwrap_or_default(),
-            network:   self.network.map(|cfg| cfg.defaultify()).unwrap_or_default(),
-            provision: self.provision.map(|cfg| cfg.defaultify()),
-            rvi:       self.rvi.map(|cfg| cfg.defaultify()).unwrap_or_default(),
-            tls:       self.tls.map(|cfg| cfg.defaultify()),
-            uptane:    self.uptane.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            auth:    self.auth.map(|cfg| cfg.defaultify()),
+            core:    self.core.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            dbus:    self.dbus.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            device:  self.device.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            gateway: self.gateway.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            network: self.network.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            rvi:     self.rvi.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            tls:     self.tls.map(|cfg| cfg.defaultify()),
+            uptane:  self.uptane.map(|cfg| cfg.defaultify()).unwrap_or_default(),
         }
     }
 
@@ -269,11 +263,11 @@ impl Defaultify<DBusConfig> for ParsedDBusConfig {
 /// The [device] configuration section.
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct DeviceConfig {
-    pub uuid:              String,
-    pub packages_dir:      String,
-    pub package_manager:   PackageManager,
-    pub auto_download:     bool,
-    pub system_info:       Option<String>,
+    pub uuid:            String,
+    pub packages_dir:    String,
+    pub package_manager: PacMan,
+    pub auto_download:   bool,
+    pub system_info:     Option<String>,
 }
 
 impl Default for DeviceConfig {
@@ -281,7 +275,7 @@ impl Default for DeviceConfig {
         DeviceConfig {
             uuid:              "123e4567-e89b-12d3-a456-426655440000".to_string(),
             packages_dir:      "/tmp/".to_string(),
-            package_manager:   PackageManager::Off,
+            package_manager:   PacMan::Off,
             auto_download:     true,
             system_info:       None,
         }
@@ -292,7 +286,7 @@ impl Default for DeviceConfig {
 struct ParsedDeviceConfig {
     pub uuid:              Option<String>,
     pub packages_dir:      Option<String>,
-    pub package_manager:   Option<PackageManager>,
+    pub package_manager:   Option<PacMan>,
     pub auto_download:     Option<bool>,
     pub system_info:       Option<String>,
     pub polling_interval:  Option<u64>,
@@ -389,47 +383,6 @@ impl Defaultify<NetworkConfig> for ParsedNetworkConfig {
             socket_commands_path: self.socket_commands_path.unwrap_or(default.socket_commands_path),
             socket_events_path:   self.socket_events_path.unwrap_or(default.socket_events_path),
             websocket_server:     self.websocket_server.unwrap_or(default.websocket_server)
-        }
-    }
-}
-
-
-/// The [provision] configuration section.
-#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
-pub struct ProvisionConfig {
-    pub p12_path:     String,
-    pub p12_password: String,
-    pub expiry_days:  u32,
-    pub device_id:    Option<String>,
-}
-
-impl Default for ProvisionConfig {
-    fn default() -> Self {
-        ProvisionConfig {
-            p12_path:     "/usr/local/etc/sota/registration.p12".to_string(),
-            p12_password: "".to_string(),
-            expiry_days:  365,
-            device_id:    None,
-        }
-    }
-}
-
-#[derive(Deserialize, Default)]
-struct ParsedProvisionConfig {
-    p12_path:     Option<String>,
-    p12_password: Option<String>,
-    expiry_days:  Option<u32>,
-    device_id:    Option<String>,
-}
-
-impl Defaultify<ProvisionConfig> for ParsedProvisionConfig {
-    fn defaultify(self) -> ProvisionConfig {
-        let default = ProvisionConfig::default();
-        ProvisionConfig {
-            p12_path:     self.p12_path.unwrap_or(default.p12_path),
-            p12_password: self.p12_password.unwrap_or(default.p12_password),
-            expiry_days:  self.expiry_days.unwrap_or(default.expiry_days),
-            device_id:    self.device_id.or(default.device_id),
         }
     }
 }
@@ -623,14 +576,6 @@ mod tests {
         websocket_server = "127.0.0.1:3012"
         "#;
 
-    const PROVISION_CONFIG: &'static str =
-        r#"
-        [provision]
-        p12_path = "/usr/local/etc/sota/registration.p12"
-        p12_password = ""
-        expiry_days = 11
-        "#;
-
     const RVI_CONFIG: &'static str =
         r#"
         [rvi]
@@ -686,7 +631,6 @@ mod tests {
     fn auth_configs() {
         let configs = String::new()
             + AUTH_CONFIG
-            + PROVISION_CONFIG
             + TLS_CONFIG;
         assert_eq!(Config::load("tests/config/auth.toml").unwrap(), Config::parse(&configs).unwrap());
     }

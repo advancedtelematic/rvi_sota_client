@@ -4,7 +4,8 @@ use std::fs::File;
 use std::path::PathBuf;
 use uuid::Uuid;
 
-use datatype::{Config, DownloadComplete, Error, Package, UpdateReport, UpdateRequest, Url};
+use datatype::{Config, DownloadComplete, Error, Package, InstallReport, InstallResult,
+               UpdateRequest, Url};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -41,7 +42,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         Ok(out.to_string())
     }
 
-    /// Query the Core server for any pending or in-flight package updates.
+    /// Check for any new package updates.
     pub fn get_update_requests(&mut self) -> Result<Vec<UpdateRequest>, Error> {
         let rx = self.client.get(self.endpoint("updates"), None);
         match rx.recv().expect("couldn't get update requests") {
@@ -51,7 +52,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         }
     }
 
-    /// Download a specific update from the Core server.
+    /// Download a specific update.
     pub fn download_update(&mut self, id: Uuid) -> Result<DownloadComplete, Error> {
         let rx = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
         let data = match rx.recv().expect("couldn't download update") {
@@ -67,19 +68,19 @@ impl<'c, 'h> Sota<'c, 'h> {
         Ok(DownloadComplete { update_id: id, update_image: path.into(), signature: "".into() })
     }
 
-    /// Install an update using the package manager.
-    pub fn install_update(&mut self, id: Uuid, creds: &Credentials) -> Result<UpdateReport, UpdateReport> {
-        let path = self.package_path(&id).expect("install_update expects a valid path");
-        match self.config.device.package_manager.install_package(&path, creds) {
-            Ok((code, output)) => {
+    /// Install an update using the current package manager.
+    pub fn install_update(&mut self, id: &Uuid, creds: &Credentials) -> Result<InstallResult, Error> {
+        let path = self.package_path(id)?;
+        self.config.device
+            .package_manager
+            .install_package(&path, creds)
+            .and_then(|outcome| {
                 fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
-                Ok(UpdateReport::single(format!("{}", id), code, output))
-            }
-            Err((code, output)) => Err(UpdateReport::single(format!("{}", id), code, output))
-        }
+                Ok(outcome.into_result(format!("{}", id)))
+            })
     }
 
-    /// Send a list of the currently installed packages to the Core server.
+    /// Send a list of the currently installed packages.
     pub fn send_installed_packages(&mut self, packages: &[Package]) -> Result<(), Error> {
         let rx = self.client.put(self.endpoint("installed"), Some(json::to_vec(packages)?));
         match rx.recv().expect("couldn't send installed packages") {
@@ -89,8 +90,8 @@ impl<'c, 'h> Sota<'c, 'h> {
         }
     }
 
-    /// Send the outcome of a package update to the Core server.
-    pub fn send_update_report(&mut self, report: &UpdateReport) -> Result<(), Error> {
+    /// Send the outcome of a package installation.
+    pub fn send_install_report(&mut self, report: &InstallReport) -> Result<(), Error> {
         let url = self.endpoint(&format!("updates/{}", report.update_id));
         let rx  = self.client.post(url, Some(json::to_vec(&report.operation_results)?));
         match rx.recv().expect("couldn't send update report") {
@@ -100,7 +101,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         }
     }
 
-    /// Send system information from the device to the Core server.
+    /// Send system information from the device.
     pub fn send_system_info(&mut self, body: Vec<u8>) -> Result<(), Error> {
         let rx = self.client.put(self.endpoint("system_info"), Some(body));
         match rx.recv().expect("couldn't send system info") {
@@ -117,7 +118,7 @@ mod tests {
     use super::*;
     use serde_json as json;
 
-    use datatype::{Config, Package, UpdateRequest, UpdateRequestStatus};
+    use datatype::{Config, Package, UpdateRequest, RequestStatus};
     use http::TestClient;
 
 
@@ -125,7 +126,7 @@ mod tests {
     fn test_get_update_requests() {
         let pending_update = UpdateRequest {
             requestId: Uuid::default(),
-            status: UpdateRequestStatus::Pending,
+            status: RequestStatus::Pending,
             packageId: Package {
                 name: "fake-pkg".to_string(),
                 version: "0.1.1".to_string()

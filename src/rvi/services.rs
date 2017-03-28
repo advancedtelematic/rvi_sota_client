@@ -8,10 +8,10 @@ use std::time::Duration;
 use time;
 use uuid::Uuid;
 
-use datatype::{ChunkReceived, DownloadStarted, Event, InstalledSoftware, RviConfig,
-               UpdateReport, Url};
-use rvi::{RpcErr, RpcOk, RpcRequest, Transfers};
+use datatype::{Event, InstallReport, InstalledSoftware, RviConfig, Url};
+use rvi::json_rpc::{ChunkReceived, DownloadStarted, RpcErr, RpcOk, RpcRequest};
 use rvi::parameters::{Abort, Chunk, Finish, Notify, Parameter, Report, Start};
+use rvi::transfers::Transfers;
 
 
 /// Hold references to RVI service endpoints, currently active `Transfers`, and
@@ -119,7 +119,7 @@ impl RemoteServices {
         self.send_message(chunk, &backend.ack)
     }
 
-    pub fn send_update_report(&self, report: UpdateReport) -> Result<String, String> {
+    pub fn send_update_report(&self, report: InstallReport) -> Result<String, String> {
         let backend = self.backend.as_ref().ok_or("BackendServices not set")?;
         let result  = UpdateReportResult { device: self.device_id.clone(), update_report: report };
         self.send_message(result, &backend.report)
@@ -154,7 +154,7 @@ pub struct BackendServices {
 #[derive(Deserialize, Serialize)]
 struct UpdateReportResult {
     pub device:        String,
-    pub update_report: UpdateReport
+    pub update_report: InstallReport
 }
 
 #[derive(Deserialize, Serialize)]

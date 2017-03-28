@@ -1,28 +1,23 @@
 use std::fmt::{self, Display, Formatter};
 
 
-/// The available authentication types for communicating with the Auth server.
+/// An enumeration of all authentication types.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
 pub enum Auth {
-    // ready for interpreter
     None,
     Token(AccessToken),
     Certificate,
-
-    // need to authenticate
     Credentials(ClientCredentials),
-    Provision
 }
 
 /// Display should not include any sensitive data for log output.
 impl Display for Auth {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            Auth::None           => write!(f, "{}", "Auth: None"),
-            Auth::Token(_)       => write!(f, "{}", "Auth: Token"),
-            Auth::Certificate    => write!(f, "{}", "Auth: Certificate"),
-            Auth::Credentials(_) => write!(f, "{}", "Auth: Credentials"),
-            Auth::Provision      => write!(f, "{}", "Auth: Provision"),
+            Auth::None           => write!(f, "Auth::None"),
+            Auth::Token(_)       => write!(f, "Auth::Token"),
+            Auth::Certificate    => write!(f, "Auth::Certificate"),
+            Auth::Credentials(_) => write!(f, "Auth::Credentials"),
         }
     }
 }

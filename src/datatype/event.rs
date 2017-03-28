@@ -2,11 +2,12 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
-use datatype::{DownloadComplete, Package, TufMeta, UpdateAvailable, UpdateReport, UpdateRequest};
+use datatype::{DownloadComplete, InstallReport, InstallResult, OstreePackage, Package,
+               TufMeta, TufSigned, UpdateAvailable, UpdateRequest};
 
 
 /// System-wide events that are broadcast to all interested parties.
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Event {
     /// General error event with a printable representation for debugging.
     Error(String),
@@ -40,9 +41,11 @@ pub enum Event {
     /// Installing an update.
     InstallingUpdate(Uuid),
     /// An update was installed.
-    InstallComplete(UpdateReport),
+    InstallComplete(InstallResult),
     /// The installation of an update failed.
-    InstallFailed(UpdateReport),
+    InstallFailed(InstallResult),
+    /// An installation report was sent.
+    InstallReportSent(InstallReport),
 
     /// An event requesting an update on all installed packages.
     InstalledPackagesNeeded,
@@ -57,14 +60,22 @@ pub enum Event {
     /// The system information was sent.
     SystemInfoSent,
 
-    /// A new Uptane client was created.
-    UptaneInitialised,
     /// There are no new Uptane updates.
     UptaneTimestampUpdated,
     /// The updated snapshot.json metadata.
     UptaneSnapshotUpdated(HashMap<String, TufMeta>),
     /// The updated target.json metadata.
-    UptaneTargetsUpdated(HashMap<String, TufMeta>)
+    UptaneTargetsUpdated(HashMap<String, TufMeta>),
+    /// An update was installed to the primary ECU.
+    UptaneInstallComplete(TufSigned),
+    /// An update was not installed to the primary ECU.
+    UptaneInstallFailed(TufSigned),
+    /// An event requesting an external ECU to install a package.
+    UptaneInstallNeeded(OstreePackage),
+    /// A manifest should be sent to the Director server.
+    UptaneManifestNeeded,
+    /// A manifest was sent to the Director server.
+    UptaneManifestSent,
 }
 
 impl Display for Event {
