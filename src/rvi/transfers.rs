@@ -32,7 +32,7 @@ impl Transfers {
     }
 
     pub fn push(&mut self, update_id: Uuid, checksum: String) {
-        let transfer = Transfer::new(self.storage_dir.to_string(), update_id.clone(), checksum);
+        let transfer = Transfer::new(self.storage_dir.to_string(), update_id, checksum);
         self.items.insert(update_id, transfer);
     }
 
@@ -45,15 +45,13 @@ impl Transfers {
     }
 
     pub fn prune(&mut self, now: i64, timeout: i64) {
-        let mut timeouts = Vec::new();
-        for (id, transfer) in &mut self.items {
-            if now - transfer.last_chunk_received > timeout {
-                timeouts.push(id.clone());
-            }
-        }
+        let old = self.items.iter()
+            .filter(|&(_, transfer)| now - transfer.last_chunk_received > timeout)
+            .map(|(id, _)| *id)
+            .collect::<Vec<Uuid>>();
 
-        for id in timeouts {
-            self.items.remove(&id);
+        for id in &old {
+            self.items.remove(id);
             info!("Transfer for update_id {} timed out.", id)
         }
     }
@@ -199,7 +197,7 @@ mod test {
     use std::fs::File;
     use time;
 
-    use package_manager::TestDir;
+    use pacman::TestDir;
 
 
     impl Transfer {

@@ -34,14 +34,14 @@ impl Gateway for Socket {
                 .map_err(|err| error!("couldn't open socket connection: {}", err))
                 .map(|stream| {
                     let itx = itx.clone();
-                    thread::spawn(move || handle_command(stream, itx));
+                    thread::spawn(move || handle_stream(stream, &itx));
                 });
         }
     }
 }
 
 
-fn handle_command(mut stream: UnixStream, itx: Sender<Interpret>) {
+fn handle_stream(mut stream: UnixStream, itx: &Sender<Interpret>) {
     info!("New socket connection.");
     let resp = parse_command(&mut stream, itx)
         .map(|ev| json::to_vec(&ev).expect("couldn't encode Event"))
@@ -51,7 +51,7 @@ fn handle_command(mut stream: UnixStream, itx: Sender<Interpret>) {
     stream.shutdown(Shutdown::Write).unwrap_or_else(|err| error!("couldn't close commands socket: {}", err));
 }
 
-fn parse_command(stream: &mut UnixStream, itx: Sender<Interpret>) -> Result<Event, Error> {
+fn parse_command(stream: &mut UnixStream, itx: &Sender<Interpret>) -> Result<Event, Error> {
     let mut reader = BufReader::new(stream);
     let mut input  = String::new();
     reader.read_to_string(&mut input)?;
@@ -60,7 +60,7 @@ fn parse_command(stream: &mut UnixStream, itx: Sender<Interpret>) -> Result<Even
     let cmd = input.parse::<Command>()?;
     let (etx, erx) = chan::async::<Event>();
     itx.send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx))) });
-    erx.recv().ok_or(Error::Socket("internal receiver error".to_string()))
+    erx.recv().ok_or_else(|| Error::Socket("internal receiver error".to_string()))
 }
 
 fn handle_event(ev_sock: &str, event: Event) {

@@ -25,14 +25,14 @@ impl Gateway for Websocket {
                 .map_err(|err| error!("Opening websocket: {}", err))
                 .map(|stream| tungstenite::accept(stream).map(|sock| {
                     let itx = itx.clone();
-                    thread::spawn(move || handle_socket(sock, itx));
+                    thread::spawn(move || handle_socket(sock, &itx));
                 }));
         }
     }
 }
 
 
-fn handle_socket(mut socket: WebSocket<TcpStream>, itx: Sender<Interpret>) {
+fn handle_socket(mut socket: WebSocket<TcpStream>, itx: &Sender<Interpret>) {
     let _ = socket.read_message()
         .map_err(|err| error!("Websocket message: {}", err))
         .map(|msg| {

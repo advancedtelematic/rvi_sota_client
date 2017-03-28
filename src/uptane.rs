@@ -83,7 +83,7 @@ impl Uptane {
 
     /// Returns a URL based on the uptane service.
     fn endpoint(&self, service: &Service, endpoint: &str) -> Url {
-        let ref cfg = self.uptane_cfg;
+        let cfg = &self.uptane_cfg;
         match *service {
             Service::Director => cfg.director_server.join(&format!("/{}", endpoint)),
             Service::Repo     => cfg.repo_server.join(&format!("/{}/{}", self.deviceid, endpoint))
@@ -124,7 +124,7 @@ impl Uptane {
 
     /// Verify the JSON buffer using the verifier's keys.
     fn verify_data(&mut self, role: RoleName, buf: &[u8]) -> Result<Verified, Error> {
-        let sign = json::from_slice::<TufSigned>(&buf)?;
+        let sign = json::from_slice::<TufSigned>(buf)?;
         let data = json::from_value::<RoleData>(sign.signed.clone())?;
         let new_ver = self.verifier.verify(&role, &sign)?;
         let old_ver = self.verifier.set_version(&role, new_ver);
@@ -153,7 +153,7 @@ impl Uptane {
 
         let verified = self.verify_data(RoleName::Root, &buf)?;
         if self.persist_meta {
-            let ref metadir = self.uptane_cfg.metadata_path;
+            let metadir = &self.uptane_cfg.metadata_path;
             fs::create_dir_all(format!("{}/{}", metadir, service))?;
             write_file(&format!("{}/{}/root.json", metadir, service), &buf)?;
         }

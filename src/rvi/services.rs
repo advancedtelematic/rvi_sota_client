@@ -81,7 +81,7 @@ impl Services {
     fn handle_message<P>(&self, id: u64, msg: &str) -> Result<RpcOk<i32>, RpcErr>
         where P: Parameter + Serialize + Deserialize
     {
-        let request = json::from_str::<RpcRequest<RviMessage<P>>>(&msg)
+        let request = json::from_str::<RpcRequest<RviMessage<P>>>(msg)
             .map_err(|err| RpcErr::invalid_params(id, format!("couldn't decode message: {}", err)))?;
         let event = request.params.parameters[0].handle(&self.remote, &self.transfers)
             .map_err(|err| RpcErr::unspecified(request.id, format!("couldn't handle parameters: {}", err)))?;

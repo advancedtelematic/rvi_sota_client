@@ -5,7 +5,7 @@ use toml;
 
 use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
 use http::TlsData;
-use package_manager::PackageManager;
+use pacman::PackageManager;
 
 
 /// A container for all parsed configs.
@@ -39,7 +39,7 @@ impl Config {
     pub fn parse(toml: &str) -> Result<Config, Error> {
         let mut partial: PartialConfig = toml::from_str(toml)?;
         partial.backwards_compatibility()?;
-        Ok(partial.to_config())
+        Ok(partial.generate_config())
     }
 
     /// Return the initial Auth type from the current Config.
@@ -91,44 +91,41 @@ struct PartialConfig {
 }
 
 impl PartialConfig {
-    fn to_config(self) -> Config {
+    fn generate_config(self) -> Config {
         Config {
             auth:      self.auth.map(|cfg| cfg.defaultify()),
-            core:      self.core.map(|cfg| cfg.defaultify()).unwrap_or(CoreConfig::default()),
-            dbus:      self.dbus.map(|cfg| cfg.defaultify()).unwrap_or(DBusConfig::default()),
-            device:    self.device.map(|cfg| cfg.defaultify()).unwrap_or(DeviceConfig::default()),
-            gateway:   self.gateway.map(|cfg| cfg.defaultify()).unwrap_or(GatewayConfig::default()),
-            network:   self.network.map(|cfg| cfg.defaultify()).unwrap_or(NetworkConfig::default()),
+            core:      self.core.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            dbus:      self.dbus.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            device:    self.device.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            gateway:   self.gateway.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            network:   self.network.map(|cfg| cfg.defaultify()).unwrap_or_default(),
             provision: self.provision.map(|cfg| cfg.defaultify()),
-            rvi:       self.rvi.map(|cfg| cfg.defaultify()).unwrap_or(RviConfig::default()),
+            rvi:       self.rvi.map(|cfg| cfg.defaultify()).unwrap_or_default(),
             tls:       self.tls.map(|cfg| cfg.defaultify()),
-            uptane:    self.uptane.map(|cfg| cfg.defaultify()).unwrap_or(UptaneConfig::default()),
+            uptane:    self.uptane.map(|cfg| cfg.defaultify()).unwrap_or_default(),
         }
     }
 
     fn backwards_compatibility(&mut self) -> Result<(), Error> {
-        match (self.core.as_mut(), self.device.as_mut()) {
-            (Some(ref mut core), Some(ref mut device)) => {
-                // device.polling_interval -> core.polling_sec
-                match (device.polling_interval, core.polling_sec) {
-                    (Some(time), None) => if time > 0 {
-                        core.polling     = Some(true);
-                        core.polling_sec = Some(time);
-                    } else {
-                        core.polling = Some(false);
-                    },
-                    (Some(_), Some(_)) => return Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string())),
-                    _ => ()
-                }
-
-                // device.certificates_path -> core.ca_file
-                match (device.certificates_path.as_mut(), core.ca_file.as_mut()) {
-                    (Some(path), None) => { core.ca_file = Some(path.clone()) }
-                    (Some(_), Some(_)) => return Err(Error::Config("core.ca_file and device.certificates_path both set".to_string())),
-                    _ => ()
-                }
+        if let (Some(ref mut core), Some(ref mut device)) = (self.core.as_mut(), self.device.as_mut()) {
+            // device.polling_interval -> core.polling_sec
+            match (device.polling_interval, core.polling_sec) {
+                (Some(time), None) => if time > 0 {
+                    core.polling     = Some(true);
+                    core.polling_sec = Some(time);
+                } else {
+                    core.polling = Some(false);
+                },
+                (Some(_), Some(_)) => return Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string())),
+                _ => ()
             }
-            _ => ()
+
+            // device.certificates_path -> core.ca_file
+            match (device.certificates_path.as_mut(), core.ca_file.as_mut()) {
+                (Some(path), None) => { core.ca_file = Some(path.clone()) }
+                (Some(_), Some(_)) => return Err(Error::Config("core.ca_file and device.certificates_path both set".to_string())),
+                _ => ()
+            }
         }
 
         Ok(())

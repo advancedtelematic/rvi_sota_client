@@ -46,7 +46,7 @@ impl Display for Command {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let text = match *self {
             Command::Authenticate(ref auth)   => format!("Authenticate ({})", auth),
-            Command::SendInstalledPackages(_) => format!("{}", "SendInstalledPackages"),
+            Command::SendInstalledPackages(_) => "SendInstalledPackages".into(),
             _ => format!("{:?}", self)
         };
         write!(f, "{}", text)
@@ -58,8 +58,8 @@ impl FromStr for Command {
 
     fn from_str(s: &str) -> Result<Command, Error> {
         match command(s.as_bytes()) {
-            IResult::Done(_, cmd) => parse_arguments(cmd.0, cmd.1.clone()),
-            _                     => Err(Error::Command(format!("bad command: {}", s)))
+            IResult::Done(_, cmd) => parse_arguments(&cmd.0, cmd.1.clone()),
+            _ => Err(Error::Parse(format!("unknown command: {}", s)))
         }
     }
 }
@@ -112,8 +112,8 @@ named!(arguments <&[u8], Vec<&str> >, chain!(
     }
 ));
 
-fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
-    match cmd {
+fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
+    match *cmd {
         Command::Authenticate(_) => match args.len() {
             0 => Ok(Command::Authenticate(Auth::None)),
             1 if args[0] == "cert" => Ok(Command::Authenticate(Auth::Certificate)),
@@ -164,7 +164,7 @@ fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
                     }).collect::<Vec<Package>>();
                 Ok(Command::SendInstalledPackages(packages))
             }
-            _ => Err(Error::Command(format!("SendInstalledPackages expects an even number of 'name version' pairs"))),
+            _ => Err(Error::Command("SendInstalledPackages expects an even number of 'name version' pairs".into())),
         },
 
         Command::SendInstalledSoftware(_) => match args.len() {

@@ -1,7 +1,7 @@
 use std::process::Command;
 
 use datatype::{Error, Package, UpdateResultCode};
-use package_manager::{InstallOutcome, parse_package};
+use pacman::{InstallOutcome, parse_package};
 
 
 /// Returns a list of installed RPM packages with
@@ -9,10 +9,10 @@ use package_manager::{InstallOutcome, parse_package};
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
     Command::new("rpm").arg("-qa").arg("--queryformat").arg("%{NAME} %{VERSION}\n")
         .output()
-        .map_err(|e| Error::Package(format!("Error fetching packages: {}", e)))
+        .map_err(|err| Error::Pacman(format!("Error fetching packages: {}", err)))
         .and_then(|c| {
             String::from_utf8(c.stdout)
-                .map_err(|e| Error::Parse(format!("Error parsing package: {}", e)))
+                .map_err(|err| Error::Parse(format!("Error parsing package: {}", err)))
                 .map(|s| s.lines().map(String::from).collect::<Vec<String>>())
         })
         .and_then(|lines| {

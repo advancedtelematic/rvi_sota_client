@@ -67,22 +67,22 @@ impl EdgeHandler {
 impl Handler for EdgeHandler {
     fn handle(&self, mut req: HyperRequest, mut resp: HyperResponse) {
         let mut text = String::new();
-        req.read_to_string(&mut text).expect("couldn't read Edge HTTP request body");
+        req.read_to_string(&mut text).expect("edge request");
 
         let outcome = || -> Result<RpcOk<i32>, RpcErr> {
             let body: Value = json::to_value(&text)
                 .map_err(|err| RpcErr::parse_error(format!("invalid json: {}", err)))?;
             let id = body.get("id").and_then(|x| x.as_u64())
-                .ok_or(RpcErr::parse_error("missing id".into()))?;
+                .ok_or_else(|| RpcErr::parse_error("missing id".into()))?;
             let method = body.get("method").and_then(|x| x.as_str())
-                .ok_or(RpcErr::invalid_request(id, "missing method".into()))?;
+                .ok_or_else(|| RpcErr::invalid_request(id, "missing method".into()))?;
             match method {
                 "services_available" => Ok(RpcOk::new(id, None)),
                 "message" => {
                     let params = body.get("params")
-                        .ok_or(RpcErr::invalid_request(id, "missing params".into()))?;
+                        .ok_or_else(|| RpcErr::invalid_request(id, "missing params".into()))?;
                     let service = params.get("service_name").and_then(|x| x.as_str())
-                        .ok_or(RpcErr::invalid_request(id, "missing params.service_name".into()))?;
+                        .ok_or_else(|| RpcErr::invalid_request(id, "missing params.service_name".into()))?;
                     self.services.handle_service(service, id, &text)
                 },
                 _ => Err(RpcErr::method_not_found(id, format!("unknown method: {}", method)))
@@ -100,6 +100,6 @@ impl Handler for EdgeHandler {
                 json::to_vec::<RpcErr>(&err).expect("encode RpcErr")
             }
         };
-        resp.send(&body).expect("EdgeHandler response");
+        resp.send(&body).expect("edge response");
     }
 }

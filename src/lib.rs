@@ -29,7 +29,7 @@ pub mod datatype;
 pub mod gateway;
 pub mod http;
 pub mod interpreter;
-pub mod package_manager;
+pub mod pacman;
 pub mod rvi;
 pub mod sota;
 pub mod uptane;

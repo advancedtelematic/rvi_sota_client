@@ -3,7 +3,7 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 
 use datatype::{Error, OstreePackage, Package, UpdateResultCode};
-use package_manager::{Credentials, InstallOutcome, parse_package};
+use pacman::{Credentials, InstallOutcome, parse_package};
 
 
 const PACKAGES_FILE: &'static str = "/usr/package.manifest";

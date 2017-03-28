@@ -39,7 +39,7 @@ impl Pkcs12 {
 
     /// Parse a PKCS#12 bundle.
     pub fn from_der(buf: &[u8], p12_pass: &str) -> Pkcs12 {
-        let pkcs = OpensslPkcs12::from_der(&buf).expect("couldn't decode p12 file");
+        let pkcs = OpensslPkcs12::from_der(buf).expect("couldn't decode p12 file");
         Pkcs12(pkcs.parse(p12_pass).expect("couldn't parse p12 file"))
     }
 
@@ -75,12 +75,14 @@ impl Pkcs12 {
 pub struct TlsClient(Arc<TlsConnector>);
 
 impl TlsClient {
-    /// This function *must* be called before `TlsClient::new()`.
+    /// This function *must* be called before `TlsClient::default()`.
     pub fn init(tls: TlsData) {
         *CONNECTOR.lock().unwrap() = Some(Arc::new(TlsConnector::new(tls)));
     }
+}
 
-    pub fn new() -> TlsClient {
+impl Default for TlsClient {
+    fn default() -> Self {
         match *CONNECTOR.lock().unwrap() {
             Some(ref connector) => TlsClient(connector.clone()),
             None => panic!("TlsClient::init not called")

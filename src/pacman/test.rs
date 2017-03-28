@@ -1,14 +1,12 @@
 use chan::Receiver;
 use std::fmt::Debug;
-use std::fs;
-use std::fs::File;
-use std::fs::OpenOptions;
+use std::fs::{self, File, OpenOptions};
 use std::io::BufReader;
 use std::io::prelude::*;
 use time;
 
 use datatype::{Error, Package, UpdateResultCode};
-use package_manager::{InstallOutcome, PackageManager};
+use pacman::{InstallOutcome, PackageManager};
 
 
 impl PackageManager {
@@ -16,7 +14,7 @@ impl PackageManager {
     pub fn new_tpm(succeeds: bool) -> Self {
         let name = format!("/tmp/sota-tpm-{}", time::precise_time_ns().to_string());
         if succeeds {
-            let _ = File::create(name.clone()).expect("couldn't create Test Package Manager file");
+            let _ = File::create(name.clone()).expect("create tpm");
         }
         PackageManager::Test { filename: name, succeeds: succeeds }
     }
@@ -30,71 +28,52 @@ impl TestDir {
     /// Create a new test directory that will be destroyed when it drops out of scope.
     pub fn new(reason: &str) -> TestDir {
         let dir = format!("/tmp/{}-{}", reason, time::precise_time_ns().to_string());
-        fs::create_dir_all(dir.clone()).expect("couldn't create TempDir");
+        fs::create_dir_all(dir.clone()).expect("create tempdir");
         TestDir(dir)
     }
 }
 
 impl Drop for TestDir {
     fn drop(&mut self) {
-        fs::remove_dir_all(&self.0.clone()).expect("couldn't remove TempDir");
+        fs::remove_dir_all(&self.0.clone()).expect("remove tempdir");
     }
 }
 
 
 /// For each item in the list, assert that it equals the next `Receiver` value.
-pub fn assert_rx<X: PartialEq + Debug>(rx: Receiver<X>, xs: &[X]) {
-    let n      = xs.len();
+pub fn assert_rx<X: PartialEq + Debug>(rx: &Receiver<X>, xs: &[X]) {
+    let n = xs.len();
     let mut xs = xs.iter();
     for _ in 0..n {
         let val = rx.recv().expect("assert_rx expected another val");
-        let x   = xs.next().expect(&format!("assert_rx: no match for val: {:?}", val));
-        assert_eq!(val, *x);
+        assert_eq!(val, *xs.next().expect(&format!("assert_rx: no match for val: {:?}", val)));
     }
 }
 
 
 /// Returns a list of installed packages from a format of `<name> <version>`.
 pub fn installed_packages(path: &str) -> Result<Vec<Package>, Error> {
-    let f        = try!(File::open(path));
-    let reader   = BufReader::new(f);
-    let mut pkgs = Vec::new();
-
-    for line in reader.lines() {
-        let line  = try!(line);
-        let parts = line.split(' ');
-
-        if parts.clone().count() == 2 {
-            if let Some(name) = parts.clone().nth(0) {
-                if let Some(version) = parts.clone().nth(1) {
-                    pkgs.push(Package {
-                        name:    name.to_string(),
-                        version: version.to_string()
-                    });
-                }
-            }
+    let reader = BufReader::new(File::open(path)?);
+    Ok(reader.lines().filter_map(|line| {
+        let line = line.expect("bad line");
+        let mut parts = line.split(' ');
+        if let (Some(name), Some(version), None) = (parts.next(), parts.next(), parts.next()) {
+            Some(Package { name: name.into(), version: version.into() })
+        } else {
+            None
         }
-    }
-
-    Ok(pkgs)
+    }).collect::<Vec<Package>>())
 }
 
 /// Installs a package to the specified path when succeeds is true, or fails otherwise.
 pub fn install_package(path: &str, pkg: &str, succeeds: bool) -> Result<InstallOutcome, InstallOutcome> {
-    if !succeeds {
-        return Err((UpdateResultCode::INSTALL_FAILED, "failed".to_string()))
-    }
-
-    let outcome = || -> Result<(), Error> {
-        let mut f = OpenOptions::new().create(true).write(true).append(true).open(path).unwrap();
-        try!(f.write(pkg.as_bytes()));
-        try!(f.write(b"\n"));
-        Ok(())
-    }();
-
-    match outcome {
-        Ok(_)    => Ok((UpdateResultCode::OK, "".to_string())),
-        Err(err) => Err((UpdateResultCode::INSTALL_FAILED, format!("{:?}", err)))
+    if succeeds {
+        let mut file = OpenOptions::new().create(true).write(true).append(true).open(path).unwrap();
+        file.write_all(format!("{}\n", pkg).as_bytes())
+            .or_else(|err| Err((UpdateResultCode::INSTALL_FAILED, format!("{:?}", err))))?;
+        Ok((UpdateResultCode::OK, "".to_string()))
+    } else {
+        Err((UpdateResultCode::INSTALL_FAILED, "failed".to_string()))
     }
 }
 

@@ -1,15 +1,14 @@
 use chan::{Sender, Receiver};
 use std;
-use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
-               OstreePackage, Package, RoleName, UpdateReport, UpdateRequestStatus as Status,
+               OstreePackage, RoleName, UpdateReport, UpdateRequestStatus as Status,
                UpdateResultCode, Url, system_info};
 use gateway::Interpret;
 use http::{AuthClient, Client};
 use authenticate::oauth2;
-use package_manager::{Credentials, PackageManager};
+use pacman::{Credentials, PackageManager};
 use rvi::Services;
 use sota::Sota;
 use uptane::Uptane;
@@ -49,7 +48,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
-                ctx.send(Command::StartInstall(dl.update_id.clone()));
+                ctx.send(Command::StartInstall(dl.update_id));
             }
 
             Event::DownloadFailed(id, reason) => {
@@ -78,7 +77,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
 
             Event::UpdatesReceived(requests) => {
                 for request in requests {
-                    let id = request.requestId.clone();
+                    let id = request.requestId;
                     match request.status {
                         Status::Pending  if self.auto_dl => ctx.send(Command::StartDownload(id)),
                         Status::InFlight if self.pacman == PackageManager::Off => (),
@@ -98,7 +97,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
                     meta.hashes.get("sha256")
                         .or_else(|| { error!("couldn't get sha256 for {}", refname); None })
                         .map(|commit| {
-                            let ref ecu = meta.custom.as_ref().expect("no custom field").ecuIdentifier;
+                            let ecu = &meta.custom.as_ref().expect("no custom field").ecuIdentifier;
                             OstreePackage::new(ecu.clone(), refname.clone(), commit.clone(), "".into(), treehub)
                         })
                 }).collect::<Vec<_>>();
@@ -130,7 +129,7 @@ impl Interpreter<Command, Interpret> for IntermediateInterpreter {
 pub enum CommandMode {
     Sota,
     Rvi(Box<Services>),
-    Uptane(Uptane)
+    Uptane(Box<Uptane>)
 }
 
 /// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
@@ -195,7 +194,7 @@ impl CommandInterpreter {
                         let timestamp = uptane.get_director(&*self.http, RoleName::Timestamp)?;
                         if timestamp.is_new() {
                             let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
-                            Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or(HashMap::new()))
+                            Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or_default())
                         } else {
                             Event::UptaneTimestampUpdated
                         }
@@ -205,16 +204,12 @@ impl CommandInterpreter {
             }
 
             Command::ListInstalledPackages => {
-                let mut packages: Vec<Package> = Vec::new();
-                if self.config.device.package_manager != PackageManager::Off {
-                    packages = self.config.device.package_manager.installed_packages()?;
-                }
-                Event::FoundInstalledPackages(packages)
+                Event::FoundInstalledPackages(self.config.device.package_manager.installed_packages()?)
             }
 
             Command::ListSystemInfo => {
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                Event::FoundSystemInfo(system_info(&cmd)?)
+                Event::FoundSystemInfo(system_info(cmd)?)
             }
 
             Command::OstreeInstall(pkgs) => {
@@ -222,8 +217,8 @@ impl CommandInterpreter {
                 if let CommandMode::Uptane(ref mut uptane) = self.mode {
                     uptane.ecu_versions = pkgs.iter().map(|pkg| {
                         let result = match pkg.install(&creds) {
-                            Ok((code,  out)) => OperationResult::new(pkg.refName.clone(), code, out),
-                            Err((code, out)) => OperationResult::new(pkg.refName.clone(), code, out),
+                            Ok((code, out))  |
+                            Err((code, out)) => OperationResult::new(pkg.refName.clone(), code, out)
                         };
                         pkg.ecu_version(Some(EcuCustom { operation_result: result }))
                     }).collect::<Vec<_>>();
@@ -246,7 +241,7 @@ impl CommandInterpreter {
 
             Command::SendSystemInfo => {
                 if let Some(ref cmd) = self.config.device.system_info {
-                    sota.send_system_info(system_info(&cmd)?.into_bytes())?;
+                    sota.send_system_info(system_info(cmd)?.into_bytes())?;
                 }
                 Event::SystemInfoSent
             }
@@ -263,13 +258,13 @@ impl CommandInterpreter {
             Command::StartDownload(id) => {
                 match self.mode {
                     CommandMode::Rvi(ref rvi) => {
-                        let _ = rvi.remote.lock().unwrap().send_download_started(id.clone());
+                        let _ = rvi.remote.lock().unwrap().send_download_started(id);
                         Event::DownloadingUpdate(id)
                     }
 
                     _ => {
-                        etx.send(Event::DownloadingUpdate(id.clone()));
-                        match sota.download_update(id.clone()) {
+                        etx.send(Event::DownloadingUpdate(id));
+                        match sota.download_update(id) {
                             Ok(dl)   => Event::DownloadComplete(dl),
                             Err(err) => Event::DownloadFailed(id, format!("{}", err))
                         }
@@ -280,12 +275,12 @@ impl CommandInterpreter {
             Command::StartInstall(id) => {
                 match self.mode {
                     CommandMode::Rvi(ref rvi) => {
-                        let _ = rvi.remote.lock().unwrap().send_download_started(id.clone());
+                        let _ = rvi.remote.lock().unwrap().send_download_started(id);
                         Event::DownloadingUpdate(id)
                     }
 
                     CommandMode::Sota => {
-                        etx.send(Event::InstallingUpdate(id.clone()));
+                        etx.send(Event::InstallingUpdate(id));
                         match sota.install_update(id, &self.get_credentials()) {
                             Ok(report)  => Event::InstallComplete(report),
                             Err(report) => Event::InstallFailed(report)
@@ -364,17 +359,17 @@ impl CommandInterpreter {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use chan;
     use chan::{Sender, Receiver};
     use std::thread;
     use uuid::Uuid;
 
-    use super::*;
-    use datatype::{Auth, Command, Config, DownloadComplete, Event,
-                   UpdateReport, UpdateResultCode};
+    use datatype::{Auth, Command, Config, DownloadComplete, Event, UpdateReport, UpdateResultCode};
     use gateway::Interpret;
     use http::test_client::TestClient;
-    use package_manager::{PackageManager, assert_rx};
+    use pacman::{PackageManager, assert_rx};
 
 
     fn new_interpreter(mut ci: CommandInterpreter) -> (Sender<Command>, Receiver<Event>) {
@@ -393,18 +388,17 @@ mod tests {
 
     #[test]
     fn already_authenticated() {
-        let vec: Vec<String> = Vec::new();
         let mut ci = CommandInterpreter {
             mode:   CommandMode::Sota,
             config: Config::default(),
             auth:   Auth::None,
-            http:   Box::new(TestClient::from(vec))
+            http:   Box::new(TestClient::from(Vec::<String>::new()))
         };
         ci.config.device.package_manager = PackageManager::new_tpm(true);
         let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::Authenticate(Auth::None));
-        assert_rx(erx, &[Event::AlreadyAuthenticated]);
+        assert_rx(&erx, &[Event::AlreadyAuthenticated]);
     }
 
     #[test]
@@ -419,7 +413,7 @@ mod tests {
         let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::StartDownload(Uuid::default()));
-        assert_rx(erx, &[
+        assert_rx(&erx, &[
             Event::DownloadingUpdate(Uuid::default()),
             Event::DownloadComplete(DownloadComplete {
                 update_id:    Uuid::default(),
@@ -441,7 +435,7 @@ mod tests {
         let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::StartInstall(Uuid::default()));
-        assert_rx(erx, &[
+        assert_rx(&erx, &[
             Event::InstallingUpdate(Uuid::default()),
             Event::InstallComplete(UpdateReport::single(format!("{}", Uuid::default()), UpdateResultCode::OK, "".to_string()))
         ]);
@@ -459,7 +453,7 @@ mod tests {
         let (ctx, erx) = new_interpreter(ci);
 
         ctx.send(Command::StartInstall(Uuid::default()));
-        assert_rx(erx, &[
+        assert_rx(&erx, &[
             Event::InstallingUpdate(Uuid::default()),
             Event::InstallFailed(UpdateReport::single(format!("{}", Uuid::default()), UpdateResultCode::INSTALL_FAILED, "failed".to_string()))
         ]);

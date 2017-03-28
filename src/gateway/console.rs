@@ -4,7 +4,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use datatype::{Command, Error, Event};
-use super::gateway::{Gateway, Interpret};
+use gateway::{Gateway, Interpret};
 
 
 /// The console gateway is used for REPL-style interaction with the client.

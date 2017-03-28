@@ -42,7 +42,7 @@ pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
 
     match child.stdin.as_mut() {
         Some(mut stdin) => {
-            stdin.write(bytes)?;
+            stdin.write_all(bytes)?;
             stdin.flush()?;
         }
         None => return Err(Error::Command(String::from("unable to write to stdin"))),

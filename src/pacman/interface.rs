@@ -3,7 +3,7 @@ use serde_json as json;
 use std::str::FromStr;
 
 use datatype::{Error, Package, UpdateResultCode};
-use package_manager::{deb, ostree, rpm, test};
+use pacman::{deb, ostree, rpm, test};
 
 
 /// The outcome when installing a package as a tuple of the `UpdateResultCode`
@@ -37,7 +37,7 @@ impl PackageManager {
     /// of installed packages.
     pub fn installed_packages(&self) -> Result<Vec<Package>, Error> {
         match *self {
-            PackageManager::Off => unreachable!("no package manager"),
+            PackageManager::Off => Err(Error::Pacman("no package manager".into())),
             PackageManager::Deb => deb::installed_packages(),
             PackageManager::Rpm => rpm::installed_packages(),
 

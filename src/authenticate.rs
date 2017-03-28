@@ -23,7 +23,7 @@ pub fn pkcs12(client: &Client, server: Url, payload: &RegistrationPayload) -> Re
 }
 
 
-/// Authenticate with the specified OAuth2 server to retrieve a new `AccessToken`.
+/// Authenticate with the specified `OAuth2` server to retrieve a new `AccessToken`.
 pub fn oauth2(server: Url, client: &Client) -> Result<AccessToken, Error> {
     info!("OAuth2 authentication server: {}", server);
     let rx = client.post(server, Some(br#"grant_type=client_credentials"#.to_vec()));

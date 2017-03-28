@@ -7,7 +7,7 @@ use std::process::Command;
 use std::str;
 
 use datatype::{EcuCustom, EcuVersion, Error, TufImage, TufMeta, UpdateResultCode as Code, Url};
-use package_manager::{Credentials, InstallOutcome};
+use pacman::{Credentials, InstallOutcome};
 use uptane::{read_file, write_file};
 
 
@@ -15,7 +15,7 @@ const NEW_PACKAGE: &'static str = "/tmp/sota-package";
 const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 
 
-/// Details of a remote OSTree package.
+/// Details of a remote `OSTree` package.
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct OstreePackage {
@@ -97,7 +97,7 @@ impl OstreePackage {
             return Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?);
         } else if Path::new(BOOT_BRANCH).exists() {
             debug!("getting ostree branch from `{}`", BOOT_BRANCH);
-            String::from_utf8(read_file(BOOT_BRANCH)?).unwrap_or("[error]".into())
+            String::from_utf8(read_file(BOOT_BRANCH)?).unwrap_or_else(|_| "[error]".into())
         } else {
             debug!("unknown ostree branch");
             "[error]".into()
@@ -130,19 +130,19 @@ impl OstreeBranch {
     fn parse(ecu_serial: &str, branch_name: &str, stdout: &str) -> Result<Vec<OstreeBranch>, Error> {
         stdout.lines()
             .map(str::trim)
-            .filter(|line| line.len() > 0)
+            .filter(|line| !line.is_empty())
             .collect::<Vec<_>>()
             .chunks(2)
             .map(|branch| {
-                let first  = branch[0].split(" ").collect::<Vec<_>>();
-                let second = branch[1].split(" ").collect::<Vec<_>>();
+                let first  = branch[0].split(' ').collect::<Vec<_>>();
+                let second = branch[1].split(' ').collect::<Vec<_>>();
 
                 let (current, os_name, commit_name) = match first.len() {
                     2 => (false, first[0], first[1]),
                     3 if first[0].trim() == "*" => (true, first[1], first[2]),
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", first)))
                 };
-                let commit = commit_name.split(".").collect::<Vec<_>>()[0];
+                let commit = commit_name.split('.').collect::<Vec<_>>()[0];
                 let desc = match second.len() {
                     3 if second[0].trim() == "origin" && second[1].trim() == "refspec:" => second[2],
                     _ => return Err(Error::Parse(format!("couldn't parse branch: {:?}", second)))

@@ -37,12 +37,13 @@ impl AuthClient {
     /// Create a new HTTP client for the given `Auth` type.
     pub fn from(auth: Auth) -> Self {
         let mut client = env::var("HTTP_PROXY").map(|ref proxy| {
+            let tls = TlsClient::default();
             let url = Url::parse(proxy).expect("couldn't parse HTTP_PROXY");
             let host = url.host_str().expect("couldn't parse HTTP_PROXY host").to_string();
             let port = url.port_or_known_default().expect("couldn't parse HTTP_PROXY port");
-            let proxy = ProxyConfig::new(url.scheme(), host, port, HttpConnector::default(), TlsClient::new());
+            let proxy = ProxyConfig::new(url.scheme(), host, port, HttpConnector::default(), tls);
             HyperClient::with_proxy_config(proxy)
-        }).unwrap_or_else(|_| HyperClient::with_connector(HttpsConnector::new(TlsClient::new())));
+        }).unwrap_or_else(|_| HyperClient::with_connector(HttpsConnector::new(TlsClient::default())));
 
         client.set_redirect_policy(RedirectPolicy::FollowNone);
 

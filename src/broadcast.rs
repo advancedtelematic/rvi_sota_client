@@ -15,10 +15,9 @@ impl<A: Clone> Broadcast<A> {
 
     /// Start forwarding received messages to every peer.
     pub fn start(&self) {
-        loop {
-            match self.rx.recv() {
-                Some(msg) => for peer in &self.peers { peer.send(msg.clone()); },
-                None      => break
+        while let Some(msg) = self.rx.recv() {
+            for peer in &self.peers {
+                peer.send(msg.clone());
             }
         }
     }

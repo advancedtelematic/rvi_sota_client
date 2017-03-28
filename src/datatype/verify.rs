@@ -86,7 +86,7 @@ impl Verifier {
                 .get(&sig.keyid)
                 .or_else(|| { debug!("couldn't find key: {}", sig.keyid); None })
                 .map(|key| {
-                    let ref public = key.keyval.public;
+                    let public = &key.keyval.public;
                     let pem = pem::parse(public)
                         .map(|pem| pem.contents)
                         .map_err(|err| trace!("couldn't parse public key as pem for {}: {:?}", public, err))?;
@@ -202,7 +202,7 @@ impl SigType {
                 {
                     match child.stdin.as_mut() {
                         Some(stdin) => {
-                            stdin.write(key)?;
+                            stdin.write_all(key)?;
                             stdin.flush()?;
                         },
                         None => return Err(Error::Verify("stdin not found".to_string())),
@@ -243,11 +243,11 @@ impl SigType {
 
             SigType::RsaSsaPss => {
                 trace!("verifying using RSA SSA-PPS");
-                let pub_key = PKey::from_rsa(Rsa::public_key_from_der(&key)?)?;
+                let pub_key = PKey::from_rsa(Rsa::public_key_from_der(key)?)?;
                 let mut verifier = OpensslVerifier::new(MessageDigest::sha256(), &pub_key)?;
                 verifier.pkey_ctx_mut().set_rsa_padding(Padding::from_raw(RSA_PKCS1_PSS_PADDING))?;
-                verifier.update(&msg)?;
-                if verifier.finish(&sig)? { Ok(()) } else { Err(Error::UptaneVerifySignatures) }
+                verifier.update(msg)?;
+                if verifier.finish(sig)? { Ok(()) } else { Err(Error::UptaneVerifySignatures) }
             }
         }
     }

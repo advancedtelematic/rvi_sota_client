@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use datatype::{Config, DownloadComplete, Error, Package, UpdateReport, UpdateRequest, Url};
 use http::{Client, Response};
-use package_manager::Credentials;
+use pacman::Credentials;
 
 
 /// Encapsulate the client configuration and HTTP client used for
@@ -37,7 +37,8 @@ impl<'c, 'h> Sota<'c, 'h> {
         let mut path = PathBuf::new();
         path.push(&self.config.device.packages_dir);
         path.push(format!("{}", id));
-        Ok(path.to_str().ok_or(Error::Parse(format!("Path is not valid UTF-8: {:?}", path)))?.to_string())
+        let out = path.to_str().ok_or_else(|| Error::Parse(format!("Path is not valid UTF-8: {:?}", path)))?;
+        Ok(out.to_string())
     }
 
     /// Query the Core server for any pending or in-flight package updates.
@@ -52,40 +53,34 @@ impl<'c, 'h> Sota<'c, 'h> {
 
     /// Download a specific update from the Core server.
     pub fn download_update(&mut self, id: Uuid) -> Result<DownloadComplete, Error> {
-        let rx   = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
+        let rx = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
         let data = match rx.recv().expect("couldn't download update") {
-            Response::Success(data) => data,
-            Response::Failed(data)  => return Err(Error::from(data)),
-            Response::Error(err)    => return Err(err)
-        };
+            Response::Success(data) => Ok(data),
+            Response::Failed(data)  => Err(Error::from(data)),
+            Response::Error(err)    => Err(err)
+        }?;
 
         let path = self.package_path(&id)?;
         let mut file = File::create(&path)
             .map_err(|err| Error::Client(format!("couldn't create path {}: {}", path, err)))?;
         let _ = io::copy(&mut &*data.body, &mut file)?;
-
-        Ok(DownloadComplete {
-            update_id:    id,
-            update_image: path.to_string(),
-            signature:    "".to_string()
-        })
+        Ok(DownloadComplete { update_id: id, update_image: path.into(), signature: "".into() })
     }
 
     /// Install an update using the package manager.
-    pub fn install_update<'t>(&mut self, id: Uuid, creds: &Credentials) -> Result<UpdateReport, UpdateReport> {
+    pub fn install_update(&mut self, id: Uuid, creds: &Credentials) -> Result<UpdateReport, UpdateReport> {
         let path = self.package_path(&id).expect("install_update expects a valid path");
         match self.config.device.package_manager.install_package(&path, creds) {
             Ok((code, output)) => {
-                let _ = fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
+                fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
                 Ok(UpdateReport::single(format!("{}", id), code, output))
             }
-
             Err((code, output)) => Err(UpdateReport::single(format!("{}", id), code, output))
         }
     }
 
     /// Send a list of the currently installed packages to the Core server.
-    pub fn send_installed_packages(&mut self, packages: &Vec<Package>) -> Result<(), Error> {
+    pub fn send_installed_packages(&mut self, packages: &[Package]) -> Result<(), Error> {
         let rx = self.client.put(self.endpoint("installed"), Some(json::to_vec(packages)?));
         match rx.recv().expect("couldn't send installed packages") {
             Response::Success(_)   => Ok(()),

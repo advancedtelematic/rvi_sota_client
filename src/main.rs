@@ -25,14 +25,14 @@ use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, Pkcs12, TlsClient, TlsData};
 use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter,
                         CommandInterpreter, CommandMode};
-use sota::package_manager::PackageManager;
+use sota::pacman::PackageManager;
 use sota::rvi::{Edge, Services};
 use sota::uptane::Uptane;
 
 
 macro_rules! exit {
     ($code:expr, $fmt:expr, $($arg:tt)*) => {{
-        print!(concat!($fmt, "\n"), $($arg)*);
+        println!($fmt, $($arg)*);
         process::exit($code);
     }}
 }
@@ -52,12 +52,12 @@ fn main() {
     crossbeam::scope(|scope| {
         // subscribe to signals first
         let signals = chan_signal::notify(&[Signal::INT, Signal::TERM]);
-        scope.spawn(move || start_signal_handler(signals));
+        scope.spawn(move || start_signal_handler(&signals));
 
         if config.core.polling {
             let poll_tick = config.core.polling_sec;
             let poll_itx  = itx.clone();
-            scope.spawn(move || start_update_poller(poll_tick, poll_itx));
+            scope.spawn(move || start_update_poller(poll_tick, &poll_itx));
         }
 
         //
@@ -118,7 +118,7 @@ fn main() {
         let ei_loop = etx.clone();
         let ei_auth = auth.clone();
         let ei_mgr  = config.device.package_manager.clone();
-        let ei_dl   = config.device.auto_download.clone();
+        let ei_dl   = config.device.auto_download;
         let ei_sys  = config.device.system_info.clone();
         let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub")));
         scope.spawn(move || EventInterpreter {
@@ -152,13 +152,13 @@ fn start_logging() -> String {
         format!("{} ({}): {} - {}", timestamp, version, record.level(), record.args())
     });
     builder.filter(Some("hyper"), LogLevelFilter::Info);
-    builder.parse(&env::var("RUST_LOG").unwrap_or("INFO".to_string()));
+    builder.parse(&env::var("RUST_LOG").unwrap_or_else(|_| "INFO".to_string()));
     builder.init().expect("builder already initialized");
 
     version.to_string()
 }
 
-fn start_signal_handler(signals: Receiver<Signal>) {
+fn start_signal_handler(signals: &Receiver<Signal>) {
     loop {
         match signals.recv() {
             Some(Signal::INT) | Some(Signal::TERM) => process::exit(0),
@@ -167,7 +167,7 @@ fn start_signal_handler(signals: Receiver<Signal>) {
     }
 }
 
-fn start_update_poller(interval: u64, itx: Sender<Interpret>) {
+fn start_update_poller(interval: u64, itx: &Sender<Interpret>) {
     info!("Polling for new updates every {} seconds.", interval);
     let (etx, erx) = chan::async::<Event>();
     let etx = Arc::new(Mutex::new(etx));
@@ -251,7 +251,7 @@ fn build_config(version: &str) -> Config {
         exit!(0, "{}", version);
     }
 
-    let mut config = match matches.opt_str("config").or(env::var("SOTA_CONFIG").ok()) {
+    let mut config = match matches.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()) {
         Some(file) => Config::load(&file).unwrap_or_else(|err| exit!(1, "{}", err)),
         None => {
             warn!("No config file given. Falling back to defaults.");
@@ -369,15 +369,17 @@ fn build_config(version: &str) -> Config {
 /// Initialize the client then return the interpreter processing mode.
 fn initialize(config: &Config, auth: &Auth) -> CommandMode {
     if *auth == Auth::Provision {
-        provision_p12(&config);
+        provision_p12(config);
     }
     TlsClient::init(config.tls_data());
 
-    if let PackageManager::Uptane = config.device.package_manager {
-        let uptane = Uptane::new(config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
-        CommandMode::Uptane(uptane)
-    } else {
-        CommandMode::Sota
+    match config.device.package_manager {
+        PackageManager::Uptane => {
+            let uptane = Uptane::new(config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
+            CommandMode::Uptane(Box::new(uptane))
+        }
+
+        _ => CommandMode::Sota
     }
 }
 
