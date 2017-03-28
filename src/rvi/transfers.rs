@@ -82,14 +82,12 @@ impl Transfer {
     /// Write the received chunk to disk and store metadata inside `Transfer`.
     pub fn write_chunk(&mut self, data: &str, index: u64) -> Result<(), String> {
         self.last_chunk_received = time::get_time().sec;
-        let mut path = try!(self.get_chunk_dir().map_err(|err| format!("couldn't get chunk dir: {}", err)));
+        let mut path = self.get_chunk_dir().map_err(|err| format!("couldn't get chunk dir: {}", err))?;
         path.push(index.to_string());
-        let mut file = try!(File::create(path).map_err(|err| format!("couldn't open chunk file: {}", err)));
-
-        let data = try!(base64::decode(data).map_err(|err| format!("couldn't decode chunk {}: {}", index, err)));
-        try!(file.write_all(&data)
-             .map_err(|err| format!("couldn't write chunk {} for update_id {}: {}", index, self.update_id, err)));
-        try!(file.flush().map_err(|err| format!("couldn't flush file: {}", err)));
+        let mut file = File::create(path).map_err(|err| format!("couldn't open chunk file: {}", err))?;
+        file.write_all(&base64::decode(data).map_err(|err| format!("couldn't decode chunk {}: {}", index, err))?)
+            .map_err(|err| format!("couldn't write chunk {} for update_id {}: {}", index, self.update_id, err))?;
+        file.flush().map_err(|err| format!("couldn't flush file: {}", err))?;
 
         self.transferred_chunks.push(index);
         self.transferred_chunks.sort();
@@ -100,55 +98,55 @@ impl Transfer {
     /// Assemble all received chunks into a complete package.
     pub fn assemble_package(&self) -> Result<PathBuf, String> {
         debug!("finalizing package {}", self.update_id);
-        try!(self.assemble_chunks());
+        self.assemble_chunks()?;
         self.verify()
             .and_then(|_| self.get_package_path())
             .map_err(|err| format!("couldn't assemble_package for update_id {}: {}", self.update_id, err))
     }
 
     fn assemble_chunks(&self) -> Result<(), String> {
-        let pkg_path = try!(self.get_package_path());
+        let pkg_path = self.get_package_path()?;
         debug!("saving update_id {} to {}", self.update_id, pkg_path.display());
-        let mut file = try!(File::create(pkg_path).map_err(|err| format!("couldn't open package file: {}", err)));
+        let mut file = File::create(pkg_path).map_err(|err| format!("couldn't open package file: {}", err))?;
 
-        let chunk_dir   = try!(self.get_chunk_dir());
-        let entries     = try!(fs::read_dir(chunk_dir.clone()).map_err(|err| format!("couldn't read dir: {}", err)));
+        let chunk_dir = self.get_chunk_dir()?;
+        let entries   = fs::read_dir(chunk_dir.clone()).map_err(|err| format!("couldn't read dir: {}", err))?;
         let mut indices = Vec::new();
         for entry in entries {
-            let entry = try!(entry.map_err(|err| format!("bad entry: {}", err)));
-            let name  = try!(entry.file_name().into_string().map_err(|err| format!("bad entry name: {:?}", err)));
-            let index = try!(u64::from_str(&name).map_err(|err| format!("couldn't parse chunk index: {}", err)));
+            let entry = entry.map_err(|err| format!("bad entry: {}", err))?;
+            let name  = entry.file_name().into_string().map_err(|err| format!("bad entry name: {:?}", err))?;
+            let index = u64::from_str(&name).map_err(|err| format!("couldn't parse chunk index: {}", err))?;
             indices.push(index);
         }
         indices.sort();
 
         for index in indices {
-            try!(self.append_chunk(&mut file, chunk_dir.clone(), index));
+            self.append_chunk(&mut file, chunk_dir.clone(), index)?;
         }
         Ok(debug!("assembled chunks for update_id {}", self.update_id))
     }
 
     fn append_chunk(&self, file: &mut File, mut chunk_dir: PathBuf, index: u64) -> Result<(), String> {
         chunk_dir.push(&index.to_string());
-        let mut chunk = try!(File::open(chunk_dir).map_err(|err| format!("couldn't open chunk: {}", err)));
-        let mut buf   = Vec::new();
-        try!(chunk.read_to_end(&mut buf).map_err(|err| format!("couldn't read file {}: {}", index, err)));
-        try!(file.write(&buf).map_err(|err| format!("couldn't write chunk {}: {}", index, err)));
+        let mut chunk = File::open(chunk_dir).map_err(|err| format!("couldn't open chunk: {}", err))?;
+        let mut buf = Vec::new();
+        chunk.read_to_end(&mut buf).map_err(|err| format!("couldn't read file {}: {}", index, err))?;
+        file.write(&buf).map_err(|err| format!("couldn't write chunk {}: {}", index, err))?;
         Ok(trace!("wrote chunk {} for update_id {}", index, self.update_id))
     }
 
     fn verify(&self) -> Result<(), String> {
-        let path     = try!(self.get_package_path());
-        let mut file = try!(File::open(path).map_err(|err| format!("couldn't open package path: {}", err)));
+        let path = self.get_package_path()?;
+        let mut file = File::open(path).map_err(|err| format!("couldn't open package path: {}", err))?;
         let mut data = Vec::new();
-        try!(file.read_to_end(&mut data).map_err(|err| format!("couldn't read file: {}", err)));
+        file.read_to_end(&mut data).map_err(|err| format!("couldn't read file: {}", err))?;
 
         let mut hash = Sha1::new();
         hash.input(&data);
-        if hash.result_str() == self.checksum {
-            Ok(())
-        } else {
+        if hash.result_str() != self.checksum {
             Err(format!("update_id {} checksum failed: expected {}, got {}", self.update_id, self.checksum, hash.result_str()))
+        } else {
+            Ok(())
         }
     }
 
@@ -164,8 +162,7 @@ impl Transfer {
     fn get_package_path(&self) -> Result<PathBuf, String> {
         let mut path = PathBuf::from(&self.storage_dir);
         path.push("packages");
-        try!(fs::create_dir_all(&path)
-                .map_err(|err| format!("couldn't create package dir {:?}: {}", path, err)));
+        fs::create_dir_all(&path).map_err(|err| format!("couldn't create package dir {:?}: {}", path, err))?;
         path.push(format!("{}.spkg", self.update_id));
         Ok(path)
     }
@@ -176,13 +173,8 @@ impl Drop for Transfer {
         let _ = self.get_chunk_dir().map(|dir| {
             fs::read_dir(&dir)
                 .or_else(|err| Err(error!("couldn't read dir {:?}: {}", &dir, err)))
-                .and_then(|entries| {
-                    for entry in entries {
-                        let _ = entry.map(|entry| fs::remove_file(entry.path()))
-                                     .map_err(|err| error!("found a malformed entry: {}", err));
-                    }
-                    Ok(fs::remove_dir(dir).map_err(|err| error!("couldn't remove dir: {}", err)))
-                })
+                .map(|entries| for entry in entries { let _ = entry.map(|entry| fs::remove_file(entry.path())); })
+                .and_then(|_| fs::remove_dir(dir).map_err(|err| error!("couldn't remove dir: {}", err)))
         });
     }
 }

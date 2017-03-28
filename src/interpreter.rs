@@ -94,7 +94,8 @@ impl Interpreter<Event, Command> for EventInterpreter {
             Event::UptaneTargetsUpdated(targets) => {
                 let treehub  = self.treehub.as_ref().expect("uptane expects a treehub url");
                 let packages = targets.iter().filter_map(|(refname, meta)| {
-                    meta.hashes.get("sha256")
+                    meta.hashes
+                        .get("sha256")
                         .or_else(|| { error!("couldn't get sha256 for {}", refname); None })
                         .map(|commit| {
                             let ecu = &meta.custom.as_ref().expect("no custom field").ecuIdentifier;

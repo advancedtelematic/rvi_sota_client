@@ -108,25 +108,25 @@ impl RemoteServices {
     }
 
     pub fn send_download_started(&self, update_id: Uuid) -> Result<String, String> {
-        let backend = try!(self.backend.as_ref().ok_or("BackendServices not set"));
-        let local   = try!(self.local.as_ref().ok_or("LocalServices not set"));
+        let backend = self.backend.as_ref().ok_or("BackendServices not set")?;
+        let local   = self.local.as_ref().ok_or("LocalServices not set")?;
         let start   = DownloadStarted { device: self.device_id.clone(), update_id: update_id, services: local.clone() };
         self.send_message(start, &backend.start)
     }
 
     pub fn send_chunk_received(&self, chunk: ChunkReceived) -> Result<String, String> {
-        let backend = try!(self.backend.as_ref().ok_or("BackendServices not set"));
+        let backend = self.backend.as_ref().ok_or("BackendServices not set")?;
         self.send_message(chunk, &backend.ack)
     }
 
     pub fn send_update_report(&self, report: UpdateReport) -> Result<String, String> {
-        let backend = try!(self.backend.as_ref().ok_or("BackendServices not set"));
+        let backend = self.backend.as_ref().ok_or("BackendServices not set")?;
         let result  = UpdateReportResult { device: self.device_id.clone(), update_report: report };
         self.send_message(result, &backend.report)
     }
 
     pub fn send_installed_software(&self, installed: InstalledSoftware) -> Result<String, String> {
-        let backend = try!(self.backend.as_ref().ok_or("BackendServices not set"));
+        let backend = self.backend.as_ref().ok_or("BackendServices not set")?;
         let result  = InstalledSoftwareResult { device_id: self.device_id.clone(), installed: installed };
         self.send_message(result, &backend.packages)
     }
