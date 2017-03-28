@@ -23,7 +23,6 @@ pub struct Config {
     pub uptane:    UptaneConfig,
 }
 
-
 impl Config {
     /// Read a toml config file using default values for missing sections or fields.
     pub fn load(path: &str) -> Result<Config, Error> {

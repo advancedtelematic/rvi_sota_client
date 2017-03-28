@@ -96,8 +96,8 @@ fn main() {
             let socket_itx = itx.clone();
             let socket_sub = broadcast.subscribe();
             let mut socket = Socket {
-                commands_path: config.network.socket_commands_path.clone(),
-                events_path:   config.network.socket_events_path.clone()
+                cmd_sock: config.network.socket_commands_path.clone(),
+                ev_sock:  config.network.socket_events_path.clone()
             };
             scope.spawn(move || socket.start(socket_itx, socket_sub));
         }

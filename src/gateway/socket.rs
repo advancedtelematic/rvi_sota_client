@@ -13,83 +13,75 @@ use unix_socket::{UnixListener, UnixStream};
 
 /// The `Socket` gateway is used for communication via Unix Domain Sockets.
 pub struct Socket {
-    pub commands_path: String,
-    pub events_path:   String,
+    pub cmd_sock: String,
+    pub ev_sock:  String,
 }
 
 impl Gateway for Socket {
     fn start(&mut self, itx: Sender<Interpret>, erx: Receiver<Event>) {
-        info!("Starting Socket command listener at {}", self.commands_path);
-        info!("Starting Socket event broadcasting to {}", self.events_path);
+        info!("Listening for commands at socket {}", self.cmd_sock);
+        info!("Sending events to socket {}", self.ev_sock);
+        let _ = fs::remove_file(&self.cmd_sock);
+        let cmd_sock = UnixListener::bind(&self.cmd_sock).expect("command socket");
 
-        let itx  = Arc::new(Mutex::new(itx));
-        let _    = fs::remove_file(&self.commands_path);
-        let sock = UnixListener::bind(&self.commands_path).expect("couldn't open socket_commands_path");
-
-        thread::spawn(move || {
-            for conn in sock.incoming() {
-                let _ = conn
-                    .map(|stream| spawn_handler(stream, itx.clone()))
-                    .map_err(|err| error!("couldn't open socket connection: {}", err));
-            }
-        });
-
-        let reply = Reply { sock: self.events_path.clone() };
+        let ev_sock = self.ev_sock.clone();
         thread::spawn(move || loop {
-            reply.handle_event(erx.recv().expect("dbus etx closed"))
+            handle_event(&ev_sock, erx.recv().expect("socket events"))
         });
+
+        for conn in cmd_sock.incoming() {
+            let _ = conn
+                .map_err(|err| error!("couldn't open socket connection: {}", err))
+                .map(|stream| {
+                    let itx = itx.clone();
+                    thread::spawn(move || handle_command(stream, itx));
+                });
+        }
     }
 }
 
 
-fn spawn_handler(mut stream: UnixStream, itx: Arc<Mutex<Sender<Interpret>>>) {
+fn handle_command(mut stream: UnixStream, itx: Sender<Interpret>) {
     info!("New socket connection.");
-    thread::spawn(move || {
-        let resp = parse_stream(&mut stream, itx)
-            .map(|ev| json::to_vec(&ev).expect("couldn't encode Event"))
-            .unwrap_or_else(|err| format!("{}", err).into_bytes());
+    let resp = parse_command(&mut stream, itx)
+        .map(|ev| json::to_vec(&ev).expect("couldn't encode Event"))
+        .unwrap_or_else(|err| format!("{}", err).into_bytes());
 
-        stream.write_all(&resp).unwrap_or_else(|err| error!("couldn't write to commands socket: {}", err));
-        stream.shutdown(Shutdown::Write).unwrap_or_else(|err| error!("couldn't close commands socket: {}", err));
-    });
+    stream.write_all(&resp).unwrap_or_else(|err| error!("couldn't write to commands socket: {}", err));
+    stream.shutdown(Shutdown::Write).unwrap_or_else(|err| error!("couldn't close commands socket: {}", err));
 }
 
-fn parse_stream(stream: &mut UnixStream, itx: Arc<Mutex<Sender<Interpret>>>) -> Result<Event, Error> {
+fn parse_command(stream: &mut UnixStream, itx: Sender<Interpret>) -> Result<Event, Error> {
     let mut reader = BufReader::new(stream);
     let mut input  = String::new();
     reader.read_to_string(&mut input)?;
     debug!("socket input: {}", input);
 
-    let (etx, erx) = chan::async::<Event>();
     let cmd = input.parse::<Command>()?;
-    itx.lock().unwrap().send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx))) });
+    let (etx, erx) = chan::async::<Event>();
+    itx.send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx))) });
     erx.recv().ok_or(Error::Socket("internal receiver error".to_string()))
 }
 
+fn handle_event(ev_sock: &str, event: Event) {
+    let reply = match event {
+        Event::DownloadComplete(dl) => {
+            EventWrapper::new("DownloadComplete", dl).to_json()
+        }
 
-struct Reply {
-    sock: String
-}
+        Event::DownloadFailed(id, reason) => {
+            EventWrapper::new("DownloadFailed", DownloadFailed { update_id: id, reason: reason }).to_json()
+        }
 
-impl Reply {
-    fn handle_event(&self, event: Event) {
-        let wrapper = match event {
-            Event::DownloadComplete(dl) => EventWrapper::new("DownloadComplete", dl).to_json(),
-            Event::DownloadFailed(id, reason) => {
-                EventWrapper::new("DownloadFailed", DownloadFailed { update_id: id, reason: reason }).to_json()
-            }
-            _ => return
-        };
+        _ => return
+    };
 
-        UnixStream::connect(&self.sock)
-            .map(|mut stream| {
-                stream.write_all(&wrapper)
-                    .unwrap_or_else(|err| error!("couldn't write to events socket: {}", err));
-                stream.shutdown(Shutdown::Write)
-                    .unwrap_or_else(|err| error!("couldn't close events socket: {}", err));
-            })
-            .unwrap_or_else(|err| debug!("couldn't open events socket: {}", err));
-    }
+    let _ = UnixStream::connect(ev_sock)
+        .map_err(|err| debug!("couldn't open events socket: {}", err))
+        .map(|mut stream| {
+            stream.write_all(&reply).unwrap_or_else(|err| error!("couldn't write to events socket: {}", err));
+            stream.shutdown(Shutdown::Write).unwrap_or_else(|err| error!("couldn't close events socket: {}", err));
+        });
 }
 
 
@@ -107,7 +99,7 @@ impl<S: Serialize> EventWrapper<S> {
     }
 
     fn to_json(&self) -> Vec<u8> {
-        json::to_vec(self).expect("couldn't encode EventWrapper")
+        json::to_vec(self).expect("encode EventWrapper")
     }
 }
 
@@ -136,7 +128,7 @@ mod tests {
     fn socket_commands_and_events() {
         let (etx, erx) = chan::sync::<Event>(0);
         let (itx, irx) = chan::sync::<Interpret>(0);
-        let mut socket = Socket { commands_path: CMD_SOCK.into(), events_path: EV_SOCK.into() };
+        let mut socket = Socket { cmd_sock: CMD_SOCK.into(), ev_sock: EV_SOCK.into() };
         thread::spawn(move || socket.start(itx, erx));
 
         let _ = fs::remove_file(EV_SOCK);
