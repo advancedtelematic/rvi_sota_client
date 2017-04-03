@@ -1,11 +1,11 @@
 pub mod auth;
 pub mod command;
 pub mod config;
+pub mod download;
 pub mod error;
 pub mod event;
+pub mod install;
 pub mod network;
-pub mod report;
-pub mod request;
 pub mod ostree;
 pub mod tuf;
 pub mod verify;
@@ -14,13 +14,13 @@ pub use self::auth::{AccessToken, Auth, ClientCredentials};
 pub use self::command::Command;
 pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
                        GatewayConfig, RviConfig, TlsConfig, UptaneConfig};
+pub use self::download::{DownloadComplete, DownloadFailed, Package, RequestStatus,
+                         UpdateAvailable, UpdateRequest};
 pub use self::error::Error;
 pub use self::event::Event;
+pub use self::install::{InstallCode, InstallOutcome, InstallReport, InstallResult,
+                        InstalledFirmware, InstalledPackage, InstalledSoftware};
 pub use self::network::{Method, SocketAddr, Url};
-pub use self::report::{InstalledFirmware, InstalledPackage, InstalledSoftware,
-                       OperationResult, UpdateResultCode, UpdateReport, system_info};
-pub use self::request::{ChunkReceived, DownloadComplete, DownloadFailed, DownloadStarted, Package,
-                        UpdateAvailable, UpdateRequest, UpdateRequestStatus};
 pub use self::ostree::OstreePackage;
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyValue, PrivateKey,
                     RoleData, RoleName, RoleMeta, Signature, TufCustom, TufImage,
@@ -49,12 +49,10 @@ pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
     }
 
     let output = child.wait_with_output()?;
-
     if !output.status.success() {
-        Err(Error::Command(format!("Error with canonical_json.py: exit: {} out: {} err: {}",
-                                   output.status,
-                                   String::from_utf8(output.stdout).unwrap_or("<stdout not utf8>".to_string()),
-                                   String::from_utf8(output.stderr).unwrap_or("<stderr not utf8>".to_string()))))
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        Err(Error::Command(format!("canonical_json.py exit {}: stdout: {}, stderr: {}", output.status, stdout, stderr)))
     } else {
         Ok(output.stdout)
     }

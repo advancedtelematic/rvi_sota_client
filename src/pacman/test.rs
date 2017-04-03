@@ -5,18 +5,18 @@ use std::io::BufReader;
 use std::io::prelude::*;
 use time;
 
-use datatype::{Error, Package, UpdateResultCode};
-use pacman::{InstallOutcome, PackageManager};
+use datatype::{Error, Package, InstallCode};
+use pacman::{InstallOutcome, PacMan};
 
 
-impl PackageManager {
+impl PacMan {
     /// Creates a new Test Package Manager that writes to a temporary file.
     pub fn new_tpm(succeeds: bool) -> Self {
         let name = format!("/tmp/sota-tpm-{}", time::precise_time_ns().to_string());
         if succeeds {
             let _ = File::create(name.clone()).expect("create tpm");
         }
-        PackageManager::Test { filename: name, succeeds: succeeds }
+        PacMan::Test { filename: name, succeeds: succeeds }
     }
 }
 
@@ -66,14 +66,13 @@ pub fn installed_packages(path: &str) -> Result<Vec<Package>, Error> {
 }
 
 /// Installs a package to the specified path when succeeds is true, or fails otherwise.
-pub fn install_package(path: &str, pkg: &str, succeeds: bool) -> Result<InstallOutcome, InstallOutcome> {
+pub fn install_package(path: &str, pkg: &str, succeeds: bool) -> Result<InstallOutcome, Error> {
     if succeeds {
         let mut file = OpenOptions::new().create(true).write(true).append(true).open(path).unwrap();
-        file.write_all(format!("{}\n", pkg).as_bytes())
-            .or_else(|err| Err((UpdateResultCode::INSTALL_FAILED, format!("{:?}", err))))?;
-        Ok((UpdateResultCode::OK, "".to_string()))
+        file.write_all(format!("{}\n", pkg).as_bytes())?;
+        Ok(InstallOutcome::new(InstallCode::OK, "".into(), "".into()))
     } else {
-        Err((UpdateResultCode::INSTALL_FAILED, "failed".to_string()))
+        Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, "".into(), "".into()))
     }
 }
 
@@ -134,7 +133,7 @@ mod tests {
     fn failed_installation() {
         let dir  = TestDir::new("sota-tpm-test-4");
         let path = format!("{}/tpm", dir.0);
-        assert!(install_package(&path, "apa 0.0.0", false).is_err());
+        install_package(&path, "apa 0.0.0", false).unwrap();
         install_package(&path, "bepa 1.0.0", true).unwrap();
         assert_eq!(installed_packages(&path).unwrap(), vec![pkg2()]);
     }

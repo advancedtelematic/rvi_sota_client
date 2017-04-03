@@ -1,9 +1,11 @@
 use serde::{Deserialize, Serialize};
 use serde_json as json;
 use time;
+use uuid::Uuid;
 
 use datatype::Url;
 use http::{AuthClient, Client, Response};
+use rvi::services::LocalServices;
 
 
 /// Encode the body of a JSON-RPC call.
@@ -101,4 +103,21 @@ impl RpcErr {
     pub fn unspecified(id: u64, data: String) -> Self {
         Self::new(id, ErrorCode { code: -32100, message: "Couldn't handle request".to_string(), data: data })
     }
+}
+
+
+/// A JSON-RPC request type to notify RVI that a new package download has started.
+#[derive(Deserialize, Serialize)]
+pub struct DownloadStarted {
+    pub device:    String,
+    pub update_id: Uuid,
+    pub services:  LocalServices,
+}
+
+/// A JSON-RPC request type to notify RVI that a new package chunk was received.
+#[derive(Deserialize, Serialize)]
+pub struct ChunkReceived {
+    pub device:    String,
+    pub update_id: Uuid,
+    pub chunks:    Vec<u64>,
 }

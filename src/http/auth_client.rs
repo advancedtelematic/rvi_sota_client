@@ -100,7 +100,7 @@ impl AuthClient {
     fn redirect_request(&self, req: &AuthRequest, resp: HyperResponse) -> Response {
         resp.headers
             .get::<Location>()
-            .map_or(Response::Error(Error::Client("redirect missing Location header".into())), |loc| {
+            .map(|loc| {
                 self.send(AuthRequest::new(&Auth::None, Request {
                     url: match loc.parse() {
                         Ok(absolute) => absolute,
@@ -111,6 +111,7 @@ impl AuthClient {
                     body:   req.request.body.clone(),
                 }))
             })
+            .unwrap_or_else(|| Response::Error(Error::Client("redirect missing Location header".into())))
     }
 }
 

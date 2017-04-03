@@ -32,12 +32,11 @@ impl Transfers {
     }
 
     pub fn push(&mut self, update_id: Uuid, checksum: String) {
-        let transfer = Transfer::new(self.storage_dir.to_string(), update_id, checksum);
-        self.items.insert(update_id, transfer);
+        self.items.insert(update_id, Transfer::new(self.storage_dir.to_string(), update_id, checksum));
     }
 
-    pub fn remove(&mut self, update_id: Uuid) {
-        self.items.remove(&update_id);
+    pub fn remove(&mut self, update_id: &Uuid) {
+        self.items.remove(update_id);
     }
 
     pub fn clear(&mut self) {
@@ -45,14 +44,15 @@ impl Transfers {
     }
 
     pub fn prune(&mut self, now: i64, timeout: i64) {
-        let old = self.items.iter()
-            .filter(|&(_, transfer)| now - transfer.last_chunk_received > timeout)
+        let old = self.items
+            .iter()
+            .filter(|&(_, ref transfer)| now - transfer.last_chunk_received > timeout)
             .map(|(id, _)| *id)
             .collect::<Vec<Uuid>>();
 
         for id in &old {
-            self.items.remove(id);
-            info!("Transfer for update_id {} timed out.", id)
+            info!("Transfer for update_id {} timed out.", id);
+            self.remove(id);
         }
     }
 }
@@ -189,7 +189,7 @@ mod test {
     use std::fs::File;
     use time;
 
-    use pacman::TestDir;
+    use pacman::test::TestDir;
 
 
     impl Transfer {

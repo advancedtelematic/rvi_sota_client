@@ -6,7 +6,7 @@ use std::fmt::{self, Display, Formatter};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-use datatype::{Error, KeyType, OperationResult, SigType, canonicalize_json};
+use datatype::{Error, InstallResult, KeyType, SigType, canonicalize_json};
 
 
 #[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
@@ -91,7 +91,7 @@ pub struct PrivateKey {
 }
 
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
 pub struct TufSigned {
     pub signatures: Vec<Signature>,
     pub signed:     json::Value,
@@ -174,5 +174,5 @@ pub struct EcuVersion {
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct EcuCustom {
-    pub operation_result: OperationResult
+    pub operation_result: InstallResult
 }

@@ -1,7 +1,8 @@
 use std::sync::Mutex;
 use uuid::Uuid;
 
-use datatype::{ChunkReceived, Event, DownloadComplete, UpdateAvailable};
+use datatype::{Event, DownloadComplete, UpdateAvailable};
+use rvi::json_rpc::ChunkReceived;
 use rvi::services::{BackendServices, RemoteServices};
 use rvi::transfers::Transfers;
 
@@ -99,7 +100,7 @@ impl Parameter for Finish {
             let pack = tfer.assemble_package().map_err(|err| format!("couldn't assemble package: {}", err))?;
             pack.into_os_string().into_string().map_err(|err| format!("couldn't get image: {:?}", err))?
         };
-        ts.remove(self.update_id);
+        ts.remove(&self.update_id);
         info!("Finished transfer of {}", self.update_id);
 
         let complete = DownloadComplete {

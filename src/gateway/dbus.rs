@@ -8,7 +8,7 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use datatype::{Command, DBusConfig, Event, InstalledFirmware, InstalledPackage,
-               InstalledSoftware, OperationResult, UpdateReport};
+               InstallResult, InstalledSoftware, InstallReport};
 use super::{Gateway, Interpret};
 
 
@@ -47,9 +47,9 @@ impl Gateway for DBus {
 
                     .add_m(fact.method("updateReport", (), move |info| {
                         debug!("dbus updateReport called: {:?}", info);
-                        let (id, res): (String, Vec<OperationResult>) = info.msg.read2()?;
-                        let report = UpdateReport::new(id, res);
-                        itx2.send(Interpret { cmd: Command::SendUpdateReport(report), etx: None });
+                        let (id, res): (String, Vec<InstallResult>) = info.msg.read2()?;
+                        let report = InstallReport::new(id, res);
+                        itx2.send(Interpret { cmd: Command::SendInstallReport(report), etx: None });
                         Ok(Vec::new())
                     }).in_arg(arg1).in_arg(arg2))));
 
@@ -149,7 +149,7 @@ impl Session {
 
 
 // FIXME: parsing implementations
-impl Arg for OperationResult {
+impl Arg for InstallResult {
     fn arg_type() -> ArgType { ArgType::Variant }
     fn signature() -> Signature<'static> { unsafe { Signature::from_slice_unchecked(b"v\0") } }
 }
@@ -164,7 +164,7 @@ impl Arg for InstalledFirmware {
     fn signature() -> Signature<'static> { unsafe { Signature::from_slice_unchecked(b"v\0") } }
 }
 
-impl<'a> Get<'a> for OperationResult {
+impl<'a> Get<'a> for InstallResult {
     fn get(_: &mut Iter<'a>) -> Option<Self> {
         None
     }

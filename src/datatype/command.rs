@@ -4,12 +4,12 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use nom::{IResult, space, eof};
-use datatype::{Auth, ClientCredentials, Error, InstalledSoftware, OstreePackage,
-               Package, UpdateReport, UpdateResultCode};
+use datatype::{Auth, ClientCredentials, Error, InstallCode, InstallReport, InstallResult,
+               InstalledSoftware, OstreePackage, Package, TufSigned};
 
 
 /// System-wide commands that are sent to the interpreter.
-#[derive(Deserialize, Serialize, PartialEq, Eq, Debug, Clone)]
+#[derive(Deserialize, Serialize, PartialEq, Debug, Clone)]
 pub enum Command {
     /// Authenticate with the auth server.
     Authenticate(Auth),
@@ -29,27 +29,29 @@ pub enum Command {
     /// Start installing an update.
     StartInstall(Uuid),
 
-    /// Install an OSTree package.
-    OstreeInstall(Vec<OstreePackage>),
-
-    /// Send a list of packages to the Core server.
+    /// Send a list of installed packages.
     SendInstalledPackages(Vec<Package>),
-    /// Send a list of all packages and firmware to the Core server.
+    /// Send a list of installed packages and firmware.
     SendInstalledSoftware(InstalledSoftware),
-    /// Send the system information to the Core server.
+    /// Send a hardware report.
     SendSystemInfo,
-    /// Send a package update report to the Core server.
-    SendUpdateReport(UpdateReport),
+    /// Send an installation report.
+    SendInstallReport(InstallReport),
+
+    /// Send the current manifest to the Director server.
+    UptaneSendManifest(Vec<TufSigned>),
+    /// Install a list of OSTree packages to their respective ECUs.
+    UptaneStartInstall(OstreePackage),
+    /// Notification from a remote ECU of an installation outcome.
+    UptaneInstallOutcome(TufSigned),
 }
 
 impl Display for Command {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let text = match *self {
-            Command::Authenticate(ref auth)   => format!("Authenticate ({})", auth),
-            Command::SendInstalledPackages(_) => "SendInstalledPackages".into(),
-            _ => format!("{:?}", self)
-        };
-        write!(f, "{}", text)
+        match *self {
+            Command::SendInstalledPackages(_) => write!(f, "SendInstalledPackages"),
+            _ => write!(f, "{:?}", self)
+        }
     }
 }
 
@@ -70,28 +72,32 @@ named!(command <(Command, Vec<&str>)>, chain!(
     ~ cmd: alt!(
         alt_complete!(tag!("Authenticate") | tag!("auth"))
             => { |_| Command::Authenticate(Auth::None) }
-        | alt_complete!(tag!("GetUpdateRequests") | tag!("getreq"))
+        | alt_complete!(tag!("GetUpdateRequests") | tag!("new"))
             => { |_| Command::GetUpdateRequests }
         | alt_complete!(tag!("ListInstalledPackages") | tag!("ls"))
             => { |_| Command::ListInstalledPackages }
         | alt_complete!(tag!("ListSystemInfo") | tag!("info"))
             => { |_| Command::ListSystemInfo }
-        | alt_complete!(tag!("OstreeInstall") | tag!("osti"))
-            => { |_| Command::OstreeInstall(vec![OstreePackage::default()]) }
-        | alt_complete!(tag!("Shutdown") | tag!("shutdown"))
-            => { |_| Command::Shutdown }
         | alt_complete!(tag!("SendInstalledPackages") | tag!("sendpack"))
             => { |_| Command::SendInstalledPackages(Vec::new()) }
-        | alt_complete!(tag!("SendInstalledSoftware") | tag!("sendinst"))
+        | alt_complete!(tag!("SendInstalledSoftware") | tag!("sendsoft"))
             => { |_| Command::SendInstalledSoftware(InstalledSoftware::default()) }
         | alt_complete!(tag!("SendSystemInfo") | tag!("sendinfo"))
             => { |_| Command::SendSystemInfo }
-        | alt_complete!(tag!("SendUpdateReport") | tag!("sendup"))
-            => { |_| Command::SendUpdateReport(UpdateReport::default()) }
+        | alt_complete!(tag!("SendInstallReport") | tag!("sendrep"))
+            => { |_| Command::SendInstallReport(InstallReport::default()) }
+        | alt_complete!(tag!("Shutdown") | tag!("shutdown"))
+            => { |_| Command::Shutdown }
         | alt_complete!(tag!("StartDownload") | tag!("dl"))
             => { |_| Command::StartDownload(Uuid::default()) }
         | alt_complete!(tag!("StartInstall") | tag!("inst"))
             => { |_| Command::StartInstall(Uuid::default()) }
+        | alt_complete!(tag!("UptaneInstallOutcome") | tag!("uptout"))
+            => { |_| Command::UptaneInstallOutcome(TufSigned::default()) }
+        | alt_complete!(tag!("UptaneSendManifest") | tag!("uptman"))
+            => { |_| Command::UptaneSendManifest(vec![TufSigned::default()]) }
+        | alt_complete!(tag!("UptaneStartInstall") | tag!("uptinst"))
+            => { |_| Command::UptaneStartInstall(OstreePackage::default()) }
     )
         ~ args: arguments
         ~ alt!(eof | tag!("\r") | tag!("\n") | tag!(";")),
@@ -115,9 +121,9 @@ named!(arguments <&[u8], Vec<&str> >, chain!(
 fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
     match *cmd {
         Command::Authenticate(_) => match args.len() {
-            0 => Ok(Command::Authenticate(Auth::None)),
+            0 => Err(Error::Command("usage: Authenticate <type> | Authenticate <client-id> <client-secret>".to_string())),
+            1 if args[0] == "none" => Ok(Command::Authenticate(Auth::None)),
             1 if args[0] == "cert" => Ok(Command::Authenticate(Auth::Certificate)),
-            1 if args[0] == "prov" => Ok(Command::Authenticate(Auth::Provision)),
             2 => Ok(Command::Authenticate(Auth::Credentials(ClientCredentials {
                 client_id:     args[0].to_string(),
                 client_secret: args[1].to_string()
@@ -140,20 +146,8 @@ fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
             _ => Err(Error::Command(format!("unexpected ListSystemInfo args: {:?}", args))),
         },
 
-        Command::OstreeInstall(_) => match args.len() {
-            0 | 1 | 2 => Err(Error::Command("usage: osti <uri> <refname> <commit>".to_string())),
-            3 => Ok(Command::OstreeInstall(vec![OstreePackage {
-                ecu_serial:  "".to_string(),
-                commit:      args[2].to_string(),
-                refName:     args[1].to_string(),
-                description: "".to_string(),
-                pullUri:     args[0].to_string(),
-            }])),
-            _ => Err(Error::Command(format!("unexpected OstreeInstall args: {:?}", args))),
-        },
-
         Command::SendInstalledPackages(_) => match args.len() {
-            0 | 1 => Err(Error::Command("usage: sendpack (<name> <version> )+".to_string())),
+            0 | 1 => Err(Error::Command("usage: SendInstalledPackages (<name> <version> )+".to_string())),
             n if n % 2 == 0 => {
                 let (names, versions): (Vec<(_, &str)>, Vec<(_, &str)>) =
                     args.into_iter().enumerate().partition(|&(n, _)| n % 2 == 0);
@@ -177,13 +171,13 @@ fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
             _ => Err(Error::Command(format!("unexpected SendSystemInfo args: {:?}", args))),
         },
 
-        Command::SendUpdateReport(_) => match args.len() {
-            0 | 1 => Err(Error::Command("usage: sendup <update-id> <result-code>".to_string())),
+        Command::SendInstallReport(_) => match args.len() {
+            0 | 1 => Err(Error::Command("usage: SendInstallReport <update-id> <result-code>".to_string())),
             2 => {
-                let code = args[1].parse::<UpdateResultCode>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultCode: {}", err)))?;
-                Ok(Command::SendUpdateReport(UpdateReport::single(args[0].into(), code, "".to_string())))
+                let code = args[1].parse::<InstallCode>().map_err(|err| Error::Command(format!("couldn't parse InstallCode: {}", err)))?;
+                Ok(Command::SendInstallReport(InstallResult::new(args[0].into(), code, "".to_string()).into_report()))
             }
-            _ => Err(Error::Command(format!("unexpected SendUpdateReport args: {:?}", args))),
+            _ => Err(Error::Command(format!("unexpected SendInstallReport args: {:?}", args))),
         },
 
         Command::Shutdown => match args.len() {
@@ -192,7 +186,7 @@ fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
         },
 
         Command::StartDownload(_) => match args.len() {
-            0 => Err(Error::Command("usage: dl <id>".to_string())),
+            0 => Err(Error::Command("usage: StartDownload <id>".to_string())),
             1 => {
                 let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
                 Ok(Command::StartDownload(uuid))
@@ -201,12 +195,34 @@ fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
         },
 
         Command::StartInstall(_) => match args.len() {
-            0 => Err(Error::Command("usage: inst <id>".to_string())),
+            0 => Err(Error::Command("usage: StartInstall <id>".to_string())),
             1 => {
                 let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
                 Ok(Command::StartInstall(uuid))
             }
             _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
+        },
+
+        Command::UptaneInstallOutcome(_) => match args.len() {
+            // FIXME(PRO-1160): args
+            _ => Err(Error::Command(format!("unexpected UptaneInstallOutcome args: {:?}", args))),
+        },
+
+        Command::UptaneSendManifest(_) => match args.len() {
+            // FIXME(PRO-1160): args
+            _ => Err(Error::Command(format!("unexpected UptaneSendManifest args: {:?}", args))),
+        },
+
+        Command::UptaneStartInstall(_) => match args.len() {
+            0 | 1 | 2 => Err(Error::Command("usage: UptaneStartInstall <serial> <refname> <commit>".to_string())),
+            3 => Ok(Command::UptaneStartInstall(OstreePackage {
+                ecu_serial:  args[0].to_string(),
+                refName:     args[1].to_string(),
+                commit:      args[2].to_string(),
+                description: "".to_string(),
+                pullUri:     "".to_string(),
+            })),
+            _ => Err(Error::Command(format!("unexpected UptaneStartInstall args: {:?}", args))),
         },
     }
 }
@@ -215,8 +231,7 @@ fn parse_arguments(cmd: &Command, args: Vec<&str>) -> Result<Command, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatype::{Auth, Command, ClientCredentials, OstreePackage, Package,
-                   UpdateReport, UpdateResultCode};
+    use datatype::{Auth, Command, ClientCredentials, OstreePackage, Package, InstallCode};
     use nom::IResult;
 
 
@@ -245,11 +260,11 @@ mod tests {
 
     #[test]
     fn authenticate_test() {
-        assert_eq!("Authenticate".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
-        assert_eq!("auth".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
+        assert_eq!("Authenticate none".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
+        assert_eq!("auth none".parse::<Command>().unwrap(), Command::Authenticate(Auth::None));
+        assert!("auth".parse::<Command>().is_err());
         assert!("auth one".parse::<Command>().is_err());
         assert_eq!("auth cert".parse::<Command>().unwrap(), Command::Authenticate(Auth::Certificate));
-        assert_eq!("auth prov".parse::<Command>().unwrap(), Command::Authenticate(Auth::Provision));
         assert_eq!("auth user pass".parse::<Command>().unwrap(),
                    Command::Authenticate(Auth::Credentials(ClientCredentials {
                        client_id:     "user".to_string(),
@@ -261,8 +276,8 @@ mod tests {
     #[test]
     fn get_update_requests_test() {
         assert_eq!("GetUpdateRequests".parse::<Command>().unwrap(), Command::GetUpdateRequests);
-        assert_eq!("getreq".parse::<Command>().unwrap(), Command::GetUpdateRequests);
-        assert!("getreq now".parse::<Command>().is_err());
+        assert_eq!("new".parse::<Command>().unwrap(), Command::GetUpdateRequests);
+        assert!("new old".parse::<Command>().is_err());
     }
 
     #[test]
@@ -281,25 +296,14 @@ mod tests {
     }
 
     #[test]
-    fn ostree_install_test() {
-        assert_eq!("OstreeInstall uri ref commit".parse::<Command>().unwrap(),
-                   Command::OstreeInstall(vec![OstreePackage {
-                       ecu_serial:  "".to_string(),
-                       commit:      "commit".to_string(),
-                       refName:     "ref".to_string(),
-                       description: "".to_string(),
-                       pullUri:     "uri".to_string()
-                   }]));
-        assert_eq!("osti 123 456 789".parse::<Command>().unwrap(),
-                   Command::OstreeInstall(vec![OstreePackage {
-                       ecu_serial:  "".to_string(),
-                       commit:      "789".to_string(),
-                       refName:     "456".to_string(),
-                       description: "".to_string(),
-                       pullUri:     "123".to_string()
-                   }]));
-        assert!("OstreeInstall this".parse::<Command>().is_err());
-        assert!("osti this that".parse::<Command>().is_err());
+    fn send_install_report_test() {
+        assert_eq!("SendInstallReport id 0".parse::<Command>().unwrap(),
+                   Command::SendInstallReport(InstallResult::new("id".into(), InstallCode::OK, "".to_string()).into_report()));
+        assert_eq!("sendrep 123 19".parse::<Command>().unwrap(),
+                   Command::SendInstallReport(InstallResult::new("123".into(), InstallCode::GENERAL_ERROR, "".to_string()).into_report()));
+        assert!("sendrep id 20".parse::<Command>().is_err());
+        assert!("SendInstalledPackages".parse::<Command>().is_err());
+        assert!("sendrep id 0 extra".parse::<Command>().is_err());
     }
 
     #[test]
@@ -336,17 +340,6 @@ mod tests {
     }
 
     #[test]
-    fn send_update_report_test() {
-        assert_eq!("SendUpdateReport id 0".parse::<Command>().unwrap(),
-                   Command::SendUpdateReport(UpdateReport::single("id".into(), UpdateResultCode::OK, "".to_string())));
-        assert_eq!("sendup 123 19".parse::<Command>().unwrap(),
-                   Command::SendUpdateReport(UpdateReport::single("123".into(), UpdateResultCode::GENERAL_ERROR, "".to_string())));
-        assert!("sendup id 20".parse::<Command>().is_err());
-        assert!("SendInstalledPackages".parse::<Command>().is_err());
-        assert!("sendup id 0 extra".parse::<Command>().is_err());
-    }
-
-    #[test]
     fn shutdown_test() {
         assert_eq!("Shutdown".parse::<Command>().unwrap(), Command::Shutdown);
         assert_eq!("shutdown".parse::<Command>().unwrap(), Command::Shutdown);
@@ -372,5 +365,39 @@ mod tests {
                    Command::StartInstall(Uuid::default()));
         assert!("StartInstall".parse::<Command>().is_err());
         assert!(format!("inst {} extra", DEFAULT_UUID).parse::<Command>().is_err());
+    }
+
+    #[test]
+    fn uptane_install_outcome_test() {
+        assert!("UptaneInstallOutcome".parse::<Command>().is_err());
+        assert!("uptout".parse::<Command>().is_err());
+    }
+
+    #[test]
+    fn uptane_send_manifest_test() {
+        assert!("UptaneSendManifest".parse::<Command>().is_err());
+        assert!("uptman".parse::<Command>().is_err());
+    }
+
+    #[test]
+    fn uptane_start_install_test() {
+        assert_eq!("UptaneStartInstall serial ref commit".parse::<Command>().unwrap(),
+                   Command::UptaneStartInstall(OstreePackage {
+                       ecu_serial:  "serial".into(),
+                       refName:     "ref".into(),
+                       commit:      "commit".into(),
+                       description: "".into(),
+                       pullUri:     "".into()
+                   }));
+        assert_eq!("uptinst 123 456 789".parse::<Command>().unwrap(),
+                   Command::UptaneStartInstall(OstreePackage {
+                       ecu_serial:  "123".into(),
+                       refName:     "456".into(),
+                       commit:      "789".into(),
+                       description: "".into(),
+                       pullUri:     "".into()
+                   }));
+        assert!("UptaneStartInstall this".parse::<Command>().is_err());
+        assert!("uptinst this that".parse::<Command>().is_err());
     }
 }

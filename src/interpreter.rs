@@ -1,14 +1,13 @@
 use chan::{Sender, Receiver};
-use std;
+use std::process::{self, Command as ShellCommand};
 use std::sync::{Arc, Mutex};
 
-use datatype::{Auth, Command, Config, EcuCustom, Error, Event, OperationResult,
-               OstreePackage, RoleName, UpdateReport, UpdateRequestStatus as Status,
-               UpdateResultCode, Url, system_info};
+use authenticate::oauth2;
+use datatype::{Auth, Command, Config, Error, Event, InstallCode, InstallResult,
+               RoleName, RequestStatus, Url};
 use gateway::Interpret;
 use http::{AuthClient, Client};
-use authenticate::oauth2;
-use pacman::{Credentials, PackageManager};
+use pacman::{Credentials, PacMan};
 use rvi::Services;
 use sota::Sota;
 use uptane::Uptane;
@@ -31,7 +30,7 @@ pub trait Interpreter<I, O> {
 pub struct EventInterpreter {
     pub loop_tx: Sender<Event>,
     pub auth:    Auth,
-    pub pacman:  PackageManager,
+    pub pacman:  PacMan,
     pub auto_dl: bool,
     pub sysinfo: Option<String>,
     pub treehub: Option<Url>,
@@ -45,26 +44,31 @@ impl Interpreter<Event, Command> for EventInterpreter {
             Event::Authenticated => {
                 self.loop_tx.send(Event::InstalledPackagesNeeded);
                 self.loop_tx.send(Event::SystemInfoNeeded);
+                self.loop_tx.send(Event::UptaneManifestNeeded);
             }
 
-            Event::DownloadComplete(ref dl) if self.pacman != PackageManager::Off => {
+            Event::DownloadComplete(ref dl) if self.pacman != PacMan::Off => {
                 ctx.send(Command::StartInstall(dl.update_id));
             }
 
             Event::DownloadFailed(id, reason) => {
-                let report = UpdateReport::single(format!("{}", id), UpdateResultCode::GENERAL_ERROR, reason);
-                ctx.send(Command::SendUpdateReport(report));
+                let result = InstallResult::new(format!("{}", id), InstallCode::GENERAL_ERROR, reason);
+                ctx.send(Command::SendInstallReport(result.into_report()));
             }
 
-            Event::InstallComplete(report) | Event::InstallFailed(report) => {
-                ctx.send(Command::SendUpdateReport(report));
+            Event::InstallComplete(result) | Event::InstallFailed(result) => {
+                ctx.send(Command::SendInstallReport(result.into_report()));
             }
 
-            Event::InstalledPackagesNeeded if self.pacman != PackageManager::Off => {
-                match self.pacman.installed_packages() {
-                    Ok(pkgs) => ctx.send(Command::SendInstalledPackages(pkgs)),
-                    Err(err) => error!("couldn't send a list of packages: {}", err)
-                }
+            Event::InstalledPackagesNeeded => {
+                self.pacman
+                    .installed_packages()
+                    .map(|packages| ctx.send(Command::SendInstalledPackages(packages)))
+                    .unwrap_or_else(|err| error!("couldn't send a list of packages: {}", err));
+            }
+
+            Event::InstallReportSent(_) => {
+                self.loop_tx.send(Event::InstalledPackagesNeeded);
             }
 
             Event::NotAuthenticated => {
@@ -79,30 +83,30 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 for request in requests {
                     let id = request.requestId;
                     match request.status {
-                        Status::Pending  if self.auto_dl => ctx.send(Command::StartDownload(id)),
-                        Status::InFlight if self.pacman == PackageManager::Off => (),
-                        Status::InFlight if self.pacman.is_installed(&request.packageId) => {
-                            let report = UpdateReport::single(format!("{}", id), UpdateResultCode::OK, "".to_string());
-                            ctx.send(Command::SendUpdateReport(report));
+                        RequestStatus::Pending  if self.auto_dl => ctx.send(Command::StartDownload(id)),
+                        RequestStatus::InFlight if self.pacman == PacMan::Off => (),
+                        RequestStatus::InFlight if self.pacman.is_installed(&request.packageId) => {
+                            let result = InstallResult::new(format!("{}", id), InstallCode::OK, "<auto generated>".to_string());
+                            ctx.send(Command::SendInstallReport(result.into_report()));
                         }
-                        Status::InFlight => ctx.send(Command::StartDownload(id)),
+                        RequestStatus::InFlight => ctx.send(Command::StartDownload(id)),
                         _ => ()
                     }
                 }
             }
 
+            Event::UptaneInstallComplete(signed) | Event::UptaneInstallFailed(signed) => {
+                ctx.send(Command::UptaneSendManifest(vec![signed]));
+            }
+
+            Event::UptaneManifestNeeded if self.pacman == PacMan::Uptane => {
+                ctx.send(Command::UptaneSendManifest(Vec::new()));
+            }
+
             Event::UptaneTargetsUpdated(targets) => {
-                let treehub  = self.treehub.as_ref().expect("uptane expects a treehub url");
-                let packages = targets.iter().filter_map(|(refname, meta)| {
-                    meta.hashes
-                        .get("sha256")
-                        .or_else(|| { error!("couldn't get sha256 for {}", refname); None })
-                        .map(|commit| {
-                            let ecu = &meta.custom.as_ref().expect("no custom field").ecuIdentifier;
-                            OstreePackage::new(ecu.clone(), refname.clone(), commit.clone(), "".into(), treehub)
-                        })
-                }).collect::<Vec<_>>();
-                ctx.send(Command::OstreeInstall(packages));
+                for pkg in Uptane::extract_packages(targets, self.treehub.as_ref().expect("treehub url")) {
+                    ctx.send(Command::UptaneStartInstall(pkg));
+                }
             }
 
             _ => ()
@@ -127,234 +131,220 @@ impl Interpreter<Command, Interpret> for IntermediateInterpreter {
 
 
 /// The `CommandMode` toggles the `Command` handling procedure.
+#[derive(Copy, Clone)]
 pub enum CommandMode {
     Sota,
-    Rvi(Box<Services>),
-    Uptane(Box<Uptane>)
+    Rvi,
+    Uptane,
 }
 
 /// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
 /// messages, broadcasting `Event`s globally and (optionally) sending the final
 /// outcome `Event` to the `Interpret` response channel.
 pub struct CommandInterpreter {
-    pub mode:   CommandMode,
     pub config: Config,
     pub auth:   Auth,
-    pub http:   Box<Client>
+    pub http:   Box<Client>,
+    pub rvi:    Option<Services>,
+    pub uptane: Option<Uptane>,
 }
 
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
         info!("CommandInterpreter received: {}", &interpret.cmd);
         let outcome = match self.auth {
+            Auth::Credentials(_) => self.authenticate(interpret.cmd),
+
             Auth::None        |
             Auth::Token(_)    |
-            Auth::Certificate => self.process_command(interpret.cmd, etx),
-
-            Auth::Provision      |
-            Auth::Credentials(_) => self.authenticate(interpret.cmd)
+            Auth::Certificate => self.process_command(interpret.cmd, etx)
         };
 
-        let final_ev = match outcome {
+        let event = match outcome {
             Ok(ev) => ev,
-
-            Err(Error::HttpAuth(resp)) => {
-                error!("HTTP authorization failed: {}", resp);
-                Event::NotAuthenticated
-            },
-
+            Err(Error::HttpAuth(_)) => Event::NotAuthenticated,
             Err(err) => Event::Error(format!("{}", err))
         };
-        etx.send(final_ev.clone());
-        interpret.etx.map(|tx| tx.lock().unwrap().send(final_ev));
+        etx.send(event.clone());
+        interpret.etx.map(|tx| tx.lock().unwrap().send(event));
     }
 }
 
 impl CommandInterpreter {
     fn process_command(&mut self, cmd: Command, etx: &Sender<Event>) -> Result<Event, Error> {
         let mut sota = Sota::new(&self.config, self.http.as_ref());
+        let mode = if self.uptane.is_some() {
+            CommandMode::Uptane
+        } else if self.rvi.is_some() {
+            CommandMode::Rvi
+        } else {
+            CommandMode::Sota
+        };
 
-        let result = match cmd {
-            Command::Authenticate(_) => Event::AlreadyAuthenticated,
+        let event = match (cmd, mode) {
+            (Command::Authenticate(_), _) => Event::AlreadyAuthenticated,
 
-            Command::GetUpdateRequests => {
-                match self.mode {
-                    CommandMode::Sota   |
-                    CommandMode::Rvi(_) => {
-                        let mut updates = sota.get_update_requests()?;
-                        if updates.is_empty() {
-                            Event::NoUpdateRequests
-                        } else {
-                            updates.sort_by_key(|u| u.installPos);
-                            Event::UpdatesReceived(updates)
-                        }
-                    }
-
-                    CommandMode::Uptane(ref mut uptane) => {
-                        uptane.initialize(&*self.http)?;
-                        let timestamp = uptane.get_director(&*self.http, RoleName::Timestamp)?;
-                        if timestamp.is_new() {
-                            let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
-                            Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or_default())
-                        } else {
-                            Event::UptaneTimestampUpdated
-                        }
-                    }
-
+            (Command::GetUpdateRequests, CommandMode::Uptane) => {
+                let uptane = self.uptane.as_mut().expect("uptane mode");
+                let timestamp = uptane.get_director(&*self.http, RoleName::Timestamp)?;
+                if timestamp.is_new() {
+                    let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
+                    Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or_default())
+                } else {
+                    Event::UptaneTimestampUpdated
                 }
             }
 
-            Command::ListInstalledPackages => {
+            (Command::GetUpdateRequests, _) => {
+                let mut updates = sota.get_update_requests()?;
+                if updates.is_empty() {
+                    Event::NoUpdateRequests
+                } else {
+                    updates.sort_by_key(|u| u.installPos);
+                    Event::UpdatesReceived(updates)
+                }
+            }
+
+            (Command::ListInstalledPackages, _) => {
                 Event::FoundInstalledPackages(self.config.device.package_manager.installed_packages()?)
             }
 
-            Command::ListSystemInfo => {
+            (Command::ListSystemInfo, _) => {
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
                 Event::FoundSystemInfo(system_info(cmd)?)
             }
 
-            Command::OstreeInstall(pkgs) => {
-                let creds = self.get_credentials();
-                if let CommandMode::Uptane(ref mut uptane) = self.mode {
-                    uptane.ecu_versions = pkgs.iter().map(|pkg| {
-                        let result = match pkg.install(&creds) {
-                            Ok((code, out))  |
-                            Err((code, out)) => OperationResult::new(pkg.refName.clone(), code, out)
-                        };
-                        pkg.ecu_version(Some(EcuCustom { operation_result: result }))
-                    }).collect::<Vec<_>>();
-                    uptane.send_manifest = true;
-                }
-                Event::InstalledPackagesNeeded
-            }
-
-            Command::SendInstalledPackages(packages) => {
+            (Command::SendInstalledPackages(packages), _) => {
                 sota.send_installed_packages(&packages)?;
                 Event::InstalledPackagesSent
             }
 
-            Command::SendInstalledSoftware(sw) => {
-                if let CommandMode::Rvi(ref rvi) = self.mode {
-                    let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
-                }
+            (Command::SendInstalledSoftware(sw), CommandMode::Rvi) => {
+                let rvi = self.rvi.as_ref().expect("rvi mode");
+                let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
                 Event::InstalledSoftwareSent
             }
 
-            Command::SendSystemInfo => {
-                if let Some(ref cmd) = self.config.device.system_info {
-                    sota.send_system_info(system_info(cmd)?.into_bytes())?;
-                }
+            (Command::SendSystemInfo, _) => {
+                let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
+                sota.send_system_info(system_info(cmd)?.into_bytes())?;
                 Event::SystemInfoSent
             }
 
-            Command::SendUpdateReport(report) => {
-                if let CommandMode::Rvi(ref rvi) = self.mode {
-                    let _ = rvi.remote.lock().unwrap().send_update_report(report);
+            (Command::SendInstallReport(report), CommandMode::Rvi) => {
+                let rvi = self.rvi.as_ref().expect("rvi mode");
+                let _ = rvi.remote.lock().unwrap().send_update_report(report.clone());
+                Event::InstallReportSent(report)
+            }
+
+            (Command::SendInstallReport(report), _) => {
+                sota.send_install_report(&report)?;
+                Event::InstallReportSent(report)
+            }
+
+            (Command::StartDownload(id), CommandMode::Rvi) => {
+                let rvi = self.rvi.as_ref().expect("rvi mode");
+                let _ = rvi.remote.lock().unwrap().send_download_started(id);
+                Event::DownloadingUpdate(id)
+            }
+
+            (Command::StartDownload(id), _) => {
+                etx.send(Event::DownloadingUpdate(id));
+                sota.download_update(id)
+                    .map(Event::DownloadComplete)
+                    .unwrap_or_else(|err| Event::DownloadFailed(id, format!("{}", err)))
+            }
+
+            (Command::StartInstall(id), CommandMode::Sota) => {
+                etx.send(Event::InstallingUpdate(id));
+                let result = sota.install_update(&id, &self.get_credentials())?;
+                if result.result_code.is_success() {
+                    Event::InstallComplete(result)
                 } else {
-                    sota.send_update_report(&report)?;
-                }
-                Event::InstalledPackagesNeeded
-            }
-
-            Command::StartDownload(id) => {
-                match self.mode {
-                    CommandMode::Rvi(ref rvi) => {
-                        let _ = rvi.remote.lock().unwrap().send_download_started(id);
-                        Event::DownloadingUpdate(id)
-                    }
-
-                    _ => {
-                        etx.send(Event::DownloadingUpdate(id));
-                        match sota.download_update(id) {
-                            Ok(dl)   => Event::DownloadComplete(dl),
-                            Err(err) => Event::DownloadFailed(id, format!("{}", err))
-                        }
-                    }
+                    Event::InstallFailed(result)
                 }
             }
 
-            Command::StartInstall(id) => {
-                match self.mode {
-                    CommandMode::Rvi(ref rvi) => {
-                        let _ = rvi.remote.lock().unwrap().send_download_started(id);
-                        Event::DownloadingUpdate(id)
-                    }
+            (Command::Shutdown, _) => process::exit(0),
 
-                    CommandMode::Sota => {
-                        etx.send(Event::InstallingUpdate(id));
-                        match sota.install_update(id, &self.get_credentials()) {
-                            Ok(report)  => Event::InstallComplete(report),
-                            Err(report) => Event::InstallFailed(report)
-                        }
-                    }
+            (Command::UptaneSendManifest(mut signed), CommandMode::Uptane) => {
+                let uptane = self.uptane.as_mut().expect("uptane mode");
+                if signed.is_empty() {
+                    signed.push(uptane.sign_manifest(None)?);
+                }
+                uptane.put_manifest(&*self.http, signed)?;
+                Event::UptaneManifestSent
+            }
 
-                    CommandMode::Uptane(_) => unimplemented!()
+            (Command::UptaneStartInstall(package), CommandMode::Uptane) => {
+                let creds  = self.get_credentials();
+                let uptane = self.uptane.as_mut().expect("uptane mode");
+                if package.ecu_serial == uptane.ecu_ver.ecu_serial {
+                    let outcome = package.install(&creds)?;
+                    let result  = outcome.into_result(package.refName.clone());
+                    if result.result_code.is_success() {
+                        Event::UptaneInstallComplete(uptane.sign_manifest(Some(result))?)
+                    } else {
+                        Event::UptaneInstallFailed(uptane.sign_manifest(Some(result))?)
+                    }
+                } else {
+                    Event::UptaneInstallNeeded(package)
                 }
             }
 
-            Command::Shutdown => std::process::exit(0),
+            (Command::SendInstalledSoftware(_), _) => unreachable!("Command::SendInstalledSoftware expects CommandMode::Rvi"),
+            (Command::StartInstall(_), _)          => unreachable!("Command::StartInstall expects CommandMode::Sota"),
+            (Command::UptaneInstallOutcome(_), _)  => unreachable!("Command::UptaneInstallOutcome expects CommandMode::Uptane"),
+            (Command::UptaneSendManifest(_), _)    => unreachable!("Command::UptaneSendManifest expects CommandMode::Uptane"),
+            (Command::UptaneStartInstall(_), _)    => unreachable!("Command::UptaneStartInstall expects CommandMode::Uptane"),
         };
 
-        Ok(result)
+        Ok(event)
     }
 
     fn authenticate(&mut self, cmd: Command) -> Result<Event, Error> {
-        let result = match cmd {
+        let event = match cmd {
+            Command::Authenticate(Auth::Credentials(creds)) => {
+                let server = self.config.auth.as_ref().expect("auth config").server.join("/token");
+                if self.http.is_testing() {
+                    self.auth = Auth::Token(oauth2(server, self.http.as_ref())?);
+                } else {
+                    self.auth = Auth::Token(oauth2(server, &AuthClient::from(Auth::Credentials(creds)))?);
+                    self.http = Box::new(AuthClient::from(self.auth.clone()));
+                }
+                Event::Authenticated
+            }
+
             Command::Authenticate(Auth::None)        |
             Command::Authenticate(Auth::Token(_))    |
             Command::Authenticate(Auth::Certificate) => Event::Authenticated,
 
-            Command::Authenticate(Auth::Credentials(creds)) => {
-                let cfg = self.config.auth.as_ref().expect("auth config required");
-                if !self.http.is_testing() {
-                    self.http = Box::new(AuthClient::from(Auth::Credentials(creds)));
-                }
-
-                let token = oauth2(cfg.server.join("/token"), self.http.as_ref())?;
-                self.auth = Auth::Token(token.clone());
-                if !self.http.is_testing() {
-                    self.http = Box::new(AuthClient::from(Auth::Token(token)));
-                }
-
-                Event::Authenticated
-            }
-
-            Command::Authenticate(Auth::Provision) => {
-                self.auth = Auth::Certificate;
-                if !self.http.is_testing() {
-                    self.http = Box::new(AuthClient::from(Auth::Certificate));
-                }
-                Event::Authenticated
-            }
-
-            Command::Shutdown => std::process::exit(0),
+            Command::Shutdown => process::exit(0),
 
             _ => Event::NotAuthenticated
         };
 
-        Ok(result)
+        Ok(event)
     }
 
     fn get_credentials(&self) -> Credentials {
-        let token = if let Auth::Token(ref t) = self.auth {
-            Some(t.access_token.clone())
-        } else {
-            None
-        };
-
+        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.clone()) } else { None };
         let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
             (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
         } else {
             (None, None, None)
         };
-
-        Credentials {
-            access_token: token,
-            ca_file:      ca,
-            cert_file:    cert,
-            pkey_file:    pkey,
-        }
+        Credentials { access_token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
     }
+}
+
+
+/// Generate a new system information report.
+pub fn system_info(cmd: &str) -> Result<String, Error> {
+    ShellCommand::new(cmd)
+        .output()
+        .map_err(|err| Error::SystemInfo(err.to_string()))
+        .and_then(|info| Ok(String::from_utf8(info.stdout)?))
 }
 
 
@@ -367,52 +357,50 @@ mod tests {
     use std::thread;
     use uuid::Uuid;
 
-    use datatype::{Auth, Command, Config, DownloadComplete, Event, UpdateReport, UpdateResultCode};
+    use datatype::{Auth, Command, Config, DownloadComplete, Event, InstallCode};
     use gateway::Interpret;
-    use http::test_client::TestClient;
-    use pacman::{PackageManager, assert_rx};
+    use http::TestClient;
+    use pacman::PacMan;
+    use pacman::test::assert_rx;
 
 
-    fn new_interpreter(mut ci: CommandInterpreter) -> (Sender<Command>, Receiver<Event>) {
+    fn new_interpreter(replies: Vec<String>, succeeds: bool) -> CommandInterpreter {
+        let mut config = Config::default();
+        config.device.package_manager = PacMan::new_tpm(succeeds);
+
+        CommandInterpreter {
+            config: config,
+            auth:   Auth::None,
+            http:   Box::new(TestClient::from(replies)),
+            rvi:    None,
+            uptane: None,
+        }
+    }
+
+    fn start_interpreter(mut ci: CommandInterpreter) -> (Sender<Command>, Receiver<Event>) {
         let (etx, erx) = chan::sync::<Event>(0);
         let (ctx, crx) = chan::sync::<Command>(0);
-
-        thread::spawn(move || loop {
-            match crx.recv() {
-                Some(cmd) => ci.interpret(Interpret { cmd: cmd, etx: None }, &etx),
-                None      => break
-            }
+        thread::spawn(move || while let Some(cmd) = crx.recv() {
+            ci.interpret(Interpret { cmd: cmd, etx: None }, &etx);
         });
-
         (ctx, erx)
     }
 
+    fn new_result(code: InstallCode) -> InstallResult {
+        InstallResult::new(format!("{}", Uuid::default()), code, "stdout: \nstderr: \n".into())
+    }
+
+
     #[test]
     fn already_authenticated() {
-        let mut ci = CommandInterpreter {
-            mode:   CommandMode::Sota,
-            config: Config::default(),
-            auth:   Auth::None,
-            http:   Box::new(TestClient::from(Vec::<String>::new()))
-        };
-        ci.config.device.package_manager = PackageManager::new_tpm(true);
-        let (ctx, erx) = new_interpreter(ci);
-
+        let (ctx, erx) = start_interpreter(new_interpreter(vec![], true));
         ctx.send(Command::Authenticate(Auth::None));
         assert_rx(&erx, &[Event::AlreadyAuthenticated]);
     }
 
     #[test]
     fn download_updates() {
-        let mut ci = CommandInterpreter {
-            mode:   CommandMode::Sota,
-            config: Config::default(),
-            auth:   Auth::None,
-            http:   Box::new(TestClient::from(vec!["[]".to_string(); 10]))
-        };
-        ci.config.device.package_manager = PackageManager::new_tpm(true);
-        let (ctx, erx) = new_interpreter(ci);
-
+        let (ctx, erx) = start_interpreter(new_interpreter(vec!["[]".into(); 10], true));
         ctx.send(Command::StartDownload(Uuid::default()));
         assert_rx(&erx, &[
             Event::DownloadingUpdate(Uuid::default()),
@@ -426,37 +414,21 @@ mod tests {
 
     #[test]
     fn install_update_success() {
-        let mut ci = CommandInterpreter {
-            mode:   CommandMode::Sota,
-            config: Config::default(),
-            auth:   Auth::None,
-            http:   Box::new(TestClient::from(vec!["[]".to_string(); 10]))
-        };
-        ci.config.device.package_manager = PackageManager::new_tpm(true);
-        let (ctx, erx) = new_interpreter(ci);
-
+        let (ctx, erx) = start_interpreter(new_interpreter(vec!["[]".into(); 10], true));
         ctx.send(Command::StartInstall(Uuid::default()));
         assert_rx(&erx, &[
             Event::InstallingUpdate(Uuid::default()),
-            Event::InstallComplete(UpdateReport::single(format!("{}", Uuid::default()), UpdateResultCode::OK, "".to_string()))
+            Event::InstallComplete(new_result(InstallCode::OK)),
         ]);
     }
 
     #[test]
     fn install_update_failed() {
-        let mut ci = CommandInterpreter {
-            mode:   CommandMode::Sota,
-            config: Config::default(),
-            auth:   Auth::None,
-            http:   Box::new(TestClient::from(vec!["[]".to_string(); 10]))
-        };
-        ci.config.device.package_manager = PackageManager::new_tpm(false);
-        let (ctx, erx) = new_interpreter(ci);
-
+        let (ctx, erx) = start_interpreter(new_interpreter(vec!["[]".into(); 10], false));
         ctx.send(Command::StartInstall(Uuid::default()));
         assert_rx(&erx, &[
             Event::InstallingUpdate(Uuid::default()),
-            Event::InstallFailed(UpdateReport::single(format!("{}", Uuid::default()), UpdateResultCode::INSTALL_FAILED, "failed".to_string()))
+            Event::InstallFailed(new_result(InstallCode::INSTALL_FAILED)),
         ]);
     }
 }

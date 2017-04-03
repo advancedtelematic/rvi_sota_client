@@ -1,50 +1,36 @@
 use std::process::Command;
+use std::str;
 
-use datatype::{Error, Package, UpdateResultCode};
-use pacman::{InstallOutcome, parse_package};
+use datatype::{Error, Package, InstallCode};
+use pacman::{InstallOutcome, parse_packages};
 
 
 /// Returns a list of installed RPM packages with
 /// `rpm -qa --queryformat ${NAME} ${VERSION}\n`.
 pub fn installed_packages() -> Result<Vec<Package>, Error> {
-    Command::new("rpm").arg("-qa").arg("--queryformat").arg("%{NAME} %{VERSION}\n")
+    Command::new("rpm")
+        .arg("-qa")
+        .arg("--queryformat")
+        .arg("%{NAME} %{VERSION}\n")
         .output()
-        .map_err(|err| Error::Pacman(format!("Error fetching packages: {}", err)))
-        .and_then(|c| {
-            String::from_utf8(c.stdout)
-                .map_err(|err| Error::Parse(format!("Error parsing package: {}", err)))
-                .map(|s| s.lines().map(String::from).collect::<Vec<String>>())
-        })
-        .and_then(|lines| {
-            lines.iter()
-                 .map(|line| parse_package(line))
-                 .filter(|item| item.is_ok())
-                 .collect::<Result<Vec<Package>, _>>()
-        })
+        .map_err(|err| Error::PacMan(format!("{}", err)))
+        .and_then(|output| Ok(String::from_utf8(output.stdout)?))
+        .and_then(|stdout| parse_packages(&stdout))
 }
 
 /// Installs a new RPM package with `rpm -Uvh --force <package-path>`.
-pub fn install_package(path: &str) -> Result<InstallOutcome, InstallOutcome> {
-    let output = Command::new("rpm").arg("-Uvh").arg("--force").arg(path)
-        .output()
-        .map_err(|err| (UpdateResultCode::GENERAL_ERROR, format!("{:?}", err)))?;
-
+pub fn install_package(path: &str) -> Result<InstallOutcome, Error> {
+    let output = Command::new("rpm").arg("-Uvh").arg("--force").arg(path).output()?;
     let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
     let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    let exists = (&stdout).contains("already installed");
 
     match output.status.code() {
+        Some(_) if exists => Ok(InstallOutcome::new(InstallCode::ALREADY_PROCESSED, stdout, stderr)),
         Some(0) => {
             let _ = Command::new("sync").status().map_err(|err| error!("couldn't run 'sync': {}", err));
-            Ok((UpdateResultCode::OK, stdout))
+            Ok(InstallOutcome::new(InstallCode::OK, stdout, stderr))
         }
-
-        _ => {
-            let out = format!("stdout: {}\nstderr: {}", stdout, stderr);
-            if (&stderr).contains("already installed") {
-                Ok((UpdateResultCode::ALREADY_PROCESSED, out))
-            } else {
-                Err((UpdateResultCode::INSTALL_FAILED, out))
-            }
-        }
+        _ => Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, stdout, stderr))
     }
 }

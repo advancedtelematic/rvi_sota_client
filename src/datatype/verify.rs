@@ -82,23 +82,23 @@ impl Verifier {
 
         let mut valid_count = 0;
         for sig in &signed.signatures {
-            let _ = self.keys
+            self.keys
                 .get(&sig.keyid)
-                .or_else(|| { debug!("couldn't find key: {}", sig.keyid); None })
-                .map(|key| {
+                .ok_or_else(|| Error::Verify("couldn't find key".into()))
+                .and_then(|key| {
                     let public = &key.keyval.public;
                     let pem = pem::parse(public)
-                        .map(|pem| pem.contents)
-                        .map_err(|err| trace!("couldn't parse public key as pem for {}: {:?}", public, err))?;
+                        .map_err(|err| Error::Verify(format!("public key {} not pem: {:?}", public, err)))
+                        .map(|pem| pem.contents)?;
                     let sig = base64::decode(&sig.sig)
-                        .map_err(|err| trace!("couldn't convert sig from base64 for {}: {}", public, err))?;
-
+                        .map_err(|err| Error::Verify(format!("sig for {} not base64: {}", public, err)))?;
                     let sig_type: SigType = key.keytype.clone().into();
-                    sig_type.verify(&cjson, &pem, &sig)
-                        .map_err(|err| trace!("failed verification for {}: {}", public, err))
-                        .map(|_| valid_count += 1)
-                        .map(|_| trace!("successful verification with: {}", public))
-                });
+                    Ok(sig_type.verify(&cjson, &pem, &sig)
+                       .map(|_| valid_count += 1)
+                       .map(|_| trace!("successful verification for {}", public))
+                       .unwrap_or_else(|err| trace!("failed verification for {}: {}", public, err)))
+                })
+                .unwrap_or_else(|err| error!("verification failed for key {}: {}", sig.keyid, err))
         }
 
         trace!("getting role: {}", role);
@@ -141,7 +141,7 @@ impl FromStr for KeyType {
 }
 
 
-#[derive(PartialEq, Eq, Debug, Clone)]
+#[derive(PartialEq, Eq, Debug, Clone, Copy)]
 pub enum SigType {
     Ed25519,
     RsaSsaPss,
@@ -211,9 +211,7 @@ impl SigType {
 
                 let output = child.wait_with_output()?;
                 if !output.status.success() {
-                    let stdout = str::from_utf8(&output.stdout).unwrap_or("[stdout not utf8]");
-                    let stderr = str::from_utf8(&output.stderr).unwrap_or("[stderr not utf8]");
-                    return Err(Error::Verify(format!("stdout: {}\nstderr: {}", stdout, stderr)));
+                    return Err(Error::Verify("RsaSsaPss verification failed".into()));
                 }
 
                 let key_bytes_der = untrusted::Input::from(&output.stdout);

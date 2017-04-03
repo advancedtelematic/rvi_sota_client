@@ -5,29 +5,35 @@
     "keyid": ""
   }],
   "signed": {
-    "vin": "{uuid}",
-    "primary_ecu_serial": "{ecu serial}",
+    "primary_ecu_serial": "<primary_ecu_serial>",
     "ecu_version_manifest": [
       {
         "signatures": [{
           "method": "rsassa-pss",
-          "sig": "{sig}",
-          "keyid": "{keyid}"
+          "sig": "<sig>",
+          "keyid": "<keyid>"
         }],
         "signed": {
-          "timeserver_time": "1970-01-01T00:00:00Z",
+          "attacks_detected": "",
+          "ecu_serial": "<primary_ecu_serial>",
           "installed_image": {
-            "filepath": "/{ostree-refname}",
+            "filepath": "<ostree_branch>-<ostree_commit>",
             "fileinfo": {
               "hashes": {
-                "sha256": "{ostree-commit}"
+                "sha256": "<ostree_commit>"
               },
               "length": 0
             }
           },
           "previous_timeserver_time": "1970-01-01T00:00:00Z",
-          "ecu_serial": "{primary-ecu-serial}",
-          "attacks_detected": ""
+          "timeserver_time": "1970-01-01T00:00:00Z",
+          "custom": {
+            "operation_result": {
+              "id": "<ecu_serial>",
+              "result_code": "OK",
+              "result_text": "<result_text>"
+            }
+          }
         }
       }
     ]

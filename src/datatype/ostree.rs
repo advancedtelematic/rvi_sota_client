@@ -6,8 +6,8 @@ use std::path::Path;
 use std::process::Command;
 use std::str;
 
-use datatype::{EcuCustom, EcuVersion, Error, TufImage, TufMeta, UpdateResultCode as Code, Url};
-use pacman::{Credentials, InstallOutcome};
+use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufImage, TufMeta, Url};
+use pacman::Credentials;
 use uptane::{read_file, write_file};
 
 
@@ -39,7 +39,7 @@ impl OstreePackage {
     }
 
     /// Shell out to the ostree command to install this package.
-    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, InstallOutcome> {
+    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, Error> {
         let mut cmd = Command::new("sota_ostree.sh");
         cmd.env("COMMIT", self.commit.clone());
         cmd.env("REF_NAME", self.refName.clone());
@@ -50,21 +50,19 @@ impl OstreePackage {
         creds.cert_file.as_ref().map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
         creds.pkey_file.as_ref().map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
 
-        cmd.output()
-            .map_err(|err| (Code::GENERAL_ERROR, format!("{}", err)))
-            .and_then(|output| {
-                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-                match output.status.code() {
-                    Some(0) => {
-                        let _ = write_file(NEW_PACKAGE, &json::to_vec(self).expect("couldn't jsonify OstreePackage"))
-                            .map_err(|err| error!("couldn't save package info: {}", err));
-                        Ok((Code::OK, stdout))
-                    }
-                    Some(99) => Ok((Code::ALREADY_PROCESSED, stdout)),
-                    _        => Err((Code::INSTALL_FAILED, format!("stdout: {}\nstderr: {}", stdout, stderr)))
-                }
-            })
+        let output = cmd.output().map_err(|err| Error::OSTree(format!("{}", err)))?;
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+
+        match output.status.code() {
+            Some(0) => {
+                write_file(NEW_PACKAGE, &json::to_vec(self)?)
+                    .unwrap_or_else(|err| error!("couldn't save package info: {}", err));
+                Ok(InstallOutcome::new(InstallCode::OK, stdout, stderr))
+            }
+            Some(99) => Ok(InstallOutcome::new(InstallCode::ALREADY_PROCESSED, stdout, stderr)),
+            _        => Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, stdout, stderr))
+        }
     }
 
     /// Create a new EcuVersion from the current OstreePackage.

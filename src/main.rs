@@ -14,20 +14,17 @@ use env_logger::LogBuilder;
 use getopts::Options;
 use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
-use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use sota::authenticate::{pkcs12, RegistrationPayload};
-use sota::datatype::{Auth, Command, Config, Event};
+use sota::datatype::{Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
-use sota::http::{AuthClient, Pkcs12, TlsClient, TlsData};
-use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter,
-                        CommandInterpreter, CommandMode};
-use sota::pacman::PackageManager;
+use sota::http::{AuthClient, TlsClient};
+use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter, CommandInterpreter};
+use sota::pacman::PacMan;
 use sota::rvi::{Edge, Services};
-use sota::uptane::Uptane;
+use sota::uptane::{Service, Uptane};
 
 
 macro_rules! exit {
@@ -39,10 +36,12 @@ macro_rules! exit {
 
 
 fn main() {
-    let version  = start_logging();
-    let config   = build_config(&version);
-    let auth     = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
-    let mut mode = initialize(&config, &auth);
+    let version = start_logging();
+    let config  = build_config(&version);
+
+    TlsClient::init(config.tls_data());
+    let auth   = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let client = AuthClient::from(auth.clone());
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -50,7 +49,6 @@ fn main() {
     let mut broadcast = Broadcast::new(erx);
 
     crossbeam::scope(|scope| {
-        // subscribe to signals first
         let signals = chan_signal::notify(&[Signal::INT, Signal::TERM]);
         scope.spawn(move || start_signal_handler(&signals));
 
@@ -59,10 +57,6 @@ fn main() {
             let poll_itx  = itx.clone();
             scope.spawn(move || start_update_poller(poll_tick, &poll_itx));
         }
-
-        //
-        // start gateways
-        //
 
         if config.gateway.console {
             let cons_itx = itx.clone();
@@ -84,12 +78,14 @@ fn main() {
             scope.spawn(move || http.start(http_itx, http_sub));
         }
 
-        if config.gateway.rvi {
+        let services = if config.gateway.rvi {
             let rvi_edge = config.network.rvi_edge_server.clone();
             let services = Services::new(config.rvi.clone(), config.device.uuid.clone(), etx.clone());
             let mut edge = Edge::new(services.clone(), rvi_edge, config.rvi.client.clone());
             scope.spawn(move || edge.start());
-            mode = CommandMode::Rvi(Box::new(services))
+            Some(services)
+        } else {
+            None
         };
 
         if config.gateway.socket {
@@ -109,9 +105,14 @@ fn main() {
             scope.spawn(move || ws.start(ws_itx, ws_sub));
         }
 
-        //
-        // start interpreters
-        //
+        let uptane = if let PacMan::Uptane = config.device.package_manager {
+            if services.is_some() { exit!(2, "{}", "unexpected [rvi] config with uptane package manager"); }
+            let mut uptane = Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
+            let _ = uptane.get_root(&client, &Service::Director).map_err(|err| exit!(2, "couldn't get root.json from director: {}", err));
+            Some(uptane)
+        } else {
+            None
+        };
 
         let ei_sub  = broadcast.subscribe();
         let ei_ctx  = ctx.clone();
@@ -133,10 +134,11 @@ fn main() {
         scope.spawn(move || IntermediateInterpreter::default().run(crx, itx));
 
         scope.spawn(move || CommandInterpreter {
-            mode:   mode,
             config: config,
             auth:   auth,
-            http:   Box::new(AuthClient::default())
+            http:   Box::new(client),
+            rvi:    services,
+            uptane: uptane,
         }.run(irx, etx));
 
         scope.spawn(move || broadcast.start());
@@ -223,10 +225,6 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "network-socket-commands-path", "change the socket path for reading commands", "PATH");
     opts.optopt("", "network-socket-events-path", "change the socket path for sending events", "PATH");
     opts.optopt("", "network-websocket-server", "change the websocket gateway address", "ADDR");
-
-    opts.optopt("", "provision-p12-path", "change the TLS PKCS#12 credentials file", "PATH");
-    opts.optopt("", "provision-p12-password", "change the TLS PKCS#12 file password", "PASSWORD");
-    opts.optopt("", "provision-expiry-days", "change the TLS certificate validity duration", "INT");
 
     opts.optopt("", "rvi-client", "change the rvi client URL", "URL");
     opts.optopt("", "rvi-storage-dir", "change the rvi storage directory", "PATH");
@@ -323,14 +321,6 @@ fn build_config(version: &str) -> Config {
     matches.opt_str("network-socket-events-path").map(|path| config.network.socket_events_path = path);
     matches.opt_str("network-websocket-server").map(|server| config.network.websocket_server = server);
 
-    config.provision.as_mut().map(|prov_cfg| {
-        matches.opt_str("provision-p12-path").map(|path| prov_cfg.p12_path = path);
-        matches.opt_str("provision-p12-password").map(|password| prov_cfg.p12_password = password);
-        matches.opt_str("provision-expiry-days").map(|text| {
-            prov_cfg.expiry_days = text.parse().unwrap_or_else(|err| exit!(1, "Invalid provision-expiry-days: {}", err));
-        });
-    });
-
     matches.opt_str("rvi-client").map(|url| {
         config.rvi.client = url.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-client URL: {}", err));
     });
@@ -364,60 +354,4 @@ fn build_config(version: &str) -> Config {
     }
 
     config
-}
-
-/// Initialize the client then return the interpreter processing mode.
-fn initialize(config: &Config, auth: &Auth) -> CommandMode {
-    if *auth == Auth::Provision {
-        provision_p12(config);
-    }
-    TlsClient::init(config.tls_data());
-
-    match config.device.package_manager {
-        PackageManager::Uptane => {
-            let uptane = Uptane::new(config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
-            CommandMode::Uptane(Box::new(uptane))
-        }
-
-        _ => CommandMode::Sota
-    }
-}
-
-/// Extract the certificates from a PKCS#12 bundle for TLS communication.
-fn provision_p12(config: &Config) -> () {
-    let prov = config.provision.as_ref().expect("provisioning expects a [provision] config");
-    let tls  = config.tls.as_ref().expect("provisioning expects a [tls] config");
-
-    if Path::new(&tls.ca_file).exists() {
-        exit!(3, "{}", "can't provision when tls.ca_file already exists");
-    } else if Path::new(&tls.cert_file).exists() {
-        exit!(3, "{}", "can't provision when tls.cert_file already exists");
-    } else if Path::new(&tls.pkey_file).exists() {
-        exit!(3, "{}", "can't provision when tls.pkey_file already exists");
-    }
-
-    // FIXME: don't use temp files
-    let prov_p12 = Pkcs12::from_file(&prov.p12_path, &prov.p12_password);
-    prov_p12.write_chain("/tmp/ca");
-    prov_p12.write_cert("/tmp/cert");
-    prov_p12.write_pkey("/tmp/pkey");
-    TlsClient::init(TlsData {
-        ca_file:   Some("/tmp/ca"),
-        cert_file: Some("/tmp/cert"),
-        pkey_file: Some("/tmp/pkey")
-    });
-    use std::fs;
-    fs::remove_file("/tmp/ca").expect("couldn't remove file");
-    fs::remove_file("/tmp/cert").expect("couldn't remove file");
-    fs::remove_file("/tmp/pkey").expect("couldn't remove file");
-
-    let bundle = pkcs12(&AuthClient::default(), tls.server.join("devices").clone(), &RegistrationPayload {
-        deviceId: prov.device_id.as_ref().unwrap_or(&config.device.uuid).clone(),
-        ttl:      prov.expiry_days
-    }).unwrap_or_else(|err| exit!(3, "couldn't get pkcs12 bundle: {}", err));
-
-    let tls_p12 = Pkcs12::from_der(&bundle, "");
-    tls_p12.write_chain(&tls.ca_file);
-    tls_p12.write_cert(&tls.cert_file);
-    tls_p12.write_pkey(&tls.pkey_file);
 }
