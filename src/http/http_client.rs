@@ -1,6 +1,6 @@
 use chan::{self, Sender, Receiver};
 use hyper::status::StatusCode;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{self, Display, Formatter};
 use std::str;
 
 use datatype::{Error, Method, Url};
@@ -53,7 +53,7 @@ pub enum Response {
 }
 
 impl Display for Response {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
             Response::Success(ref data) => write!(f, "{}", data),
             Response::Failed(ref data)  => write!(f, "{}", data),
@@ -71,7 +71,7 @@ pub struct ResponseData {
 }
 
 impl Display for ResponseData {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self.body.len() {
             0 => write!(f, "Response Code: {}", self.code),
             n => match str::from_utf8(&self.body) {

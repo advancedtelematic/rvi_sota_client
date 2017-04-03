@@ -1,13 +1,13 @@
-use std::fmt::{self, Display, Formatter};
+use std::fmt::{self, Debug, Display, Formatter};
 
 
 /// An enumeration of all authentication types.
-#[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Auth {
     None,
-    Token(AccessToken),
     Certificate,
     Credentials(ClientCredentials),
+    Token(AccessToken),
 }
 
 /// Display should not include any sensitive data for log output.
@@ -22,6 +22,12 @@ impl Display for Auth {
     }
 }
 
+impl Debug for Auth {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        write!(f, "{}", self)
+    }
+}
+
 
 /// Encapsulates the client id and secret used during authentication.
 #[derive(Clone, PartialEq, Eq, Debug, Serialize, Deserialize)]
@@ -29,7 +35,6 @@ pub struct ClientCredentials {
     pub client_id:     String,
     pub client_secret: String,
 }
-
 
 /// Stores the returned access token data following a successful authentication.
 #[derive(Serialize, Deserialize, Debug, PartialEq, Eq, Clone, Default)]

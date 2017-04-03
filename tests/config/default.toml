@@ -18,7 +18,7 @@ software_manager_path = "/org/genivi/SoftwareLoadingManager"
 timeout = 60
 
 [device]
-uuid = "123e4567-e89b-12d3-a456-426655440000"
+uuid = "00000000-0000-0000-0000-000000000000"
 packages_dir = "/tmp/"
 package_manager = "off"
 auto_download = true
@@ -38,12 +38,6 @@ rvi_edge_server = "127.0.0.1:9999"
 socket_commands_path = "/tmp/sota-commands.socket"
 socket_events_path = "/tmp/sota-events.socket"
 websocket_server = "127.0.0.1:3012"
-
-#[provision]
-#p12_path = "/usr/local/etc/sota/credentials.p12"
-#p12_password = ""
-#expiry_days = 11
-##device_id = None
 
 [rvi]
 client = "http://127.0.0.1:8901"

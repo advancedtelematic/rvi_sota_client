@@ -21,7 +21,7 @@ use sota::datatype::{Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, TlsClient};
-use sota::interpreter::{EventInterpreter, IntermediateInterpreter, Interpreter, CommandInterpreter};
+use sota::interpreter::{CommandInterpreter, EventInterpreter, IntermediateInterpreter, Interpreter};
 use sota::pacman::PacMan;
 use sota::rvi::{Edge, Services};
 use sota::uptane::{Service, Uptane};
@@ -40,8 +40,8 @@ fn main() {
     let config  = build_config(&version);
 
     TlsClient::init(config.tls_data());
-    let auth   = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
-    let client = AuthClient::from(auth.clone());
+    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let http = AuthClient::from(auth.clone());
 
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
@@ -80,7 +80,7 @@ fn main() {
 
         let services = if config.gateway.rvi {
             let rvi_edge = config.network.rvi_edge_server.clone();
-            let services = Services::new(config.rvi.clone(), config.device.uuid.clone(), etx.clone());
+            let services = Services::new(config.rvi.clone(), format!("{}", config.device.uuid), etx.clone());
             let mut edge = Edge::new(services.clone(), rvi_edge, config.rvi.client.clone());
             scope.spawn(move || edge.start());
             Some(services)
@@ -108,7 +108,7 @@ fn main() {
         let uptane = if let PacMan::Uptane = config.device.package_manager {
             if services.is_some() { exit!(2, "{}", "unexpected [rvi] config with uptane package manager"); }
             let mut uptane = Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
-            let _ = uptane.get_root(&client, &Service::Director).map_err(|err| exit!(2, "couldn't get root.json from director: {}", err));
+            let _ = uptane.get_root(&http, &Service::Director).map_err(|err| exit!(2, "couldn't get root.json from director: {}", err));
             Some(uptane)
         } else {
             None
@@ -136,7 +136,7 @@ fn main() {
         scope.spawn(move || CommandInterpreter {
             config: config,
             auth:   auth,
-            http:   Box::new(client),
+            http:   Box::new(http),
             rvi:    services,
             uptane: uptane,
         }.run(irx, etx));
@@ -285,7 +285,9 @@ fn build_config(version: &str) -> Config {
         config.dbus.timeout = timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid dbus-timeout: {}", err));
     });
 
-    matches.opt_str("device-uuid").map(|uuid| config.device.uuid = uuid);
+    matches.opt_str("device-uuid").map(|uuid| {
+        config.device.uuid = uuid.parse().unwrap_or_else(|err| exit!(1, "Invalid device-uuid: {}", err));
+    });
     matches.opt_str("device-packages-dir").map(|path| config.device.packages_dir = path);
     matches.opt_str("device-package-manager").map(|text| {
         config.device.package_manager = text.parse().unwrap_or_else(|err| exit!(1, "Invalid device-package-manager: {}", err));

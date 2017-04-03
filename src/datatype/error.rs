@@ -3,7 +3,7 @@ use hyper::error::Error as HyperError;
 use openssl::error::ErrorStack as OpensslErrors;
 use serde_json::Error as SerdeJsonError;
 use std::convert::From;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
@@ -102,7 +102,7 @@ derive_from!([
 ]);
 
 impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
             Error::ChronoParse(ref e)   => format!("DateTime parse error: {}", e.clone()),
             Error::Client(ref s)        => format!("Http client error: {}", s.clone()),
@@ -125,6 +125,11 @@ impl Display for Error {
             Error::Socket(ref s)        => format!("Unix Domain Socket error: {}", s.clone()),
             Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
             Error::Toml(ref e)          => format!("TOML error: {:?}", e.clone()),
+            Error::UrlParse(ref s)      => format!("Url parse error: {}", s.clone()),
+            Error::Utf8(ref e)          => format!("Utf8 error: {}", e.clone()),
+            Error::Verify(ref s)        => format!("Verification error: {}", s.clone()),
+            Error::Websocket(ref e)     => format!("Websocket Error: {:?}", e.clone()),
+
             Error::UptaneExpired               => "Uptane: expired".into(),
             Error::UptaneInvalidKeyType(ref s) => format!("Uptane: invalid key type: {}", s),
             Error::UptaneInvalidSigType(ref s) => format!("Uptane: invalid signature type: {}", s),
@@ -134,10 +139,6 @@ impl Display for Error {
             Error::UptaneRoleThreshold         => "Uptane: role threshold not met".into(),
             Error::UptaneUnknownRole           => "Uptane: unknown role".into(),
             Error::UptaneVerifySignatures      => "Uptane: invalid signature".into(),
-            Error::UrlParse(ref s)  => format!("Url parse error: {}", s.clone()),
-            Error::Utf8(ref e)      => format!("Utf8 error: {}", e.clone()),
-            Error::Verify(ref s)    => format!("Verification error: {}", s.clone()),
-            Error::Websocket(ref e) => format!("Websocket Error: {:?}", e.clone()),
         };
         write!(f, "{}", inner)
     }

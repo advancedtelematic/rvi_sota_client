@@ -2,7 +2,7 @@ use hyper::method::Method as HyperMethod;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, Serializer};
 use serde_json as json;
-use std::fmt::{Display, Formatter, Result as FmtResult};
+use std::fmt::{self, Display, Formatter};
 use std::net::{SocketAddr as StdSocketAddr};
 use std::ops::Deref;
 use std::str::FromStr;
@@ -45,7 +45,7 @@ impl Deref for SocketAddr {
 }
 
 impl Display for SocketAddr {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
     }
 }
@@ -56,10 +56,15 @@ impl Display for SocketAddr {
 pub struct Url(pub url::Url);
 
 impl Url {
-    /// Append the string suffix to this URL. Will panic on parse failure.
+    /// Append the string suffix to this URL, trimming multiple slashes.
+    /// Will panic on parse failure.
     pub fn join(&self, suffix: &str) -> Url {
-        Url(url::Url::parse(&format!("{}{}", self.0, suffix))
-            .expect(&format!("couldn't join `{}` with `{}`", self.0, suffix)))
+        let url = match (self.0.as_str().ends_with('/'), suffix.starts_with('/')) {
+            (true, true)   => format!("{}{}", self.0, suffix.trim_left_matches('/')),
+            (false, false) => format!("{}/{}", self.0, suffix),
+            _              => format!("{}{}", self.0, suffix)
+        };
+        Url(url::Url::parse(&url).expect(&format!("couldn't join `{}` with `{}`", self.0, suffix)))
     }
 }
 
@@ -96,7 +101,7 @@ impl Deref for Url {
 }
 
 impl Display for Url {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let host = self.0.host_str().unwrap_or("localhost");
         if let Some(port) = self.0.port() {
             write!(f, "{}://{}:{}{}", self.0.scheme(), host, port, self.0.path())
@@ -126,7 +131,7 @@ impl Into<HyperMethod> for Method {
 }
 
 impl Display for Method {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let method = match *self {
             Method::Get  => "GET".to_string(),
             Method::Post => "POST".to_string(),
@@ -146,11 +151,11 @@ mod tests {
     fn test_join_url() {
         let slash: Url = "http://localhost:1234/foo/".parse().unwrap();
         assert_eq!(slash.join("bar"), "http://localhost:1234/foo/bar".parse().unwrap());
-        assert_eq!(slash.join("/double"), "http://localhost:1234/foo//double".parse().unwrap());
+        assert_eq!(slash.join("///multiple"), "http://localhost:1234/foo/multiple".parse().unwrap());
         assert_eq!(slash.join("a/b"), "http://localhost:1234/foo/a/b".parse().unwrap());
 
         let no_slash: Url = "http://localhost:1234/foo".parse().unwrap();
-        assert_eq!(no_slash.join("bar"), "http://localhost:1234/foobar".parse().unwrap());
+        assert_eq!(no_slash.join("bar"), "http://localhost:1234/foo/bar".parse().unwrap());
         assert_eq!(no_slash.join("/two"), "http://localhost:1234/foo/two".parse().unwrap());
         assert_eq!(no_slash.join("/query%25?x=1"), "http://localhost:1234/foo/query%25?x=1".parse().unwrap());
     }

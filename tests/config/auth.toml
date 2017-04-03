@@ -3,12 +3,6 @@ server = "http://127.0.0.1:9001"
 client_id = "client-id"
 client_secret = "client-secret"
 
-[provision]
-p12_path = "/usr/local/etc/sota/registration.p12"
-p12_password = ""
-expiry_days = 11
-#device_id = None
-
 [tls]
 server = "http://localhost:8000"
 ca_file = "/usr/local/etc/sota/ca.crt"
