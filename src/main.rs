@@ -242,116 +242,70 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "uptane-private-key-path", "change the path to the private key for the primary ECU", "PATH");
     opts.optopt("", "uptane-public-key-path", "change the path to the public key for the primary ECU", "PATH");
 
-    let matches = opts.parse(&args[1..]).expect("couldn't parse args");
-    if matches.opt_present("help") {
+    let cli = opts.parse(&args[1..]).expect("couldn't parse args");
+    if cli.opt_present("help") {
         exit!(0, "{}", opts.usage(&format!("Usage: {} [options]", program)));
-    } else if matches.opt_present("version") {
+    } else if cli.opt_present("version") {
         exit!(0, "{}", version);
     }
-
-    let mut config = match matches.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()) {
-        Some(file) => Config::load(&file).unwrap_or_else(|err| exit!(1, "{}", err)),
-        None => {
-            warn!("No config file given. Falling back to defaults.");
-            Config::default()
-        }
-    };
+    let file = cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()).expect("No config provided");
+    let mut config = Config::load(&file).expect("Error loading config");
 
     config.auth.as_mut().map(|auth_cfg| {
-        matches.opt_str("auth-server").map(|text| {
-            auth_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid auth-server URL: {}", err));
-        });
-        matches.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
-        matches.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = secret);
+        cli.opt_str("auth-server").map(|text| auth_cfg.server = text.parse().expect("Invalid auth-server URL"));
+        cli.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
+        cli.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = secret);
     });
 
-    matches.opt_str("core-server").map(|text| {
-        config.core.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid core-server URL: {}", err));
-    });
-    matches.opt_str("core-polling").map(|polling| {
-        config.core.polling = polling.parse().unwrap_or_else(|err| exit!(1, "Invalid core-polling boolean: {}", err));
-    });
-    matches.opt_str("core-polling-sec").map(|secs| {
-        config.core.polling_sec = secs.parse().unwrap_or_else(|err| exit!(1, "Invalid core-polling-sec: {}", err));
-    });
-    matches.opt_str("core-ca-file").map(|path| config.core.ca_file = Some(path));
+    cli.opt_str("core-server").map(|text| config.core.server = text.parse().expect("Invalid core-server URL"));
+    cli.opt_str("core-polling").map(|polling| config.core.polling = polling.parse().expect("Invalid core-polling boolean"));
+    cli.opt_str("core-polling-sec").map(|secs| config.core.polling_sec = secs.parse().expect("Invalid core-polling-sec"));
+    cli.opt_str("core-ca-file").map(|path| config.core.ca_file = Some(path));
 
-    matches.opt_str("dbus-name").map(|name| config.dbus.name = name);
-    matches.opt_str("dbus-path").map(|path| config.dbus.path = path);
-    matches.opt_str("dbus-interface").map(|interface| config.dbus.interface = interface);
-    matches.opt_str("dbus-software-manager").map(|mgr| config.dbus.software_manager = mgr);
-    matches.opt_str("dbus-software-manager-path").map(|mgr_path| config.dbus.software_manager_path = mgr_path);
-    matches.opt_str("dbus-timeout").map(|timeout| {
-        config.dbus.timeout = timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid dbus-timeout: {}", err));
-    });
+    cli.opt_str("dbus-name").map(|name| config.dbus.name = name);
+    cli.opt_str("dbus-path").map(|path| config.dbus.path = path);
+    cli.opt_str("dbus-interface").map(|interface| config.dbus.interface = interface);
+    cli.opt_str("dbus-software-manager").map(|mgr| config.dbus.software_manager = mgr);
+    cli.opt_str("dbus-software-manager-path").map(|mgr_path| config.dbus.software_manager_path = mgr_path);
+    cli.opt_str("dbus-timeout").map(|timeout| config.dbus.timeout = timeout.parse().expect("Invalid dbus-timeout"));
 
-    matches.opt_str("device-uuid").map(|uuid| {
-        config.device.uuid = uuid.parse().unwrap_or_else(|err| exit!(1, "Invalid device-uuid: {}", err));
-    });
-    matches.opt_str("device-packages-dir").map(|path| config.device.packages_dir = path);
-    matches.opt_str("device-package-manager").map(|text| {
-        config.device.package_manager = text.parse().unwrap_or_else(|err| exit!(1, "Invalid device-package-manager: {}", err));
-    });
-    matches.opt_str("device-system-info").map(|cmd| config.device.system_info = Some(cmd));
+    cli.opt_str("device-uuid").map(|uuid| config.device.uuid = uuid.parse().expect("Invalid device-uuid"));
+    cli.opt_str("device-packages-dir").map(|path| config.device.packages_dir = path);
+    cli.opt_str("device-package-manager").map(|text| config.device.package_manager = text.parse().expect("Invalid device-package-manager"));
+    cli.opt_str("device-system-info").map(|cmd| config.device.system_info = Some(cmd));
 
-    matches.opt_str("gateway-console").map(|console| {
-        config.gateway.console = console.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-console boolean: {}", err));
-    });
-    matches.opt_str("gateway-dbus").map(|dbus| {
-        config.gateway.dbus = dbus.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-dbus boolean: {}", err));
-    });
-    matches.opt_str("gateway-http").map(|http| {
-        config.gateway.http = http.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-http boolean: {}", err));
-    });
-    matches.opt_str("gateway-rvi").map(|rvi| {
-        config.gateway.rvi = rvi.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-rvi boolean: {}", err));
-    });
-    matches.opt_str("gateway-socket").map(|socket| {
-        config.gateway.socket = socket.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-socket boolean: {}", err));
-    });
-    matches.opt_str("gateway-websocket").map(|websocket| {
-        config.gateway.websocket = websocket.parse().unwrap_or_else(|err| exit!(1, "Invalid gateway-websocket boolean: {}", err));
-    });
+    cli.opt_str("gateway-console").map(|console| config.gateway.console = console.parse().expect("Invalid gateway-console boolean"));
+    cli.opt_str("gateway-dbus").map(|dbus| config.gateway.dbus = dbus.parse().expect("Invalid gateway-dbus boolean"));
+    cli.opt_str("gateway-http").map(|http| config.gateway.http = http.parse().expect("Invalid gateway-http boolean"));
+    cli.opt_str("gateway-rvi").map(|rvi| config.gateway.rvi = rvi.parse().expect("Invalid gateway-rvi boolean"));
+    cli.opt_str("gateway-socket").map(|socket| config.gateway.socket = socket.parse().expect("Invalid gateway-socket boolean"));
+    cli.opt_str("gateway-websocket").map(|websocket| config.gateway.websocket = websocket.parse().expect("Invalid gateway-websocket boolean"));
 
-    matches.opt_str("network-http-server").map(|addr| {
-        config.network.http_server = addr.parse().unwrap_or_else(|err| exit!(1, "Invalid network-http-server: {}", err));
-    });
-    matches.opt_str("network-rvi-edge-server").map(|addr| {
-        config.network.rvi_edge_server = addr.parse().unwrap_or_else(|err| exit!(1, "Invalid network-rvi-edge-server: {}", err));
-    });
-    matches.opt_str("network-socket-commands-path").map(|path| config.network.socket_commands_path = path);
-    matches.opt_str("network-socket-events-path").map(|path| config.network.socket_events_path = path);
-    matches.opt_str("network-websocket-server").map(|server| config.network.websocket_server = server);
+    cli.opt_str("network-http-server").map(|addr| config.network.http_server = addr.parse().expect("Invalid network-http-server"));
+    cli.opt_str("network-rvi-edge-server").map(|addr| config.network.rvi_edge_server = addr.parse().expect("Invalid network-rvi-edge-server"));
+    cli.opt_str("network-socket-commands-path").map(|path| config.network.socket_commands_path = path);
+    cli.opt_str("network-socket-events-path").map(|path| config.network.socket_events_path = path);
+    cli.opt_str("network-websocket-server").map(|server| config.network.websocket_server = server);
 
-    matches.opt_str("rvi-client").map(|url| {
-        config.rvi.client = url.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-client URL: {}", err));
-    });
-    matches.opt_str("rvi-storage-dir").map(|dir| config.rvi.storage_dir = dir);
-    matches.opt_str("rvi-timeout").map(|timeout| {
-        config.rvi.timeout = Some(timeout.parse().unwrap_or_else(|err| exit!(1, "Invalid rvi-timeout: {}", err)));
-    });
+    cli.opt_str("rvi-client").map(|url| config.rvi.client = url.parse().expect("Invalid rvi-client URL"));
+    cli.opt_str("rvi-storage-dir").map(|dir| config.rvi.storage_dir = dir);
+    cli.opt_str("rvi-timeout").map(|timeout| config.rvi.timeout = Some(timeout.parse().expect("Invalid rvi-timeout")));
 
     config.tls.as_mut().map(|tls_cfg| {
-        matches.opt_str("tls-server").map(|text| {
-            tls_cfg.server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid tls-server URL: {}", err));
-        });
-        matches.opt_str("tls-ca-file").map(|path| tls_cfg.ca_file = path);
-        matches.opt_str("tls-cert-file").map(|path| tls_cfg.cert_file = path);
-        matches.opt_str("tls-pkey-file").map(|path| tls_cfg.pkey_file = path);
+        cli.opt_str("tls-server").map(|text| tls_cfg.server = text.parse().expect("Invalid tls-server URL"));
+        cli.opt_str("tls-ca-file").map(|path| tls_cfg.ca_file = path);
+        cli.opt_str("tls-cert-file").map(|path| tls_cfg.cert_file = path);
+        cli.opt_str("tls-pkey-file").map(|path| tls_cfg.pkey_file = path);
     });
 
-    matches.opt_str("uptane-director-server").map(|text| {
-        config.uptane.director_server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid uptane-director-server URL: {}", err));
-    });
-    matches.opt_str("uptane-repo-server").map(|text| {
-        config.uptane.repo_server = text.parse().unwrap_or_else(|err| exit!(1, "Invalid uptane-repo-server URL: {}", err));
-    });
-    matches.opt_str("uptane-primary-ecu-serial").map(|text| config.uptane.primary_ecu_serial = text);
-    matches.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
-    matches.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
-    matches.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
+    cli.opt_str("uptane-director-server").map(|text| config.uptane.director_server = text.parse().expect("Invalid uptane-director-server URL"));
+    cli.opt_str("uptane-repo-server").map(|text| config.uptane.repo_server = text.parse().expect("Invalid uptane-repo-server URL"));
+    cli.opt_str("uptane-primary-ecu-serial").map(|text| config.uptane.primary_ecu_serial = text);
+    cli.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
+    cli.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
+    cli.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
 
-    if matches.opt_present("print") {
+    if cli.opt_present("print") {
         exit!(0, "{:#?}", config);
     }
 
