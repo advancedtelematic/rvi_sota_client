@@ -49,7 +49,7 @@ impl Uptane {
 
         Ok(Uptane {
             config:   config.uptane.clone(),
-            deviceid: config.device.uuid.clone(),
+            deviceid: format!("{}", config.device.uuid),
             verifier: Verifier::default(),
             ecu_ver:  OstreePackage::get_ecu(&config.uptane.primary_ecu_serial)?.ecu_version(None),
             privkey:  PrivateKey { keyid: priv_id, der_key: private },

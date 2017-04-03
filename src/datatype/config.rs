@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::prelude::*;
 use std::ops::Deref;
 use toml;
+use uuid::Uuid;
 
 use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
 use http::TlsData;
@@ -38,7 +39,7 @@ impl Config {
     pub fn parse(toml: &str) -> Result<Config, Error> {
         let mut partial: PartialConfig = toml::from_str(toml)?;
         partial.backwards_compatibility()?;
-        Ok(partial.generate_config())
+        Ok(partial.into_config())
     }
 
     /// Return the initial Auth type from the current Config.
@@ -55,14 +56,14 @@ impl Config {
 
     /// Return the certificates used for TLS connections from the current Config.
     pub fn tls_data(&self) -> TlsData {
-        match self.tls {
-            Some(ref tls) => TlsData {
+        if let Some(ref tls) = self.tls {
+            TlsData {
                 ca_file:   Some(&tls.ca_file),
                 cert_file: Some(&tls.cert_file),
                 pkey_file: Some(&tls.pkey_file),
-            },
-
-            None => TlsData {
+            }
+        } else {
+            TlsData {
                 ca_file:   self.core.ca_file.as_ref().map(Deref::deref),
                 cert_file: None,
                 pkey_file: None,
@@ -86,7 +87,7 @@ struct PartialConfig {
 }
 
 impl PartialConfig {
-    fn generate_config(self) -> Config {
+    fn into_config(self) -> Config {
         Config {
             auth:    self.auth.map(|cfg| cfg.defaultify()),
             core:    self.core.map(|cfg| cfg.defaultify()).unwrap_or_default(),
@@ -263,7 +264,7 @@ impl Defaultify<DBusConfig> for ParsedDBusConfig {
 /// The [device] configuration section.
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct DeviceConfig {
-    pub uuid:            String,
+    pub uuid:            Uuid,
     pub packages_dir:    String,
     pub package_manager: PacMan,
     pub auto_download:   bool,
@@ -273,18 +274,18 @@ pub struct DeviceConfig {
 impl Default for DeviceConfig {
     fn default() -> DeviceConfig {
         DeviceConfig {
-            uuid:              "123e4567-e89b-12d3-a456-426655440000".to_string(),
-            packages_dir:      "/tmp/".to_string(),
-            package_manager:   PacMan::Off,
-            auto_download:     true,
-            system_info:       None,
+            uuid:            Uuid::default(),
+            packages_dir:    "/tmp/".into(),
+            package_manager: PacMan::Off,
+            auto_download:   true,
+            system_info:     None,
         }
     }
 }
 
 #[derive(Deserialize, Default)]
 struct ParsedDeviceConfig {
-    pub uuid:              Option<String>,
+    pub uuid:              Option<Uuid>,
     pub packages_dir:      Option<String>,
     pub package_manager:   Option<PacMan>,
     pub auto_download:     Option<bool>,
@@ -550,7 +551,7 @@ mod tests {
     const DEVICE_CONFIG: &'static str =
         r#"
         [device]
-        uuid = "123e4567-e89b-12d3-a456-426655440000"
+        uuid = "00000000-0000-0000-0000-000000000000"
         packages_dir = "/tmp/"
         package_manager = "off"
         "#;

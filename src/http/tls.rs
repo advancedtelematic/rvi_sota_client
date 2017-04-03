@@ -5,7 +5,7 @@ use openssl::pkey::PKey;
 use openssl::ssl::{Error as SslError, SslConnectorBuilder, SslConnector,
                    SslMethod, SslStream, ShutdownResult};
 use openssl::x509::X509;
-use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::fmt::{self, Debug, Formatter};
 use std::fs::File;
 use std::io::{self, Read, Write};
 use std::net::SocketAddr;
@@ -99,7 +99,7 @@ impl SslClient for TlsClient {
 }
 
 impl Debug for TlsClient {
-    fn fmt(&self, f: &mut Formatter) -> FmtResult {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.debug_tuple("TlsClient").field(&"_").finish()
     }
 }
@@ -156,7 +156,7 @@ impl TlsConnector {
 pub struct TlsStream<S>(SslStream<S>);
 
 impl<S: Debug> Debug for TlsStream<S> {
-    fn fmt(&self, fmt: &mut Formatter) -> FmtResult {
+    fn fmt(&self, fmt: &mut Formatter) -> fmt::Result {
         Debug::fmt(&self.0, fmt)
     }
 }
