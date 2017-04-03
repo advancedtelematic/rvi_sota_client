@@ -92,6 +92,7 @@ impl Deserialize for PacMan {
     }
 }
 
+
 /// Split each line by a the first space and return as list of package name and version.
 pub fn parse_packages(stdout: &str) -> Result<Vec<Package>, Error> {
     stdout.lines()
