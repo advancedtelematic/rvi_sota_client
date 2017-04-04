@@ -19,7 +19,7 @@ const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 #[derive(Serialize, Deserialize, PartialEq, Eq, Debug, Clone, Default)]
 #[allow(non_snake_case)]
 pub struct OstreePackage {
-    #[serde(skip_deserializing)]
+    #[serde(default)]
     pub ecu_serial:  String,
     pub refName:     String,
     pub commit:      String,
@@ -65,16 +65,17 @@ impl OstreePackage {
         }
     }
 
-    /// Create a new EcuVersion from the current OstreePackage.
-    pub fn ecu_version(&self, custom: Option<EcuCustom>) -> EcuVersion {
+    /// Convert the current `OstreePackage` into an `EcuVersion`.
+    pub fn into_version(self, custom: Option<EcuCustom>) -> EcuVersion {
         let mut hashes = HashMap::new();
-        hashes.insert("sha256".to_string(), self.commit.clone());
+        hashes.insert("sha256".to_string(), self.commit);
 
         EcuVersion {
             attacks_detected: "".to_string(),
-            ecu_serial: self.ecu_serial.clone(),
+            custom: custom,
+            ecu_serial: self.ecu_serial,
             installed_image: TufImage {
-                filepath: self.refName.clone(),
+                filepath: self.refName,
                 fileinfo: TufMeta {
                     length: 0,
                     hashes: hashes,
@@ -83,22 +84,21 @@ impl OstreePackage {
             },
             previous_timeserver_time: "1970-01-01T00:00:00Z".to_string(),
             timeserver_time: "1970-01-01T00:00:00Z".to_string(),
-            custom: custom
         }
     }
 
     /// Get the current OSTree package based on the last successful installation
     /// if it exists, or from running `ostree admin status` otherwise.
-    pub fn get_ecu(serial: &str) -> Result<Self, Error> {
+    pub fn get_ecu(serial: &str) -> Result<OstreePackage, Error> {
         let branch = if Path::new(NEW_PACKAGE).exists() {
             debug!("getting ostree package from `{}`", NEW_PACKAGE);
             return Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?);
         } else if Path::new(BOOT_BRANCH).exists() {
             debug!("getting ostree branch from `{}`", BOOT_BRANCH);
-            String::from_utf8(read_file(BOOT_BRANCH)?).unwrap_or_else(|_| "[error]".into())
+            String::from_utf8(read_file(BOOT_BRANCH)?).unwrap_or_else(|_| "<error>".into())
         } else {
-            debug!("unknown ostree branch");
-            "[error]".into()
+            error!("unknown ostree branch");
+            "<unknown>".into()
         };
 
         debug!("getting ostree branch with `ostree admin status`");

@@ -157,9 +157,9 @@ impl Uptane {
         Ok(self.put(client, &Service::Director, "manifest", json::to_vec(&manifest)?)?)
     }
 
-    /// Sign a new manifest for sending to the Director server.
-    pub fn sign_manifest(&self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
-        let version = OstreePackage::get_ecu(&self.config.primary_ecu_serial)?.ecu_version(custom);
+    /// Sign the primary's `EcuVersion` for sending to the Director server.
+    pub fn signed_version(&self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
+        let version = OstreePackage::get_ecu(&self.config.primary_ecu_serial)?.into_version(custom);
         TufSigned::sign(json::to_value(version)?, &self.privkey, self.sigtype)
     }
 

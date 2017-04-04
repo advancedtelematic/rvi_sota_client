@@ -290,7 +290,7 @@ impl CommandInterpreter {
             (Command::UptaneSendManifest(mut signed), CommandMode::Uptane) => {
                 let uptane = self.uptane.as_mut().expect("uptane mode");
                 if signed.is_empty() {
-                    signed.push(uptane.sign_manifest(None)?);
+                    signed.push(uptane.signed_version(None)?);
                 }
                 uptane.put_manifest(&*self.http, signed)?;
                 Event::UptaneManifestSent
@@ -300,13 +300,13 @@ impl CommandInterpreter {
                 let creds  = self.get_credentials();
                 let uptane = self.uptane.as_mut().expect("uptane mode");
                 if package.ecu_serial == self.config.uptane.primary_ecu_serial {
-                    let result = package.install(&creds)?.into_result(package.refName.clone());
+                    let result  = package.install(&creds)?.into_result(package.refName.clone());
                     let success = result.result_code.is_success();
-                    let manifest = uptane.sign_manifest(Some(EcuCustom { operation_result: result }))?;
+                    let version = uptane.signed_version(Some(EcuCustom { operation_result: result }))?;
                     if success {
-                        Event::UptaneInstallComplete(manifest)
+                        Event::UptaneInstallComplete(version)
                     } else {
-                        Event::UptaneInstallFailed(manifest)
+                        Event::UptaneInstallFailed(version)
                     }
                 } else {
                     Event::UptaneInstallNeeded(package)
