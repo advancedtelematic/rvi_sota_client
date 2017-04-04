@@ -6,9 +6,9 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 
-use datatype::{Config, EcuCustom, EcuManifests, EcuVersion, Error, InstallResult,
-               PrivateKey, OstreePackage, RoleData, RoleName, SigType, TufMeta,
-               TufSigned, UptaneConfig, Url, Verified, Verifier};
+use datatype::{Config, EcuCustom, EcuManifests, Error, PrivateKey, OstreePackage,
+               RoleData, RoleName, SigType, TufMeta, TufSigned, UptaneConfig, Url,
+               Verified, Verifier};
 use http::{Client, Response};
 
 
@@ -33,7 +33,6 @@ pub struct Uptane {
     pub config:   UptaneConfig,
     pub deviceid: String,
     pub verifier: Verifier,
-    pub ecu_ver:  EcuVersion,
     pub privkey:  PrivateKey,
     pub sigtype:  SigType,
     pub persist:  bool,
@@ -51,7 +50,6 @@ impl Uptane {
             config:   config.uptane.clone(),
             deviceid: format!("{}", config.device.uuid),
             verifier: Verifier::default(),
-            ecu_ver:  OstreePackage::get_ecu(&config.uptane.primary_ecu_serial)?.ecu_version(None),
             privkey:  PrivateKey { keyid: priv_id, der_key: private },
             sigtype:  SigType::RsaSsaPss,
             persist:  true,
@@ -149,20 +147,19 @@ impl Uptane {
         self.verify_data(role, &buf)
     }
 
-    /// Send a list of signed manifests to the Director server.
+    /// Send a signed manifest with a list of signed objects to the Director server.
     pub fn put_manifest(&mut self, client: &Client, signed: Vec<TufSigned>) -> Result<(), Error> {
         let ecus = EcuManifests {
-            primary_ecu_serial:   self.ecu_ver.ecu_serial.clone(),
+            primary_ecu_serial:   self.config.primary_ecu_serial.clone(),
             ecu_version_manifest: signed
         };
         let manifest = TufSigned::sign(json::to_value(ecus)?, &self.privkey, self.sigtype)?;
         Ok(self.put(client, &Service::Director, "manifest", json::to_vec(&manifest)?)?)
     }
 
-    /// Sign a manifest with an optional installation result outcome.
-    pub fn sign_manifest(&self, result: Option<InstallResult>) -> Result<TufSigned, Error> {
-        let mut version = self.ecu_ver.clone();
-        result.map(|result| version.custom = Some(EcuCustom { operation_result: result }));
+    /// Sign a new manifest for sending to the Director server.
+    pub fn sign_manifest(&self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
+        let version = OstreePackage::get_ecu(&self.config.primary_ecu_serial)?.ecu_version(custom);
         TufSigned::sign(json::to_value(version)?, &self.privkey, self.sigtype)
     }
 
@@ -227,7 +224,6 @@ mod tests {
             },
             deviceid: "uptane-test".into(),
             verifier: Verifier::default(),
-            ecu_ver: OstreePackage::default().ecu_version(None),
             privkey: PrivateKey {
                 keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
                 der_key: pem::parse(RSA_2048_PRIV).unwrap().contents

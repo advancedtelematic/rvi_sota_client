@@ -3,7 +3,7 @@ use std::process::{self, Command as ShellCommand};
 use std::sync::{Arc, Mutex};
 
 use authenticate::oauth2;
-use datatype::{Auth, Command, Config, Error, Event, InstallCode, InstallResult,
+use datatype::{Auth, Command, Config, EcuCustom, Error, Event, InstallCode, InstallResult,
                RoleName, RequestStatus, Url};
 use gateway::Interpret;
 use http::{AuthClient, Client};
@@ -85,7 +85,7 @@ impl Interpreter<Event, Command> for EventInterpreter {
                 for request in requests {
                     let id = request.requestId;
                     match request.status {
-                        RequestStatus::Pending  if self.auto_dl => ctx.send(Command::StartDownload(id)),
+                        RequestStatus::Pending if self.auto_dl => ctx.send(Command::StartDownload(id)),
                         RequestStatus::InFlight if self.pacman == PacMan::Off => (),
                         RequestStatus::InFlight if self.pacman.is_installed(&request.packageId) => {
                             let result = InstallResult::new(format!("{}", id), InstallCode::OK, "<auto generated>".to_string());
@@ -182,7 +182,7 @@ impl CommandInterpreter {
             (Command::Authenticate(creds @ Auth::Credentials(_)), _) => {
                 let server = self.config.auth.as_ref().expect("auth config").server.join("/token");
                 if self.http.is_testing() {
-                    self.auth = Auth::Token(oauth2(server, self.http.as_ref())?);
+                    self.auth = Auth::Token(oauth2(server, &*self.http)?);
                 } else {
                     self.auth = Auth::Token(oauth2(server, &AuthClient::from(creds))?);
                     self.http = Box::new(AuthClient::from(self.auth.clone()));
@@ -210,7 +210,7 @@ impl CommandInterpreter {
             }
 
             (Command::GetUpdateRequests, _) => {
-                let mut sota = Sota::new(&self.config, self.http.as_ref());
+                let mut sota = Sota::new(&self.config, &*self.http);
                 let mut updates = sota.get_update_requests()?;
                 if updates.is_empty() {
                     Event::NoUpdateRequests
@@ -230,7 +230,7 @@ impl CommandInterpreter {
             }
 
             (Command::SendInstalledPackages(packages), _) => {
-                let mut sota = Sota::new(&self.config, self.http.as_ref());
+                let mut sota = Sota::new(&self.config, &*self.http);
                 sota.send_installed_packages(&packages)?;
                 Event::InstalledPackagesSent
             }
@@ -242,7 +242,7 @@ impl CommandInterpreter {
             }
 
             (Command::SendSystemInfo, _) => {
-                let mut sota = Sota::new(&self.config, self.http.as_ref());
+                let mut sota = Sota::new(&self.config, &*self.http);
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
                 sota.send_system_info(system_info(cmd)?.into_bytes())?;
                 Event::SystemInfoSent
@@ -255,7 +255,7 @@ impl CommandInterpreter {
             }
 
             (Command::SendInstallReport(report), _) => {
-                let mut sota = Sota::new(&self.config, self.http.as_ref());
+                let mut sota = Sota::new(&self.config, &*self.http);
                 sota.send_install_report(&report)?;
                 Event::InstallReportSent(report)
             }
@@ -267,7 +267,7 @@ impl CommandInterpreter {
             }
 
             (Command::StartDownload(id), _) => {
-                let mut sota = Sota::new(&self.config, self.http.as_ref());
+                let mut sota = Sota::new(&self.config, &*self.http);
                 etx.send(Event::DownloadingUpdate(id));
                 sota.download_update(id)
                     .map(Event::DownloadComplete)
@@ -275,7 +275,7 @@ impl CommandInterpreter {
             }
 
             (Command::StartInstall(id), CommandMode::Sota) => {
-                let mut sota = Sota::new(&self.config, self.http.as_ref());
+                let mut sota = Sota::new(&self.config, &*self.http);
                 etx.send(Event::InstallingUpdate(id));
                 let result = sota.install_update(&id, &self.get_credentials())?;
                 if result.result_code.is_success() {
@@ -299,13 +299,14 @@ impl CommandInterpreter {
             (Command::UptaneStartInstall(package), CommandMode::Uptane) => {
                 let creds  = self.get_credentials();
                 let uptane = self.uptane.as_mut().expect("uptane mode");
-                if package.ecu_serial == uptane.ecu_ver.ecu_serial {
-                    let outcome = package.install(&creds)?;
-                    let result  = outcome.into_result(package.refName.clone());
-                    if result.result_code.is_success() {
-                        Event::UptaneInstallComplete(uptane.sign_manifest(Some(result))?)
+                if package.ecu_serial == self.config.uptane.primary_ecu_serial {
+                    let result = package.install(&creds)?.into_result(package.refName.clone());
+                    let success = result.result_code.is_success();
+                    let manifest = uptane.sign_manifest(Some(EcuCustom { operation_result: result }))?;
+                    if success {
+                        Event::UptaneInstallComplete(manifest)
                     } else {
-                        Event::UptaneInstallFailed(uptane.sign_manifest(Some(result))?)
+                        Event::UptaneInstallFailed(manifest)
                     }
                 } else {
                     Event::UptaneInstallNeeded(package)
