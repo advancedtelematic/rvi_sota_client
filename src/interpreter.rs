@@ -28,6 +28,7 @@ pub trait Interpreter<I, O> {
 
 /// The `EventInterpreter` listens for `Event`s and may respond `Command`s.
 pub struct EventInterpreter {
+    pub initial: bool,
     pub loop_tx: Sender<Event>,
     pub auth:    Auth,
     pub pacman:  PacMan,
@@ -41,10 +42,11 @@ impl Interpreter<Event, Command> for EventInterpreter {
         info!("EventInterpreter received: {}", event);
 
         match event {
-            Event::Authenticated => {
+            Event::Authenticated if self.initial => {
                 self.loop_tx.send(Event::InstalledPackagesNeeded);
                 self.loop_tx.send(Event::SystemInfoNeeded);
                 self.loop_tx.send(Event::UptaneManifestNeeded);
+                self.initial = false;
             }
 
             Event::DownloadComplete(ref dl) if self.pacman != PacMan::Off => {
@@ -142,8 +144,8 @@ pub enum CommandMode {
 /// messages, broadcasting `Event`s globally and (optionally) sending the final
 /// outcome `Event` to the `Interpret` response channel.
 pub struct CommandInterpreter {
-    pub config: Config,
     pub auth:   Auth,
+    pub config: Config,
     pub http:   Box<Client>,
     pub rvi:    Option<Services>,
     pub uptane: Option<Uptane>,
@@ -152,27 +154,6 @@ pub struct CommandInterpreter {
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
         info!("CommandInterpreter received: {}", &interpret.cmd);
-        let outcome = match self.auth {
-            Auth::Credentials(_) => self.authenticate(interpret.cmd),
-
-            Auth::None        |
-            Auth::Token(_)    |
-            Auth::Certificate => self.process_command(interpret.cmd, etx)
-        };
-
-        let event = match outcome {
-            Ok(ev) => ev,
-            Err(Error::HttpAuth(_)) => Event::NotAuthenticated,
-            Err(err) => Event::Error(format!("{}", err))
-        };
-        etx.send(event.clone());
-        interpret.etx.map(|tx| tx.lock().unwrap().send(event));
-    }
-}
-
-impl CommandInterpreter {
-    fn process_command(&mut self, cmd: Command, etx: &Sender<Event>) -> Result<Event, Error> {
-        let mut sota = Sota::new(&self.config, self.http.as_ref());
         let mode = if self.uptane.is_some() {
             CommandMode::Uptane
         } else if self.rvi.is_some() {
@@ -181,8 +162,41 @@ impl CommandInterpreter {
             CommandMode::Sota
         };
 
+        let event = match self.process_command(interpret.cmd, mode, etx) {
+            Ok(ev) => ev,
+            Err(Error::HttpAuth(resp)) => {
+                error!("{}", resp);
+                Event::NotAuthenticated
+            }
+            Err(err) => Event::Error(format!("{}", err))
+        };
+
+        etx.send(event.clone());
+        interpret.etx.map(|tx| tx.lock().unwrap().send(event));
+    }
+}
+
+impl CommandInterpreter {
+    fn process_command(&mut self, cmd: Command, mode: CommandMode, etx: &Sender<Event>) -> Result<Event, Error> {
         let event = match (cmd, mode) {
-            (Command::Authenticate(_), _) => Event::AlreadyAuthenticated,
+            (Command::Authenticate(creds @ Auth::Credentials(_)), _) => {
+                let server = self.config.auth.as_ref().expect("auth config").server.join("/token");
+                if self.http.is_testing() {
+                    self.auth = Auth::Token(oauth2(server, self.http.as_ref())?);
+                } else {
+                    self.auth = Auth::Token(oauth2(server, &AuthClient::from(creds))?);
+                    self.http = Box::new(AuthClient::from(self.auth.clone()));
+                }
+                Event::Authenticated
+            }
+
+            (Command::Authenticate(auth), _) => {
+                self.auth = auth;
+                if ! self.http.is_testing() {
+                    self.http = Box::new(AuthClient::from(self.auth.clone()));
+                }
+                Event::Authenticated
+            }
 
             (Command::GetUpdateRequests, CommandMode::Uptane) => {
                 let uptane = self.uptane.as_mut().expect("uptane mode");
@@ -196,6 +210,7 @@ impl CommandInterpreter {
             }
 
             (Command::GetUpdateRequests, _) => {
+                let mut sota = Sota::new(&self.config, self.http.as_ref());
                 let mut updates = sota.get_update_requests()?;
                 if updates.is_empty() {
                     Event::NoUpdateRequests
@@ -215,6 +230,7 @@ impl CommandInterpreter {
             }
 
             (Command::SendInstalledPackages(packages), _) => {
+                let mut sota = Sota::new(&self.config, self.http.as_ref());
                 sota.send_installed_packages(&packages)?;
                 Event::InstalledPackagesSent
             }
@@ -226,6 +242,7 @@ impl CommandInterpreter {
             }
 
             (Command::SendSystemInfo, _) => {
+                let mut sota = Sota::new(&self.config, self.http.as_ref());
                 let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
                 sota.send_system_info(system_info(cmd)?.into_bytes())?;
                 Event::SystemInfoSent
@@ -238,6 +255,7 @@ impl CommandInterpreter {
             }
 
             (Command::SendInstallReport(report), _) => {
+                let mut sota = Sota::new(&self.config, self.http.as_ref());
                 sota.send_install_report(&report)?;
                 Event::InstallReportSent(report)
             }
@@ -249,13 +267,15 @@ impl CommandInterpreter {
             }
 
             (Command::StartDownload(id), _) => {
+                let mut sota = Sota::new(&self.config, self.http.as_ref());
                 etx.send(Event::DownloadingUpdate(id));
                 sota.download_update(id)
                     .map(Event::DownloadComplete)
-                    .unwrap_or_else(|err| Event::DownloadFailed(id, format!("{}", err)))
+                    .unwrap_or_else(|err| Event::DownloadFailed(id, err.to_string()))
             }
 
             (Command::StartInstall(id), CommandMode::Sota) => {
+                let mut sota = Sota::new(&self.config, self.http.as_ref());
                 etx.send(Event::InstallingUpdate(id));
                 let result = sota.install_update(&id, &self.get_credentials())?;
                 if result.result_code.is_success() {
@@ -297,31 +317,6 @@ impl CommandInterpreter {
             (Command::UptaneInstallOutcome(_), _)  => unreachable!("Command::UptaneInstallOutcome expects CommandMode::Uptane"),
             (Command::UptaneSendManifest(_), _)    => unreachable!("Command::UptaneSendManifest expects CommandMode::Uptane"),
             (Command::UptaneStartInstall(_), _)    => unreachable!("Command::UptaneStartInstall expects CommandMode::Uptane"),
-        };
-
-        Ok(event)
-    }
-
-    fn authenticate(&mut self, cmd: Command) -> Result<Event, Error> {
-        let event = match cmd {
-            Command::Authenticate(Auth::Credentials(creds)) => {
-                let server = self.config.auth.as_ref().expect("auth config").server.join("/token");
-                if self.http.is_testing() {
-                    self.auth = Auth::Token(oauth2(server, self.http.as_ref())?);
-                } else {
-                    self.auth = Auth::Token(oauth2(server, &AuthClient::from(Auth::Credentials(creds)))?);
-                    self.http = Box::new(AuthClient::from(self.auth.clone()));
-                }
-                Event::Authenticated
-            }
-
-            Command::Authenticate(Auth::None)        |
-            Command::Authenticate(Auth::Token(_))    |
-            Command::Authenticate(Auth::Certificate) => Event::Authenticated,
-
-            Command::Shutdown => process::exit(0),
-
-            _ => Event::NotAuthenticated
         };
 
         Ok(event)
@@ -390,13 +385,6 @@ mod tests {
         InstallResult::new(format!("{}", Uuid::default()), code, "stdout: \nstderr: \n".into())
     }
 
-
-    #[test]
-    fn already_authenticated() {
-        let (ctx, erx) = start_interpreter(new_interpreter(vec![], true));
-        ctx.send(Command::Authenticate(Auth::None));
-        assert_rx(&erx, &[Event::AlreadyAuthenticated]);
-    }
 
     #[test]
     fn download_updates() {

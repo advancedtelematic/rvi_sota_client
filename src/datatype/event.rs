@@ -2,22 +2,19 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
-use datatype::{DownloadComplete, InstallReport, InstallResult, OstreePackage, Package,
-               TufMeta, TufSigned, UpdateAvailable, UpdateRequest};
+use datatype::{DownloadComplete, InstallReport, InstallResult, OstreePackage,
+               Package, TufMeta, TufSigned, UpdateAvailable, UpdateRequest};
 
 
 /// System-wide events that are broadcast to all interested parties.
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 pub enum Event {
-    /// General error event with a printable representation for debugging.
-    Error(String),
-
     /// Authentication was successful.
     Authenticated,
     /// An operation failed because we are not currently authenticated.
     NotAuthenticated,
-    /// Nothing was done as we are already authenticated.
-    AlreadyAuthenticated,
+    /// General error event with a printable representation for debugging.
+    Error(String),
 
     /// A notification from Core of pending or in-flight updates.
     UpdatesReceived(Vec<UpdateRequest>),

@@ -46,7 +46,9 @@ fn main() {
     let (etx, erx) = chan::async::<Event>();
     let (ctx, crx) = chan::async::<Command>();
     let (itx, irx) = chan::async::<Interpret>();
+
     let mut broadcast = Broadcast::new(erx);
+    etx.send(Event::NotAuthenticated);
 
     crossbeam::scope(|scope| {
         let signals = chan_signal::notify(&[Signal::INT, Signal::TERM]);
@@ -123,6 +125,7 @@ fn main() {
         let ei_sys  = config.device.system_info.clone();
         let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub")));
         scope.spawn(move || EventInterpreter {
+            initial: true,
             loop_tx: ei_loop,
             auth:    ei_auth,
             pacman:  ei_mgr,
