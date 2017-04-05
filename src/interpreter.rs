@@ -1,5 +1,7 @@
 use chan::{Sender, Receiver};
+use std::cell::RefCell;
 use std::process::{self, Command as ShellCommand};
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use authenticate::oauth2;
@@ -133,36 +135,27 @@ impl Interpreter<Command, Interpret> for IntermediateInterpreter {
 
 
 /// The `CommandMode` toggles the `Command` handling procedure.
-#[derive(Copy, Clone)]
+#[derive(Clone)]
 pub enum CommandMode {
     Sota,
-    Rvi,
-    Uptane,
+    Rvi(Rc<RefCell<Services>>),
+    Uptane(Rc<RefCell<Uptane>>),
 }
 
 /// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
 /// messages, broadcasting `Event`s globally and (optionally) sending the final
 /// outcome `Event` to the `Interpret` response channel.
 pub struct CommandInterpreter {
+    pub mode:   CommandMode,
     pub auth:   Auth,
     pub config: Config,
     pub http:   Box<Client>,
-    pub rvi:    Option<Services>,
-    pub uptane: Option<Uptane>,
 }
 
 impl Interpreter<Interpret, Event> for CommandInterpreter {
     fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
         info!("CommandInterpreter received: {}", &interpret.cmd);
-        let mode = if self.uptane.is_some() {
-            CommandMode::Uptane
-        } else if self.rvi.is_some() {
-            CommandMode::Rvi
-        } else {
-            CommandMode::Sota
-        };
-
-        let event = match self.process_command(interpret.cmd, mode, etx) {
+        let event = match self.process_command(interpret.cmd, etx) {
             Ok(ev) => ev,
             Err(Error::HttpAuth(resp)) => {
                 error!("{}", resp);
@@ -177,8 +170,8 @@ impl Interpreter<Interpret, Event> for CommandInterpreter {
 }
 
 impl CommandInterpreter {
-    fn process_command(&mut self, cmd: Command, mode: CommandMode, etx: &Sender<Event>) -> Result<Event, Error> {
-        let event = match (cmd, mode) {
+    fn process_command(&mut self, cmd: Command, etx: &Sender<Event>) -> Result<Event, Error> {
+        let event = match (cmd, self.mode.clone()) {
             (Command::Authenticate(creds @ Auth::Credentials(_)), _) => {
                 let server = self.config.auth.as_ref().expect("auth config").server.join("/token");
                 if self.http.is_testing() {
@@ -198,8 +191,8 @@ impl CommandInterpreter {
                 Event::Authenticated
             }
 
-            (Command::GetUpdateRequests, CommandMode::Uptane) => {
-                let uptane = self.uptane.as_mut().expect("uptane mode");
+            (Command::GetUpdateRequests, CommandMode::Uptane(uptane)) => {
+                let mut uptane = uptane.borrow_mut();
                 let timestamp = uptane.get_director(&*self.http, RoleName::Timestamp)?;
                 if timestamp.is_new() {
                     let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
@@ -235,9 +228,9 @@ impl CommandInterpreter {
                 Event::InstalledPackagesSent
             }
 
-            (Command::SendInstalledSoftware(sw), CommandMode::Rvi) => {
-                let rvi = self.rvi.as_ref().expect("rvi mode");
-                let _ = rvi.remote.lock().unwrap().send_installed_software(sw);
+            (Command::SendInstalledSoftware(sw), CommandMode::Rvi(services)) => {
+                let services = services.borrow_mut();
+                services.remote.lock().unwrap().send_installed_software(sw).map_err(Error::Rvi)?;
                 Event::InstalledSoftwareSent
             }
 
@@ -248,9 +241,9 @@ impl CommandInterpreter {
                 Event::SystemInfoSent
             }
 
-            (Command::SendInstallReport(report), CommandMode::Rvi) => {
-                let rvi = self.rvi.as_ref().expect("rvi mode");
-                let _ = rvi.remote.lock().unwrap().send_update_report(report.clone());
+            (Command::SendInstallReport(report), CommandMode::Rvi(services)) => {
+                let services = services.borrow_mut();
+                services.remote.lock().unwrap().send_update_report(report.clone()).map_err(Error::Rvi)?;
                 Event::InstallReportSent(report)
             }
 
@@ -260,9 +253,9 @@ impl CommandInterpreter {
                 Event::InstallReportSent(report)
             }
 
-            (Command::StartDownload(id), CommandMode::Rvi) => {
-                let rvi = self.rvi.as_ref().expect("rvi mode");
-                let _ = rvi.remote.lock().unwrap().send_download_started(id);
+            (Command::StartDownload(id), CommandMode::Rvi(services)) => {
+                let services = services.borrow_mut();
+                services.remote.lock().unwrap().send_download_started(id).map_err(Error::Rvi)?;
                 Event::DownloadingUpdate(id)
             }
 
@@ -287,8 +280,8 @@ impl CommandInterpreter {
 
             (Command::Shutdown, _) => process::exit(0),
 
-            (Command::UptaneSendManifest(mut signed), CommandMode::Uptane) => {
-                let uptane = self.uptane.as_mut().expect("uptane mode");
+            (Command::UptaneSendManifest(mut signed), CommandMode::Uptane(uptane)) => {
+                let mut uptane = uptane.borrow_mut();
                 if signed.is_empty() {
                     signed.push(uptane.signed_version(None)?);
                 }
@@ -296,11 +289,11 @@ impl CommandInterpreter {
                 Event::UptaneManifestSent
             }
 
-            (Command::UptaneStartInstall(package), CommandMode::Uptane) => {
-                let creds  = self.get_credentials();
-                let uptane = self.uptane.as_mut().expect("uptane mode");
+            (Command::UptaneStartInstall(package), CommandMode::Uptane(uptane)) => {
+                let uptane = uptane.borrow_mut();
                 if package.ecu_serial == self.config.uptane.primary_ecu_serial {
-                    let result  = package.install(&creds)?.into_result(package.refName.clone());
+                    let outcome = package.install(&self.get_credentials())?;
+                    let result  = outcome.into_result(package.refName.clone());
                     let success = result.result_code.is_success();
                     let version = uptane.signed_version(Some(EcuCustom { operation_result: result }))?;
                     if success {
@@ -360,25 +353,24 @@ mod tests {
     use pacman::test::assert_rx;
 
 
-    fn new_interpreter(replies: Vec<String>, succeeds: bool) -> CommandInterpreter {
-        let mut config = Config::default();
-        config.device.package_manager = PacMan::new_tpm(succeeds);
-
-        CommandInterpreter {
-            config: config,
-            auth:   Auth::None,
-            http:   Box::new(TestClient::from(replies)),
-            rvi:    None,
-            uptane: None,
-        }
-    }
-
-    fn start_interpreter(mut ci: CommandInterpreter) -> (Sender<Command>, Receiver<Event>) {
+    fn new_interpreter(replies: Vec<String>, succeeds: bool) -> (Sender<Command>, Receiver<Event>) {
         let (etx, erx) = chan::sync::<Event>(0);
         let (ctx, crx) = chan::sync::<Command>(0);
-        thread::spawn(move || while let Some(cmd) = crx.recv() {
-            ci.interpret(Interpret { cmd: cmd, etx: None }, &etx);
+
+        thread::spawn(move || {
+            let mut config = Config::default();
+            config.device.package_manager = PacMan::new_tpm(succeeds);
+            let mut ci = CommandInterpreter {
+                mode:   CommandMode::Sota,
+                config: config,
+                auth:   Auth::None,
+                http:   Box::new(TestClient::from(replies)),
+            };
+            while let Some(cmd) = crx.recv() {
+                ci.interpret(Interpret { cmd: cmd, etx: None }, &etx);
+            }
         });
+
         (ctx, erx)
     }
 
@@ -389,7 +381,7 @@ mod tests {
 
     #[test]
     fn download_updates() {
-        let (ctx, erx) = start_interpreter(new_interpreter(vec!["[]".into(); 10], true));
+        let (ctx, erx) = new_interpreter(vec!["[]".into(); 10], true);
         ctx.send(Command::StartDownload(Uuid::default()));
         assert_rx(&erx, &[
             Event::DownloadingUpdate(Uuid::default()),
@@ -403,7 +395,7 @@ mod tests {
 
     #[test]
     fn install_update_success() {
-        let (ctx, erx) = start_interpreter(new_interpreter(vec!["[]".into(); 10], true));
+        let (ctx, erx) = new_interpreter(vec!["[]".into(); 10], true);
         ctx.send(Command::StartInstall(Uuid::default()));
         assert_rx(&erx, &[
             Event::InstallingUpdate(Uuid::default()),
@@ -413,7 +405,7 @@ mod tests {
 
     #[test]
     fn install_update_failed() {
-        let (ctx, erx) = start_interpreter(new_interpreter(vec!["[]".into(); 10], false));
+        let (ctx, erx) = new_interpreter(vec!["[]".into(); 10], false);
         ctx.send(Command::StartInstall(Uuid::default()));
         assert_rx(&erx, &[
             Event::InstallingUpdate(Uuid::default()),

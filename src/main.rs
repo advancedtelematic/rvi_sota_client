@@ -14,6 +14,8 @@ use env_logger::LogBuilder;
 use getopts::Options;
 use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -21,7 +23,8 @@ use sota::datatype::{Command, Config, Event};
 use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
 use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, TlsClient};
-use sota::interpreter::{CommandInterpreter, EventInterpreter, IntermediateInterpreter, Interpreter};
+use sota::interpreter::{CommandMode, CommandInterpreter, EventInterpreter,
+                        IntermediateInterpreter, Interpreter};
 use sota::pacman::PacMan;
 use sota::rvi::{Edge, Services};
 use sota::uptane::{Service, Uptane};
@@ -135,13 +138,17 @@ fn main() {
         }.run(ei_sub, ei_ctx));
 
         scope.spawn(move || IntermediateInterpreter::default().run(crx, itx));
-
         scope.spawn(move || CommandInterpreter {
+            mode: if let Some(uptane) = uptane {
+                CommandMode::Uptane(Rc::new(RefCell::new(uptane)))
+            } else if let Some(services) = services {
+                CommandMode::Rvi(Rc::new(RefCell::new(services)))
+            } else {
+                CommandMode::Sota
+            },
             config: config,
             auth:   auth,
             http:   Box::new(http),
-            rvi:    services,
-            uptane: uptane,
         }.run(irx, etx));
 
         scope.spawn(move || broadcast.start());
