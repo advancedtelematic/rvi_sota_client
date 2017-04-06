@@ -8,8 +8,10 @@ IMAGE_SOTA := advancedtelematic/sota-client:latest
 IMAGE_FPM  := advancedtelematic/fpm:latest
 IMAGE_TEST := advancedtelematic/sota-client-test:latest
 
-# target client binary format
+# client binary target triple
 TARGET := x86_64-unknown-linux-gnu
+# client binary features
+FEATURES := default
 
 DOCKER_RUN := \
 	@docker run --rm \
@@ -30,40 +32,34 @@ DOCKER_RUN := \
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
 
-.PHONY: help new old clean test doc doc-dev client client-dev image deb rpm sota-version package-version
+.PHONY: help start generate test test doc client image test deb rpm sota-version package-version
 .DEFAULT_GOAL := help
 
 help:
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "\033[36m%16s\033[0m : %s\n", $$1, $$2}' $(MAKEFILE_LIST)
 
-new: image ## Generate a new config then run the client.
-	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
-
-old: image ## Use a local `sota.toml` config file to run the client.
+start: image ## Use a local `sota.toml` config file to run the client.
 	$(DOCKER_RUN) --net=host --volume sota.toml:/usr/local/etc/sota.toml $(IMAGE_SOTA)
 
+generate: image ## Generate a new config then run the client.
+	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
+
 test: ## Run all unit tests.
-	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET)
+	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET) --features=$(FEATURES)
 
 doc: ## Generate documentation for the sota crate.
-	$(CARGO) doc --lib --no-deps --release
+	$(CARGO) doc --lib --no-deps --release --features=$(FEATURES)
 
-doc-dev: ## Generate development documentation for the sota crate.
-	$(CARGO) doc --lib
+client: src/ ## Compile a new release build of the client.
+	$(CARGO) build --release --target=$(TARGET) --features=$(FEATURES)
+	@cp target/$(TARGET)/release/sota_client run/
+
+image: client ## Build a Docker image for running the client.
+	@docker build --tag advancedtelematic/sota-client run
 
 clean: ## Remove all compiled libraries, builds and temporary files.
 	$(CARGO) clean
 	@rm -f run/sota_client {,run/}*.{deb,rpm} /tmp/sota-tpm*
-
-client: src/ ## Compile a new release build of the client.
-	$(CARGO) build --release --target=$(TARGET)
-	@cp target/$(TARGET)/release/sota_client run/
-
-client-dev: ## Compile a new development build of the client
-	$(CARGO) build --target=$(TARGET)
-
-image: client ## Build a Docker image for running the client.
-	@docker build --tag advancedtelematic/sota-client run
 
 deb: client ## Create a new DEB package of the client.
 	$(DOCKER_RUN) $(IMAGE_FPM) run/make_package.sh deb

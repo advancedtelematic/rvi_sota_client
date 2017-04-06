@@ -1,13 +1,19 @@
 pub mod console;
+#[cfg(feature = "d-bus")]
 pub mod dbus;
 pub mod http;
+#[cfg(feature = "socket")]
 pub mod socket;
+#[cfg(feature = "websocket")]
 pub mod websocket;
 
 pub use self::console::Console;
+#[cfg(feature = "d-bus")]
 pub use self::dbus::DBus;
 pub use self::http::Http;
+#[cfg(feature = "socket")]
 pub use self::socket::Socket;
+#[cfg(feature = "websocket")]
 pub use self::websocket::Websocket;
 
 

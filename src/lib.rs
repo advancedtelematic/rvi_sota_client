@@ -1,23 +1,30 @@
-#[macro_use] extern crate nom; // use before log to avoid error!() macro conflict
+#[macro_use]
+extern crate nom; // use before log to avoid error!() macro conflict
 
 extern crate base64;
 extern crate chan;
 extern crate chrono;
 extern crate crossbeam;
 extern crate crypto;
+#[cfg(feature = "d-bus")]
 extern crate dbus;
 extern crate hyper;
 extern crate openssl;
 extern crate pem;
-#[macro_use] extern crate lazy_static;
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate lazy_static;
+#[macro_use]
+extern crate log;
 extern crate ring;
 extern crate serde;
-#[macro_use] extern crate serde_derive;
+#[macro_use]
+extern crate serde_derive;
 extern crate serde_json;
 extern crate time;
 extern crate toml;
+#[cfg(feature = "websocket")]
 extern crate tungstenite;
+#[cfg(feature = "socket")]
 extern crate unix_socket;
 extern crate untrusted;
 extern crate url;
