@@ -20,7 +20,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sota::datatype::{Command, Config, Event};
-use sota::gateway::{Console, DBus, Gateway, Interpret, Http, Socket, Websocket};
+use sota::gateway::{Console, Gateway, Interpret, Http};
+#[cfg(feature = "d-bus")]
+use sota::gateway::DBus;
+#[cfg(feature = "socket")]
+use sota::gateway::Socket;
+#[cfg(feature = "websocket")]
+use sota::gateway::Websocket;
 use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, TlsClient};
 use sota::interpreter::{CommandMode, CommandInterpreter, EventInterpreter,
@@ -70,10 +76,14 @@ fn main() {
         }
 
         if config.gateway.dbus {
-            let dbus_itx = itx.clone();
-            let dbus_sub = broadcast.subscribe();
-            let mut dbus = DBus { cfg: config.dbus.clone() };
-            scope.spawn(move || dbus.start(dbus_itx, dbus_sub));
+            #[cfg(feature = "d-bus")] {
+                let dbus_itx = itx.clone();
+                let dbus_sub = broadcast.subscribe();
+                let mut dbus = DBus { cfg: config.dbus.clone() };
+                scope.spawn(move || dbus.start(dbus_itx, dbus_sub));
+            }
+            #[cfg(not(feature = "d-bus"))]
+            exit!(2, "{}", "binary not compiled with 'd-bus' feature but dbus gateway enabled");
         }
 
         if config.gateway.http {
@@ -94,20 +104,28 @@ fn main() {
         };
 
         if config.gateway.socket {
-            let socket_itx = itx.clone();
-            let socket_sub = broadcast.subscribe();
-            let mut socket = Socket {
-                cmd_sock: config.network.socket_commands_path.clone(),
-                ev_sock:  config.network.socket_events_path.clone()
-            };
-            scope.spawn(move || socket.start(socket_itx, socket_sub));
+            #[cfg(feature = "socket")] {
+                let socket_itx = itx.clone();
+                let socket_sub = broadcast.subscribe();
+                let mut socket = Socket {
+                    cmd_sock: config.network.socket_commands_path.clone(),
+                    ev_sock:  config.network.socket_events_path.clone()
+                };
+                scope.spawn(move || socket.start(socket_itx, socket_sub));
+            }
+            #[cfg(not(feature = "socket"))]
+            exit!(2, "{}", "binary not compiled with 'socket' feature but socket gateway enabled");
         }
 
         if config.gateway.websocket {
-            let ws_itx = itx.clone();
-            let ws_sub = broadcast.subscribe();
-            let mut ws = Websocket { server: config.network.websocket_server.clone() };
-            scope.spawn(move || ws.start(ws_itx, ws_sub));
+            #[cfg(feature = "websocket")] {
+                let ws_itx = itx.clone();
+                let ws_sub = broadcast.subscribe();
+                let mut ws = Websocket { server: config.network.websocket_server.clone() };
+                scope.spawn(move || ws.start(ws_itx, ws_sub));
+            }
+            #[cfg(not(feature = "websocket"))]
+            exit!(2, "{}", "binary not compiled with 'websocket' feature but websocket gateway enabled");
         }
 
         let uptane = if let PacMan::Uptane = config.device.package_manager {
