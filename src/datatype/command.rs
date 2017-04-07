@@ -113,7 +113,7 @@ named!(arguments <&[u8], Vec<&str> >, chain!(
     )),
     move || {
         args.into_iter()
-            .filter(|arg| arg.len() > 0)
+            .filter(|arg| !arg.is_empty())
             .collect()
     }
 ));

@@ -63,51 +63,51 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
-            Error::ChronoParse(ref e)   => format!("DateTime parse error: {}", e.clone()),
-            Error::Client(ref s)        => format!("Http client error: {}", s.clone()),
-            Error::Command(ref e)       => format!("Unknown Command: {}", e.clone()),
-            Error::Config(ref s)        => format!("Bad Config: {}", s.clone()),
-            Error::FromUtf8(ref e)      => format!("From utf8 error: {}", e.clone()),
-            Error::Http(ref r)          => format!("HTTP client error: {}", r.clone()),
-            Error::HttpAuth(ref r)      => format!("HTTP authorization error: {}", r.clone()),
-            Error::Hyper(ref e)         => format!("Hyper error: {}", e.clone()),
-            Error::Io(ref e)            => format!("IO error: {}", e.clone()),
-            Error::Openssl(ref e)       => format!("OpenSSL errors: {}", e.clone()),
-            Error::OSTree(ref e)        => format!("OSTree error: {}", e.clone()),
-            Error::Poison(ref e)        => format!("Poison error: {}", e.clone()),
-            Error::PacMan(ref s)        => format!("Package manager error: {}", s.clone()),
-            Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),
-            Error::Recv(ref s)          => format!("Recv error: {}", s.clone()),
-            Error::Rvi(ref s)           => format!("RVI error: {}", s.clone()),
-            Error::SendCommand(ref s)   => format!("Command send error: {}", s.clone()),
-            Error::SendEvent(ref s)     => format!("Event send error: {}", s.clone()),
-            Error::SerdeJson(ref e)     => format!("Serde JSON error: {}", e.clone()),
-            Error::Socket(ref s)        => format!("Unix Domain Socket error: {}", s.clone()),
-            Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
-            Error::Toml(ref e)          => format!("TOML error: {:?}", e.clone()),
-            Error::UrlParse(ref s)      => format!("Url parse error: {}", s.clone()),
-            Error::Utf8(ref e)          => format!("Utf8 error: {}", e.clone()),
-            Error::Verify(ref s)        => format!("Verification error: {}", s.clone()),
-            #[cfg(feature = "websocket")]
-            Error::Websocket(ref e)     => format!("Websocket Error: {:?}", e.clone()),
+            Error::ChronoParse(ref err) => format!("DateTime parse error: {}", err),
+            Error::Client(ref err)      => format!("Http client error: {}", err),
+            Error::Command(ref err)     => format!("Unknown Command: {}", err),
+            Error::Config(ref err)      => format!("Bad Config: {}", err),
+            Error::FromUtf8(ref err)    => format!("From utf8 error: {}", err),
+            Error::Http(ref err)        => format!("HTTP client error: {}", err),
+            Error::HttpAuth(ref err)    => format!("HTTP authorization error: {}", err),
+            Error::Hyper(ref err)       => format!("Hyper error: {}", err),
+            Error::Io(ref err)          => format!("IO error: {}", err),
+            Error::Openssl(ref err)     => format!("OpenSSL errors: {}", err),
+            Error::OSTree(ref err)      => format!("OSTree error: {}", err),
+            Error::Poison(ref err)      => format!("Poison error: {}", err),
+            Error::PacMan(ref err)      => format!("Package manager error: {}", err),
+            Error::Parse(ref err)       => format!("Parse error: {}", err),
+            Error::Recv(ref err)        => format!("Recv error: {}", err),
+            Error::Rvi(ref err)         => format!("RVI error: {}", err),
+            Error::SendCommand(ref err) => format!("Command send error: {}", err),
+            Error::SendEvent(ref err)   => format!("Event send error: {}", err),
+            Error::SerdeJson(ref err)   => format!("Serde JSON error: {}", err),
+            Error::Socket(ref err)      => format!("Unix Domain Socket error: {}", err),
+            Error::SystemInfo(ref err)  => format!("System info error: {}", err),
+            Error::Toml(ref err)        => format!("TOML error: {:?}", err),
+            Error::UrlParse(ref err)    => format!("Url parse error: {}", err),
+            Error::Utf8(ref err)        => format!("Utf8 error: {}", err),
+            Error::Verify(ref err)      => format!("Verification error: {}", err),
+            #[cfg(feature="websocket")]
+            Error::Websocket(ref err)   => format!("Websocket Error: {:?}", err),
 
-            Error::UptaneExpired               => "Uptane: expired".into(),
-            Error::UptaneInvalidKeyType(ref s) => format!("Uptane: invalid key type: {}", s),
-            Error::UptaneInvalidSigType(ref s) => format!("Uptane: invalid signature type: {}", s),
-            Error::UptaneInvalidRole           => "Uptane: invalid role".into(),
-            Error::UptaneMissingSignatures     => "Uptane: missing signatures".into(),
-            Error::UptaneMissingField(s)       => format!("Uptane: metadata missing field: {}", s),
-            Error::UptaneRoleThreshold         => "Uptane: role threshold not met".into(),
-            Error::UptaneUnknownRole           => "Uptane: unknown role".into(),
-            Error::UptaneVerifySignatures      => "Uptane: invalid signature".into(),
+            Error::UptaneExpired                 => "Uptane: expired".into(),
+            Error::UptaneInvalidKeyType(ref err) => format!("Uptane: invalid key type: {}", err),
+            Error::UptaneInvalidSigType(ref err) => format!("Uptane: invalid signature type: {}", err),
+            Error::UptaneInvalidRole             => "Uptane: invalid role".into(),
+            Error::UptaneMissingSignatures       => "Uptane: missing signatures".into(),
+            Error::UptaneMissingField(err)       => format!("Uptane: metadata missing field: {}", err),
+            Error::UptaneRoleThreshold           => "Uptane: role threshold not met".into(),
+            Error::UptaneUnknownRole             => "Uptane: unknown role".into(),
+            Error::UptaneVerifySignatures        => "Uptane: invalid signature".into(),
         };
         write!(f, "{}", inner)
     }
 }
 
 impl<E> From<PoisonError<E>> for Error {
-    fn from(e: PoisonError<E>) -> Error {
-        Error::Poison(format!("{}", e))
+    fn from(err: PoisonError<E>) -> Error {
+        Error::Poison(err.to_string())
     }
 }
 
@@ -115,16 +115,16 @@ impl<E> From<PoisonError<E>> for Error {
 macro_rules! derive_from {
     ([ $( $from: ident => $to: ident ),* ]) => {
         $(impl From<$from> for Error {
-            fn from(e: $from) -> Error {
-                Error::$to(e)
+            fn from(err: $from) -> Error {
+                Error::$to(err)
             }
         })*
     };
 
     ([ $( $error: ident < $ty: ty > => $to: ident),* ]) => {
         $(impl From<$error<$ty>> for Error {
-            fn from(e: $error<$ty>) -> Error {
-                Error::$to(e)
+            fn from(err: $error<$ty>) -> Error {
+                Error::$to(err)
             }
         })*
     };

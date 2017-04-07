@@ -169,12 +169,15 @@ impl<S: Read + Write> TlsStream<S> {
     pub fn shutdown(&mut self) -> io::Result<()> {
         loop {
             match self.0.shutdown() {
-                Ok(ShutdownResult::Sent)     => continue,
-                Ok(ShutdownResult::Received) => return Ok(()),
+                Ok(ShutdownResult::Sent) => continue,
+
+                Ok(ShutdownResult::Received) |
                 Err(SslError::ZeroReturn)    => return Ok(()),
-                Err(SslError::Stream(e))     => return Err(e),
-                Err(SslError::WantRead(e))   => return Err(e),
-                Err(SslError::WantWrite(e))  => return Err(e),
+
+                Err(SslError::Stream(err))    |
+                Err(SslError::WantRead(err))  |
+                Err(SslError::WantWrite(err)) => return Err(err),
+
                 Err(err) => return Err(io::Error::new(io::ErrorKind::Other, err)),
             }
         }

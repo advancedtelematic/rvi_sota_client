@@ -104,7 +104,7 @@ impl AuthClient {
                 self.send(AuthRequest::new(&Auth::None, Request {
                     url: match loc.parse() {
                         Ok(absolute) => absolute,
-                        Err(_) if &loc[0..1] == "/" => req.request.url.join(loc), // relative
+                        Err(_) if loc[0..1] == *"/" => req.request.url.join(loc), // relative
                         Err(err) => return Response::Error(Error::Parse(format!("`{}` not a url: {}", loc, err)))
                     },
                     method: req.request.method.clone(),

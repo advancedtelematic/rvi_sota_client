@@ -74,7 +74,7 @@ impl FromStr for PacMan {
             "rpm" => Ok(PacMan::Rpm),
             "ostree" => Ok(PacMan::Ostree),
             "uptane" => Ok(PacMan::Uptane),
-            test if test.len() > 5 && &test[..5] == "test:" => {
+            test if test.len() > 5 && test[..5] == *"test:" => {
                 Ok(PacMan::Test { filename: test[5..].into(), succeeds: true })
             },
             _ => Err(Error::Parse(format!("unknown package manager: {}", s)))

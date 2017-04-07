@@ -46,7 +46,7 @@ impl Transfers {
     pub fn prune(&mut self, now: i64, timeout: i64) {
         let old = self.items
             .iter()
-            .filter(|&(_, ref transfer)| now - transfer.last_chunk_received > timeout)
+            .filter(|&(_, transfer)| now - transfer.last_chunk_received > timeout)
             .map(|(id, _)| *id)
             .collect::<Vec<Uuid>>();
 
