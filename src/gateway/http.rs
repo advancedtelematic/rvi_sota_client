@@ -6,10 +6,10 @@ use hyper::status::StatusCode;
 use serde_json as json;
 use std::net::SocketAddr;
 use std::thread;
-use std::sync::{Arc, Mutex};
 
 use datatype::Event;
-use gateway::{Gateway, Interpret};
+use gateway::Gateway;
+use interpreter::CommandExec;
 
 
 /// The `Http` gateway parses `Command`s from the body of incoming requests.
@@ -18,23 +18,16 @@ pub struct Http {
 }
 
 impl Gateway for Http {
-    fn start(&mut self, itx: Sender<Interpret>, _: Receiver<Event>) {
+    fn start(&mut self, ctx: Sender<CommandExec>, _: Receiver<Event>) {
         info!("Starting HTTP gateway at http://{}", self.server);
-        let server = Server::http(&self.server).expect("couldn't start http gateway");
-        let itx = Arc::new(Mutex::new(itx));
-        thread::spawn(move || server.handle(HttpHandler::new(itx.clone())).unwrap());
+        let server = Server::http(&self.server).expect("http gateway");
+        thread::spawn(move || server.handle(HttpHandler { ctx: ctx.clone() }).expect("serve http"));
     }
 }
 
 
 struct HttpHandler {
-    itx: Arc<Mutex<Sender<Interpret>>>,
-}
-
-impl HttpHandler {
-    fn new(itx: Arc<Mutex<Sender<Interpret>>>) -> HttpHandler {
-        HttpHandler { itx: itx }
-    }
+    ctx: Sender<CommandExec>
 }
 
 impl Handler for HttpHandler {
@@ -47,7 +40,7 @@ impl Handler for HttpHandler {
             })
             .map(|cmd| {
                 let (etx, erx) = chan::async::<Event>();
-                self.itx.lock().unwrap().send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx))) });
+                self.ctx.send(CommandExec { cmd: cmd, etx: Some(etx) });
                 body = json::to_vec(&erx.recv().expect("no http response")).expect("encode event");
                 resp.headers_mut().set(ContentType(Mime(TopLevel::Application, SubLevel::Json, vec![])));
                 *resp.status_mut() = StatusCode::Ok;
@@ -59,6 +52,8 @@ impl Handler for HttpHandler {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     use chan;
     use crossbeam;
     use serde_json as json;
@@ -66,28 +61,26 @@ mod tests {
     use std::time::Duration;
     use uuid::Uuid;
 
-    use super::*;
-    use gateway::{Gateway, Interpret};
     use datatype::{Command, Event};
+    use gateway::Gateway;
     use http::{AuthClient, Client, Response, TlsClient, TlsData};
 
 
     #[test]
     fn http_connections() {
         TlsClient::init(TlsData::default());
-
+        let (ctx, crx) = chan::sync::<CommandExec>(0);
         let (etx, erx) = chan::sync::<Event>(0);
-        let (itx, irx) = chan::sync::<Interpret>(0);
 
-        thread::spawn(move || Http { server: "127.0.0.1:8888".parse().unwrap() }.start(itx, erx));
+        thread::spawn(move || Http { server: "127.0.0.1:8888".parse().unwrap() }.start(ctx, erx));
         thread::sleep(Duration::from_millis(100)); // wait before connecting
 
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                match irx.recv() {
-                    Some(Interpret { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
-                        etx.lock().unwrap().send(Event::InstallingUpdate(id));
+                match crx.recv() {
+                    Some(CommandExec { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
+                        etx.send(Event::InstallingUpdate(id));
                     }
                     Some(_) => panic!("expected StartInstall"),
                     None    => break

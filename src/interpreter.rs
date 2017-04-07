@@ -2,12 +2,10 @@ use chan::{Sender, Receiver};
 use std::cell::RefCell;
 use std::process::{self, Command as ShellCommand};
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 
 use authenticate::oauth2;
 use datatype::{Auth, Command, Config, EcuCustom, Error, Event, InstallCode, InstallResult,
                RoleName, RequestStatus, Url};
-use gateway::Interpret;
 use http::{AuthClient, Client};
 use pacman::{Credentials, PacMan};
 use rvi::Services;
@@ -28,7 +26,7 @@ pub trait Interpreter<I, O> {
 }
 
 
-/// The `EventInterpreter` listens for `Event`s and may respond `Command`s.
+/// The `EventInterpreter` listens for `Event`s and queues `Command`s for processing.
 pub struct EventInterpreter {
     pub initial: bool,
     pub loop_tx: Sender<Event>,
@@ -39,9 +37,10 @@ pub struct EventInterpreter {
     pub treehub: Option<Url>,
 }
 
-impl Interpreter<Event, Command> for EventInterpreter {
-    fn interpret(&mut self, event: Event, ctx: &Sender<Command>) {
+impl Interpreter<Event, CommandExec> for EventInterpreter {
+    fn interpret(&mut self, event: Event, ctx: &Sender<CommandExec>) {
         info!("EventInterpreter received: {}", event);
+        let queue = |cmd: Command| ctx.send(CommandExec { cmd: cmd, etx: None });
 
         match event {
             Event::Authenticated if self.initial => {
@@ -52,22 +51,22 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::DownloadComplete(ref dl) if self.pacman != PacMan::Off => {
-                ctx.send(Command::StartInstall(dl.update_id));
+                queue(Command::StartInstall(dl.update_id));
             }
 
             Event::DownloadFailed(id, reason) => {
                 let result = InstallResult::new(format!("{}", id), InstallCode::GENERAL_ERROR, reason);
-                ctx.send(Command::SendInstallReport(result.into_report()));
+                queue(Command::SendInstallReport(result.into_report()));
             }
 
             Event::InstallComplete(result) | Event::InstallFailed(result) => {
-                ctx.send(Command::SendInstallReport(result.into_report()));
+                queue(Command::SendInstallReport(result.into_report()));
             }
 
             Event::InstalledPackagesNeeded => {
                 self.pacman
                     .installed_packages()
-                    .map(|packages| ctx.send(Command::SendInstalledPackages(packages)))
+                    .map(|packages| queue(Command::SendInstalledPackages(packages)))
                     .unwrap_or_else(|err| error!("couldn't send a list of packages: {}", err));
             }
 
@@ -76,40 +75,40 @@ impl Interpreter<Event, Command> for EventInterpreter {
             }
 
             Event::NotAuthenticated => {
-                ctx.send(Command::Authenticate(self.auth.clone()));
+                queue(Command::Authenticate(self.auth.clone()));
             }
 
             Event::SystemInfoNeeded => {
-                self.sysinfo.as_ref().map(|_| ctx.send(Command::SendSystemInfo));
+                self.sysinfo.as_ref().map(|_| queue(Command::SendSystemInfo));
             }
 
             Event::UpdatesReceived(requests) => {
                 for request in requests {
                     let id = request.requestId;
                     match request.status {
-                        RequestStatus::Pending if self.auto_dl => ctx.send(Command::StartDownload(id)),
+                        RequestStatus::Pending if self.auto_dl => queue(Command::StartDownload(id)),
                         RequestStatus::InFlight if self.pacman == PacMan::Off => (),
                         RequestStatus::InFlight if self.pacman.is_installed(&request.packageId) => {
-                            let result = InstallResult::new(format!("{}", id), InstallCode::OK, "<auto generated>".to_string());
-                            ctx.send(Command::SendInstallReport(result.into_report()));
+                            let result = InstallResult::new(format!("{}", id), InstallCode::OK, "<generated>".to_string());
+                            queue(Command::SendInstallReport(result.into_report()));
                         }
-                        RequestStatus::InFlight => ctx.send(Command::StartDownload(id)),
+                        RequestStatus::InFlight => queue(Command::StartDownload(id)),
                         _ => ()
                     }
                 }
             }
 
             Event::UptaneInstallComplete(signed) | Event::UptaneInstallFailed(signed) => {
-                ctx.send(Command::UptaneSendManifest(vec![signed]));
+                queue(Command::UptaneSendManifest(vec![signed]));
             }
 
             Event::UptaneManifestNeeded if self.pacman == PacMan::Uptane => {
-                ctx.send(Command::UptaneSendManifest(Vec::new()));
+                queue(Command::UptaneSendManifest(Vec::new()));
             }
 
             Event::UptaneTargetsUpdated(targets) => {
                 for pkg in Uptane::extract_packages(targets, self.treehub.as_ref().expect("treehub url")) {
-                    ctx.send(Command::UptaneStartInstall(pkg));
+                    queue(Command::UptaneStartInstall(pkg));
                 }
             }
 
@@ -119,22 +118,14 @@ impl Interpreter<Event, Command> for EventInterpreter {
 }
 
 
-/// The `IntermediateInterpreter` listens for `Command`s and wraps them with a
-/// response channel for sending to the `CommandInterpreter`.
-#[derive(Default)]
-pub struct IntermediateInterpreter {
-    pub resp_tx: Option<Arc<Mutex<Sender<Event>>>>
+/// Wraps a `Command` for execution and (optionally) waits for the outcome `Event`.
+#[derive(Debug)]
+pub struct CommandExec {
+    pub cmd: Command,
+    pub etx: Option<Sender<Event>>,
 }
 
-impl Interpreter<Command, Interpret> for IntermediateInterpreter {
-    fn interpret(&mut self, cmd: Command, itx: &Sender<Interpret>) {
-        trace!("IntermediateInterpreter received: {}", &cmd);
-        itx.send(Interpret { cmd: cmd, etx: self.resp_tx.clone() });
-    }
-}
-
-
-/// The `CommandMode` toggles the `Command` handling procedure.
+/// Toggles the `CommandInterpreter`'s handling procedure.
 #[derive(Clone)]
 pub enum CommandMode {
     Sota,
@@ -142,9 +133,8 @@ pub enum CommandMode {
     Uptane(Rc<RefCell<Uptane>>),
 }
 
-/// The `CommandInterpreter` interprets the `Command` inside incoming `Interpret`
-/// messages, broadcasting `Event`s globally and (optionally) sending the final
-/// outcome `Event` to the `Interpret` response channel.
+/// The `CommandInterpreter` executes the incoming `Command`, broadcasting all
+/// `Event`s and (optionally) forwarding the final event to a `Receiver`.
 pub struct CommandInterpreter {
     pub mode:   CommandMode,
     pub auth:   Auth,
@@ -152,20 +142,19 @@ pub struct CommandInterpreter {
     pub http:   Box<Client>,
 }
 
-impl Interpreter<Interpret, Event> for CommandInterpreter {
-    fn interpret(&mut self, interpret: Interpret, etx: &Sender<Event>) {
-        info!("CommandInterpreter received: {}", &interpret.cmd);
-        let event = match self.process_command(interpret.cmd, etx) {
+impl Interpreter<CommandExec, Event> for  CommandInterpreter {
+    fn interpret(&mut self, exec: CommandExec, etx: &Sender<Event>) {
+        info!("CommandInterpreter received: {}", &exec.cmd);
+        let event = match self.process_command(exec.cmd, etx) {
             Ok(ev) => ev,
             Err(Error::HttpAuth(resp)) => {
                 error!("{}", resp);
                 Event::NotAuthenticated
             }
-            Err(err) => Event::Error(format!("{}", err))
+            Err(err) => Event::Error(err.to_string())
         };
-
-        etx.send(event.clone());
-        interpret.etx.map(|tx| tx.lock().unwrap().send(event));
+        exec.etx.map(|etx| etx.send(event.clone()));
+        etx.send(event);
     }
 }
 
@@ -347,15 +336,14 @@ mod tests {
     use uuid::Uuid;
 
     use datatype::{Auth, Command, Config, DownloadComplete, Event, InstallCode};
-    use gateway::Interpret;
     use http::TestClient;
     use pacman::PacMan;
     use pacman::test::assert_rx;
 
 
     fn new_interpreter(replies: Vec<String>, succeeds: bool) -> (Sender<Command>, Receiver<Event>) {
-        let (etx, erx) = chan::sync::<Event>(0);
         let (ctx, crx) = chan::sync::<Command>(0);
+        let (etx, erx) = chan::sync::<Event>(0);
 
         thread::spawn(move || {
             let mut config = Config::default();
@@ -367,7 +355,7 @@ mod tests {
                 http:   Box::new(TestClient::from(replies)),
             };
             while let Some(cmd) = crx.recv() {
-                ci.interpret(Interpret { cmd: cmd, etx: None }, &etx);
+                ci.interpret(CommandExec { cmd: cmd, etx: None }, &etx);
             }
         });
 

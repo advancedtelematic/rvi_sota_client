@@ -16,7 +16,7 @@ use url::ParseError as UrlParseError;
 
 use datatype::Event;
 use http::ResponseData;
-use gateway::Interpret;
+use interpreter::CommandExec;
 
 
 /// System-wide errors that are returned from `Result` type failures.
@@ -38,8 +38,8 @@ pub enum Error {
     Poison(String),
     Recv(RecvError),
     Rvi(String),
+    SendCommand(SendError<CommandExec>),
     SendEvent(SendError<Event>),
-    SendInterpret(SendError<Interpret>),
     SerdeJson(SerdeJsonError),
     Socket(String),
     SystemInfo(String),
@@ -79,8 +79,8 @@ impl Display for Error {
             Error::Parse(ref s)         => format!("Parse error: {}", s.clone()),
             Error::Recv(ref s)          => format!("Recv error: {}", s.clone()),
             Error::Rvi(ref s)           => format!("RVI error: {}", s.clone()),
-            Error::SendEvent(ref s)     => format!("Send error for Event: {}", s.clone()),
-            Error::SendInterpret(ref s) => format!("Send error for Interpret: {}", s.clone()),
+            Error::SendCommand(ref s)   => format!("Command send error: {}", s.clone()),
+            Error::SendEvent(ref s)     => format!("Event send error: {}", s.clone()),
             Error::SerdeJson(ref e)     => format!("Serde JSON error: {}", e.clone()),
             Error::Socket(ref s)        => format!("Unix Domain Socket error: {}", s.clone()),
             Error::SystemInfo(ref s)    => format!("System info error: {}", s.clone()),
@@ -148,6 +148,6 @@ derive_from!([
 derive_from!([WebsocketError => Websocket]);
 
 derive_from!([
-    SendError<Event>     => SendEvent,
-    SendError<Interpret> => SendInterpret
+    SendError<CommandExec> => SendCommand,
+    SendError<Event>       => SendEvent
 ]);

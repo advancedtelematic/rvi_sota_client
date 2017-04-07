@@ -9,7 +9,8 @@ use uuid::Uuid;
 
 use datatype::{Command, DBusConfig, Event, InstalledFirmware, InstalledPackage,
                InstallResult, InstalledSoftware, InstallReport};
-use super::{Gateway, Interpret};
+use gateway::Gateway;
+use interpreter::CommandExec;
 
 
 /// The `DBus` gateway is used with the RVI module for communicating with the
@@ -20,7 +21,7 @@ pub struct DBus {
 }
 
 impl Gateway for DBus {
-    fn start(&mut self, itx: Sender<Interpret>, erx: Receiver<Event>) {
+    fn start(&mut self, ctx: Sender<CommandExec>, erx: Receiver<Event>) {
         info!("Starting DBus gateway.");
 
         let cfg  = self.cfg.clone();
@@ -30,8 +31,8 @@ impl Gateway for DBus {
         let arg0 = Argument::new(Some("update_id".into()), Signature::new("s").expect("arg1 signature"));
         let arg1 = arg0.clone();
         let arg2 = Argument::new(Some("operations_results".into()), Signature::new("aa{sv}").expect("arg2 signature"));
-        let itx1 = itx.clone();
-        let itx2 = itx.clone();
+        let ctx1 = ctx.clone();
+        let ctx2 = ctx.clone();
 
         let fact = Factory::new_fn::<()>();
         let tree = fact.tree(()).add(
@@ -41,7 +42,7 @@ impl Gateway for DBus {
                         debug!("dbus initiateDownload called: {:?}", info);
                         let uuid = Uuid::from_str(info.msg.read1()?)
                             .map_err(|err| dbus::Error::new_custom("read1", &format!("{}", err)))?;
-                        itx1.send(Interpret { cmd: Command::StartDownload(uuid), etx: None });
+                        ctx1.send(CommandExec { cmd: Command::StartDownload(uuid), etx: None });
                         Ok(Vec::new())
                     }).in_arg(arg0))
 
@@ -49,14 +50,14 @@ impl Gateway for DBus {
                         debug!("dbus updateReport called: {:?}", info);
                         let (id, res): (String, Vec<InstallResult>) = info.msg.read2()?;
                         let report = InstallReport::new(id, res);
-                        itx2.send(Interpret { cmd: Command::SendInstallReport(report), etx: None });
+                        ctx2.send(CommandExec { cmd: Command::SendInstallReport(report), etx: None });
                         Ok(Vec::new())
                     }).in_arg(arg1).in_arg(arg2))));
 
         let session_cfg = self.cfg.clone();
-        let session_itx = itx.clone();
+        let session_ctx = ctx.clone();
         thread::spawn(move || {
-            let session = Session::new(session_itx, session_cfg);
+            let session = Session::new(session_ctx, session_cfg);
             loop {
                 session.handle_event(erx.recv().expect("dbus etx closed"))
             }
@@ -70,7 +71,7 @@ impl Gateway for DBus {
 
 struct Session {
     conn:    Connection,
-    itx:     Sender<Interpret>,
+    ctx:     Sender<CommandExec>,
     dest:    String,
     path:    String,
     iface:   String,
@@ -78,10 +79,10 @@ struct Session {
 }
 
 impl Session {
-    fn new(itx: Sender<Interpret>, cfg: DBusConfig) -> Self {
+    fn new(ctx: Sender<CommandExec>, cfg: DBusConfig) -> Self {
         Session {
             conn:    Connection::get_private(BusType::Session).expect("couldn't get session bus"),
-            itx:     itx,
+            ctx:     ctx,
             dest:    cfg.software_manager.clone(),
             path:    cfg.software_manager_path.clone(),
             iface:   cfg.software_manager.clone(),
@@ -98,7 +99,7 @@ impl Session {
     }
 
     fn send_internal(&self, cmd: Command) {
-        self.itx.send(Interpret { cmd: cmd, etx: None });
+        self.ctx.send(CommandExec { cmd: cmd, etx: None });
     }
 
     fn new_message(&self, method: &str, args: &[MessageItem]) -> Message {

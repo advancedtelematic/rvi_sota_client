@@ -16,11 +16,10 @@ use log::{LogLevelFilter, LogRecord};
 use std::{env, process, thread};
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sota::datatype::{Command, Config, Event};
-use sota::gateway::{Console, Gateway, Interpret, Http};
+use sota::gateway::{Console, Gateway, Http};
 #[cfg(feature = "d-bus")]
 use sota::gateway::DBus;
 #[cfg(feature = "socket")]
@@ -29,8 +28,8 @@ use sota::gateway::Socket;
 use sota::gateway::Websocket;
 use sota::broadcast::Broadcast;
 use sota::http::{AuthClient, TlsClient};
-use sota::interpreter::{CommandMode, CommandInterpreter, EventInterpreter,
-                        IntermediateInterpreter, Interpreter};
+use sota::interpreter::{CommandExec, CommandMode, CommandInterpreter,
+                        EventInterpreter, Interpreter};
 use sota::pacman::PacMan;
 use sota::rvi::{Edge, Services};
 use sota::uptane::{Service, Uptane};
@@ -52,10 +51,8 @@ fn main() {
     let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
     let http = AuthClient::from(auth.clone());
 
+    let (ctx, crx) = chan::async::<CommandExec>();
     let (etx, erx) = chan::async::<Event>();
-    let (ctx, crx) = chan::async::<Command>();
-    let (itx, irx) = chan::async::<Interpret>();
-
     let mut broadcast = Broadcast::new(erx);
     etx.send(Event::NotAuthenticated);
 
@@ -65,32 +62,32 @@ fn main() {
 
         if config.core.polling {
             let poll_tick = config.core.polling_sec;
-            let poll_itx  = itx.clone();
-            scope.spawn(move || start_update_poller(poll_tick, &poll_itx));
+            let poll_ctx  = ctx.clone();
+            scope.spawn(move || start_update_poller(poll_tick, &poll_ctx));
         }
 
         if config.gateway.console {
-            let cons_itx = itx.clone();
+            let cons_ctx = ctx.clone();
             let cons_sub = broadcast.subscribe();
-            scope.spawn(move || Console.start(cons_itx, cons_sub));
+            scope.spawn(move || Console.start(cons_ctx, cons_sub));
         }
 
         if config.gateway.dbus {
             #[cfg(feature = "d-bus")] {
-                let dbus_itx = itx.clone();
+                let dbus_ctx = ctx.clone();
                 let dbus_sub = broadcast.subscribe();
                 let mut dbus = DBus { cfg: config.dbus.clone() };
-                scope.spawn(move || dbus.start(dbus_itx, dbus_sub));
+                scope.spawn(move || dbus.start(dbus_ctx, dbus_sub));
             }
             #[cfg(not(feature = "d-bus"))]
             exit!(2, "{}", "binary not compiled with 'd-bus' feature but dbus gateway enabled");
         }
 
         if config.gateway.http {
-            let http_itx = itx.clone();
+            let http_ctx = ctx.clone();
             let http_sub = broadcast.subscribe();
             let mut http = Http { server: *config.network.http_server };
-            scope.spawn(move || http.start(http_itx, http_sub));
+            scope.spawn(move || http.start(http_ctx, http_sub));
         }
 
         let services = if config.gateway.rvi {
@@ -105,13 +102,13 @@ fn main() {
 
         if config.gateway.socket {
             #[cfg(feature = "socket")] {
-                let socket_itx = itx.clone();
+                let socket_ctx = ctx.clone();
                 let socket_sub = broadcast.subscribe();
                 let mut socket = Socket {
                     cmd_sock: config.network.socket_commands_path.clone(),
                     ev_sock:  config.network.socket_events_path.clone()
                 };
-                scope.spawn(move || socket.start(socket_itx, socket_sub));
+                scope.spawn(move || socket.start(socket_ctx, socket_sub));
             }
             #[cfg(not(feature = "socket"))]
             exit!(2, "{}", "binary not compiled with 'socket' feature but socket gateway enabled");
@@ -119,10 +116,10 @@ fn main() {
 
         if config.gateway.websocket {
             #[cfg(feature = "websocket")] {
-                let ws_itx = itx.clone();
+                let ws_ctx = ctx.clone();
                 let ws_sub = broadcast.subscribe();
                 let mut ws = Websocket { server: config.network.websocket_server.clone() };
-                scope.spawn(move || ws.start(ws_itx, ws_sub));
+                scope.spawn(move || ws.start(ws_ctx, ws_sub));
             }
             #[cfg(not(feature = "websocket"))]
             exit!(2, "{}", "binary not compiled with 'websocket' feature but websocket gateway enabled");
@@ -155,7 +152,6 @@ fn main() {
             treehub: ei_tree,
         }.run(ei_sub, ei_ctx));
 
-        scope.spawn(move || IntermediateInterpreter::default().run(crx, itx));
         scope.spawn(move || CommandInterpreter {
             mode: if let Some(uptane) = uptane {
                 CommandMode::Uptane(Rc::new(RefCell::new(uptane)))
@@ -167,7 +163,7 @@ fn main() {
             config: config,
             auth:   auth,
             http:   Box::new(http),
-        }.run(irx, etx));
+        }.run(crx, etx));
 
         scope.spawn(move || broadcast.start());
     });
@@ -197,12 +193,11 @@ fn start_signal_handler(signals: &Receiver<Signal>) {
     }
 }
 
-fn start_update_poller(interval: u64, itx: &Sender<Interpret>) {
+fn start_update_poller(interval: u64, ctx: &Sender<CommandExec>) {
     info!("Polling for new updates every {} seconds.", interval);
     let (etx, erx) = chan::async::<Event>();
-    let etx = Arc::new(Mutex::new(etx));
     loop {
-        itx.send(Interpret { cmd: Command::GetUpdateRequests, etx: Some(etx.clone()) });
+        ctx.send(CommandExec { cmd: Command::GetUpdateRequests, etx: Some(etx.clone()) });
         let _ = erx.recv(); // wait for the response
         thread::sleep(Duration::from_secs(interval));
     }

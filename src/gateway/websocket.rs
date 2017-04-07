@@ -1,12 +1,12 @@
 use chan::{self, Sender, Receiver};
 use serde_json as json;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
-use std::sync::{Arc, Mutex};
 use std::thread;
 use tungstenite::{self, Message, WebSocket};
 
 use datatype::{Command, Event};
-use gateway::{Gateway, Interpret};
+use gateway::Gateway;
+use interpreter::CommandExec;
 
 
 // FIXME(PRO-2835): broadcast system events
@@ -15,7 +15,7 @@ pub struct Websocket {
 }
 
 impl Gateway for Websocket {
-    fn start(&mut self, itx: Sender<Interpret>, _: Receiver<Event>) {
+    fn start(&mut self, ctx: Sender<CommandExec>, _: Receiver<Event>) {
         info!("Starting Websocket gateway at {}.", self.server);
         let mut addr: Vec<_> = self.server.to_socket_addrs().expect("websocket server").collect();
         let server = TcpListener::bind(&addr.pop().expect("websocket address")).expect("websocket listener");
@@ -24,15 +24,15 @@ impl Gateway for Websocket {
             let _ = stream
                 .map_err(|err| error!("Opening websocket: {}", err))
                 .map(|stream| tungstenite::accept(stream).map(|sock| {
-                    let itx = itx.clone();
-                    thread::spawn(move || handle_socket(sock, &itx));
+                    let ctx = ctx.clone();
+                    thread::spawn(move || handle_socket(sock, &ctx));
                 }));
         }
     }
 }
 
 
-fn handle_socket(mut socket: WebSocket<TcpStream>, itx: &Sender<Interpret>) {
+fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
     let _ = socket.read_message()
         .map_err(|err| error!("Websocket message: {}", err))
         .map(|msg| {
@@ -48,7 +48,7 @@ fn handle_socket(mut socket: WebSocket<TcpStream>, itx: &Sender<Interpret>) {
                 .map_err(|err| error!("Websocket request not a command: {}", err))
                 .map(|cmd| {
                     let (etx, erx) = chan::sync::<Event>(0);
-                    itx.send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx.clone()))) });
+                    ctx.send(CommandExec { cmd: cmd, etx: Some(etx) });
                     let reply = json::to_string(&erx.recv().expect("websocket response")).expect("json reply");
                     socket.write_message(Message::Text(reply)).map_err(|err| error!("Writing to websocket: {}", err))
                 });
@@ -70,22 +70,23 @@ mod tests {
     use uuid::Uuid;
 
     use datatype::{Command, Event};
-    use gateway::{Gateway, Interpret};
+    use gateway::Gateway;
+    use interpreter::CommandExec;
 
 
     #[test]
     fn websocket_connections() {
+        let (ctx, crx) = chan::sync::<CommandExec>(0);
         let (etx, erx) = chan::sync::<Event>(0);
-        let (itx, irx) = chan::sync::<Interpret>(0);
-        thread::spawn(move || Websocket { server: "localhost:3012".into() }.start(itx, erx));
+        thread::spawn(move || Websocket { server: "localhost:3012".into() }.start(ctx, erx));
         thread::sleep(Duration::from_millis(100)); // wait before connecting
 
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                match irx.recv() {
-                    Some(Interpret { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
-                        etx.lock().unwrap().send(Event::InstallingUpdate(id));
+                match crx.recv() {
+                    Some(CommandExec { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
+                        etx.send(Event::InstallingUpdate(id));
                     }
                     Some(_) => panic!("expected StartInstall"),
                     None    => break

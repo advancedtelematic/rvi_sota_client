@@ -3,11 +3,11 @@ use serde::ser::Serialize;
 use serde_json as json;
 use std::io::{BufReader, Read, Write};
 use std::net::Shutdown;
-use std::sync::{Arc, Mutex};
 use std::{fs, thread};
 
 use datatype::{Command, DownloadFailed, Error, Event};
-use super::{Gateway, Interpret};
+use gateway::Gateway;
+use interpreter::CommandExec;
 use unix_socket::{UnixListener, UnixStream};
 
 
@@ -18,7 +18,7 @@ pub struct Socket {
 }
 
 impl Gateway for Socket {
-    fn start(&mut self, itx: Sender<Interpret>, erx: Receiver<Event>) {
+    fn start(&mut self, ctx: Sender<CommandExec>, erx: Receiver<Event>) {
         info!("Listening for commands at socket {}", self.cmd_sock);
         info!("Sending events to socket {}", self.ev_sock);
         let _ = fs::remove_file(&self.cmd_sock);
@@ -30,20 +30,18 @@ impl Gateway for Socket {
         });
 
         for conn in cmd_sock.incoming() {
+            let ctx = ctx.clone();
             let _ = conn
                 .map_err(|err| error!("couldn't open socket connection: {}", err))
-                .map(|stream| {
-                    let itx = itx.clone();
-                    thread::spawn(move || handle_stream(stream, &itx));
-                });
+                .map(|stream| thread::spawn(move || handle_stream(stream, &ctx)));
         }
     }
 }
 
 
-fn handle_stream(mut stream: UnixStream, itx: &Sender<Interpret>) {
+fn handle_stream(mut stream: UnixStream, ctx: &Sender<CommandExec>) {
     info!("New socket connection.");
-    let resp = parse_command(&mut stream, itx)
+    let resp = parse_command(&mut stream, ctx)
         .map(|ev| json::to_vec(&ev).expect("couldn't encode Event"))
         .unwrap_or_else(|err| format!("{}", err).into_bytes());
 
@@ -51,7 +49,7 @@ fn handle_stream(mut stream: UnixStream, itx: &Sender<Interpret>) {
     stream.shutdown(Shutdown::Write).unwrap_or_else(|err| error!("couldn't close commands socket: {}", err));
 }
 
-fn parse_command(stream: &mut UnixStream, itx: &Sender<Interpret>) -> Result<Event, Error> {
+fn parse_command(stream: &mut UnixStream, ctx: &Sender<CommandExec>) -> Result<Event, Error> {
     let mut reader = BufReader::new(stream);
     let mut input  = String::new();
     reader.read_to_string(&mut input)?;
@@ -59,7 +57,7 @@ fn parse_command(stream: &mut UnixStream, itx: &Sender<Interpret>) -> Result<Eve
 
     let cmd = input.parse::<Command>()?;
     let (etx, erx) = chan::async::<Event>();
-    itx.send(Interpret { cmd: cmd, etx: Some(Arc::new(Mutex::new(etx))) });
+    ctx.send(CommandExec { cmd: cmd, etx: Some(etx) });
     erx.recv().ok_or_else(|| Error::Socket("internal receiver error".to_string()))
 }
 
@@ -117,7 +115,8 @@ mod tests {
     use uuid::Uuid;
 
     use datatype::{Command, DownloadComplete, Event};
-    use gateway::{Gateway, Interpret};
+    use gateway::Gateway;
+    use interpreter::CommandExec;
     use unix_socket::{UnixListener, UnixStream};
 
 
@@ -126,10 +125,10 @@ mod tests {
 
     #[test]
     fn socket_commands_and_events() {
+        let (ctx, crx) = chan::sync::<CommandExec>(0);
         let (etx, erx) = chan::sync::<Event>(0);
-        let (itx, irx) = chan::sync::<Interpret>(0);
         let mut socket = Socket { cmd_sock: CMD_SOCK.into(), ev_sock: EV_SOCK.into() };
-        thread::spawn(move || socket.start(itx, erx));
+        thread::spawn(move || socket.start(ctx, erx));
 
         let _ = fs::remove_file(EV_SOCK);
         let serv = UnixListener::bind(EV_SOCK).expect("open events socket");
@@ -145,9 +144,9 @@ mod tests {
         thread::spawn(move || {
             let _ = etx; // move into this scope
             loop {
-                match irx.recv() {
-                    Some(Interpret { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
-                        etx.lock().unwrap().send(Event::InstallingUpdate(id));
+                match crx.recv() {
+                    Some(CommandExec { cmd: Command::StartInstall(id), etx: Some(etx) }) => {
+                        etx.send(Event::InstallingUpdate(id));
                     }
                     Some(_) => panic!("expected StartInstall"),
                     None    => break
