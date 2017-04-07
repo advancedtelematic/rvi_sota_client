@@ -68,16 +68,16 @@ fn main() {
 
         if config.gateway.console {
             let cons_ctx = ctx.clone();
-            let cons_sub = broadcast.subscribe();
-            scope.spawn(move || Console.start(cons_ctx, cons_sub));
+            let cons_erx = broadcast.subscribe();
+            scope.spawn(move || Console.start(cons_ctx, cons_erx));
         }
 
         if config.gateway.dbus {
             #[cfg(feature = "d-bus")] {
                 let dbus_ctx = ctx.clone();
-                let dbus_sub = broadcast.subscribe();
+                let dbus_erx = broadcast.subscribe();
                 let mut dbus = DBus { cfg: config.dbus.clone() };
-                scope.spawn(move || dbus.start(dbus_ctx, dbus_sub));
+                scope.spawn(move || dbus.start(dbus_ctx, dbus_erx));
             }
             #[cfg(not(feature = "d-bus"))]
             exit!(2, "{}", "binary not compiled with 'd-bus' feature but dbus gateway enabled");
@@ -85,9 +85,9 @@ fn main() {
 
         if config.gateway.http {
             let http_ctx = ctx.clone();
-            let http_sub = broadcast.subscribe();
+            let http_erx = broadcast.subscribe();
             let mut http = Http { server: *config.network.http_server };
-            scope.spawn(move || http.start(http_ctx, http_sub));
+            scope.spawn(move || http.start(http_ctx, http_erx));
         }
 
         let services = if config.gateway.rvi {
@@ -103,12 +103,12 @@ fn main() {
         if config.gateway.socket {
             #[cfg(feature = "socket")] {
                 let socket_ctx = ctx.clone();
-                let socket_sub = broadcast.subscribe();
+                let socket_erx = broadcast.subscribe();
                 let mut socket = Socket {
                     cmd_sock: config.network.socket_commands_path.clone(),
                     ev_sock:  config.network.socket_events_path.clone()
                 };
-                scope.spawn(move || socket.start(socket_ctx, socket_sub));
+                scope.spawn(move || socket.start(socket_ctx, socket_erx));
             }
             #[cfg(not(feature = "socket"))]
             exit!(2, "{}", "binary not compiled with 'socket' feature but socket gateway enabled");
@@ -117,9 +117,9 @@ fn main() {
         if config.gateway.websocket {
             #[cfg(feature = "websocket")] {
                 let ws_ctx = ctx.clone();
-                let ws_sub = broadcast.subscribe();
+                let ws_erx = broadcast.subscribe();
                 let mut ws = Websocket { server: config.network.websocket_server.clone() };
-                scope.spawn(move || ws.start(ws_ctx, ws_sub));
+                scope.spawn(move || ws.start(ws_ctx, ws_erx));
             }
             #[cfg(not(feature = "websocket"))]
             exit!(2, "{}", "binary not compiled with 'websocket' feature but websocket gateway enabled");
@@ -134,7 +134,7 @@ fn main() {
             None
         };
 
-        let ei_sub  = broadcast.subscribe();
+        let ei_erx  = broadcast.subscribe();
         let ei_ctx  = ctx.clone();
         let ei_loop = etx.clone();
         let ei_auth = auth.clone();
@@ -150,7 +150,7 @@ fn main() {
             auto_dl: ei_dl,
             sysinfo: ei_sys,
             treehub: ei_tree,
-        }.run(ei_sub, ei_ctx));
+        }.run(ei_erx, ei_ctx));
 
         scope.spawn(move || CommandInterpreter {
             mode: if let Some(uptane) = uptane {
