@@ -17,7 +17,6 @@ COPY canonical_json.py $bin_dir
 COPY sota_client $bin_dir
 COPY sota_start.sh $bin_dir
 COPY sota_sysinfo.sh $bin_dir
-COPY sota_ostree.sh $bin_dir
 
 COPY sota_certificates $conf_dir
 

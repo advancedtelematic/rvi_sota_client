@@ -8,6 +8,7 @@ extern crate crossbeam;
 extern crate crypto;
 #[cfg(feature = "d-bus")]
 extern crate dbus;
+extern crate hex;
 extern crate hyper;
 extern crate openssl;
 extern crate pem;
@@ -20,6 +21,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json;
+extern crate tar;
 extern crate time;
 extern crate toml;
 #[cfg(feature = "websocket")]

@@ -70,7 +70,7 @@ impl Uptane {
         let rx = client.get(self.endpoint(service, endpoint), None);
         match rx.recv().expect("couldn't GET from uptane") {
             Response::Success(data) => Ok(data.body),
-            Response::Failed(data)  => Err(Error::from(data)),
+            Response::Failed(data)  => Err(data.into()),
             Response::Error(err)    => Err(err)
         }
     }
@@ -80,7 +80,7 @@ impl Uptane {
         let rx = client.put(self.endpoint(service, endpoint), Some(bytes));
         match rx.recv().expect("couldn't PUT bytes to uptane") {
             Response::Success(_)   => Ok(()),
-            Response::Failed(data) => Err(Error::from(data)),
+            Response::Failed(data) => Err(data.into()),
             Response::Error(err)   => Err(err)
         }
     }
@@ -159,7 +159,7 @@ impl Uptane {
 
     /// Sign the primary's `EcuVersion` for sending to the Director server.
     pub fn signed_version(&self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
-        let version = OstreePackage::get_ecu(&self.config.primary_ecu_serial)?.into_version(custom);
+        let version = OstreePackage::get_latest(&self.config.primary_ecu_serial)?.into_version(custom);
         TufSigned::sign(json::to_value(version)?, &self.privkey, self.sigtype)
     }
 

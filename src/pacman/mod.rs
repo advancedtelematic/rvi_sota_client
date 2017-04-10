@@ -10,15 +10,16 @@ use serde_json as json;
 use std::str::FromStr;
 
 use datatype::{Error, Package, InstallOutcome};
+use http::Client;
 
 
-/// Optional credentials for forwarding the to package manager.
-#[derive(Default)]
-pub struct Credentials {
-    pub access_token: Option<String>,
-    pub ca_file:      Option<String>,
-    pub cert_file:    Option<String>,
-    pub pkey_file:    Option<String>,
+/// HTTP client and credentials for use by a package manager.
+pub struct Credentials<'c> {
+    pub client:    &'c Client,
+    pub token:     Option<String>,
+    pub ca_file:   Option<String>,
+    pub cert_file: Option<String>,
+    pub pkey_file: Option<String>,
 }
 
 
