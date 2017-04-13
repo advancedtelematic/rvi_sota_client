@@ -47,7 +47,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let rx = self.client.get(self.endpoint("updates"), None);
         match rx.recv().expect("couldn't get update requests") {
             Response::Success(data) => Ok(json::from_slice::<Vec<UpdateRequest>>(&data.body)?),
-            Response::Failed(data)  => Err(Error::from(data)),
+            Response::Failed(data)  => Err(data.into()),
             Response::Error(err)    => Err(err)
         }
     }
@@ -57,7 +57,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let rx = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
         let data = match rx.recv().expect("couldn't download update") {
             Response::Success(data) => Ok(data),
-            Response::Failed(data)  => Err(Error::from(data)),
+            Response::Failed(data)  => Err(data.into()),
             Response::Error(err)    => Err(err)
         }?;
 
@@ -85,7 +85,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let rx = self.client.put(self.endpoint("installed"), Some(json::to_vec(packages)?));
         match rx.recv().expect("couldn't send installed packages") {
             Response::Success(_)   => Ok(()),
-            Response::Failed(data) => Err(Error::from(data)),
+            Response::Failed(data) => Err(data.into()),
             Response::Error(err)   => Err(err)
         }
     }
@@ -96,7 +96,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let rx  = self.client.post(url, Some(json::to_vec(&report.operation_results)?));
         match rx.recv().expect("couldn't send update report") {
             Response::Success(_)   => Ok(()),
-            Response::Failed(data) => Err(Error::from(data)),
+            Response::Failed(data) => Err(data.into()),
             Response::Error(err)   => Err(err)
         }
     }
@@ -106,7 +106,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let rx = self.client.put(self.endpoint("system_info"), Some(body));
         match rx.recv().expect("couldn't send system info") {
             Response::Success(_)   => Ok(()),
-            Response::Failed(data) => Err(Error::from(data)),
+            Response::Failed(data) => Err(data.into()),
             Response::Error(err)   => Err(err)
         }
     }

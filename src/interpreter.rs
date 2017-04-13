@@ -312,7 +312,7 @@ impl CommandInterpreter {
         } else {
             (None, None, None)
         };
-        Credentials { access_token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
+        Credentials { client: &*self.http, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
     }
 }
 

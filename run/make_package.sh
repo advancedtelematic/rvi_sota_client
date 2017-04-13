@@ -54,7 +54,6 @@ function make_pkg {
     "${cwd}/canonical_json.py=${bin_dir}/canonical_json.py" \
     "${cwd}/sota_client=${bin_dir}/sota_client" \
     "${cwd}/sota_sysinfo.sh=${bin_dir}/sota_sysinfo.sh" \
-    "${cwd}/sota_ostree.sh=${bin_dir}/sota_ostree.sh" \
     "${cwd}/sota_certificates=${config_dir}/sota_certificates" \
     "${toml_file}=${config_dir}/sota.toml"
 

@@ -1,4 +1,5 @@
 use chrono::ParseError as ChronoParseError;
+use hex::FromHexError;
 use hyper::error::Error as HyperError;
 use openssl::error::ErrorStack as OpensslErrors;
 use serde_json::Error as SerdeJsonError;
@@ -27,6 +28,7 @@ pub enum Error {
     Command(String),
     Config(String),
     FromUtf8(FromUtf8Error),
+    Hex(FromHexError),
     Http(ResponseData),
     HttpAuth(ResponseData),
     Hyper(HyperError),
@@ -68,6 +70,7 @@ impl Display for Error {
             Error::Command(ref err)     => format!("Unknown Command: {}", err),
             Error::Config(ref err)      => format!("Bad Config: {}", err),
             Error::FromUtf8(ref err)    => format!("From utf8 error: {}", err),
+            Error::Hex(ref err)         => format!("Not valid hex data: {}", err),
             Error::Http(ref err)        => format!("HTTP client error: {}", err),
             Error::HttpAuth(ref err)    => format!("HTTP authorization error: {}", err),
             Error::Hyper(ref err)       => format!("Hyper error: {}", err),
@@ -132,6 +135,7 @@ macro_rules! derive_from {
 
 derive_from!([
     ChronoParseError => ChronoParse,
+    FromHexError     => Hex,
     FromUtf8Error    => FromUtf8,
     HyperError       => Hyper,
     IoError          => Io,

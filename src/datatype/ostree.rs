@@ -1,18 +1,54 @@
+use base64;
+use hex::FromHex;
 use serde_json as json;
 use std::collections::HashMap;
-use std::fs::File;
-use std::io::BufReader;
+use std::fmt::Debug;
+use std::ffi::OsStr;
+use std::fs::{self, File};
+use std::io::{self, BufReader};
 use std::path::Path;
-use std::process::Command;
+use std::process::{Command, Output};
 use std::str;
+use tar::Archive;
 
 use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufImage, TufMeta, Url};
+use http::{Client, Response};
 use pacman::Credentials;
 use uptane::{read_file, write_file};
 
 
 const NEW_PACKAGE: &'static str = "/tmp/sota-package";
 const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
+const REMOTE_PATH: &'static str = "/etc/ostree/remotes.d/sota-remote.conf";
+
+
+/// Struct for OSTree related functions.
+pub struct Ostree;
+
+impl Ostree {
+    fn run<S: AsRef<OsStr> + Debug>(args: &[S]) -> Result<Output, Error> {
+        debug!("running `ostree` command with args: {:?}", args);
+        Command::new("ostree")
+            .args(args)
+            .env("OSTREE_BOOT_PARTITION", "/boot")
+            .output()
+            .map_err(|err| Error::Command(format!("ostree: {}", err)))
+            .and_then(|output| {
+                if output.status.success() {
+                    Ok(output)
+                } else {
+                    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                    Err(Error::OSTree(format!("stdout: {}\nstderr: {}", stdout, stderr)))
+                }
+            })
+    }
+
+    fn hash(commit: &str) -> Result<String, Error> {
+        let data = Vec::from_hex(commit)?;
+        Ok(base64::encode(&data).replace('/', "_").trim_right_matches('=').into())
+    }
+}
 
 
 /// Details of a remote `OSTree` package.
@@ -38,33 +74,6 @@ impl OstreePackage {
         }
     }
 
-    /// Shell out to the ostree command to install this package.
-    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, Error> {
-        let mut cmd = Command::new("sota_ostree.sh");
-        cmd.env("COMMIT", self.commit.clone());
-        cmd.env("REF_NAME", self.refName.clone());
-        cmd.env("DESCRIPTION", self.description.clone());
-        cmd.env("PULL_URI", self.pullUri.clone());
-        creds.access_token.as_ref().map(|t| cmd.env("AUTHPLUS_ACCESS_TOKEN", t.clone()));
-        creds.ca_file.as_ref().map(|f| cmd.env("TLS_CA_CERT", f.clone()));
-        creds.cert_file.as_ref().map(|f| cmd.env("TLS_CLIENT_CERT", f.clone()));
-        creds.pkey_file.as_ref().map(|f| cmd.env("TLS_CLIENT_KEY", f.clone()));
-
-        let output = cmd.output().map_err(|err| Error::OSTree(format!("{}", err)))?;
-        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-
-        match output.status.code() {
-            Some(0) => {
-                write_file(NEW_PACKAGE, &json::to_vec(self)?)
-                    .unwrap_or_else(|err| error!("couldn't save package info: {}", err));
-                Ok(InstallOutcome::new(InstallCode::OK, stdout, stderr))
-            }
-            Some(99) => Ok(InstallOutcome::new(InstallCode::ALREADY_PROCESSED, stdout, stderr)),
-            _        => Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, stdout, stderr))
-        }
-    }
-
     /// Convert the current `OstreePackage` into an `EcuVersion`.
     pub fn into_version(self, custom: Option<EcuCustom>) -> EcuVersion {
         let mut hashes = HashMap::new();
@@ -87,24 +96,47 @@ impl OstreePackage {
         }
     }
 
-    /// Get the current OSTree package based on the last successful installation
-    /// if it exists, or from running `ostree admin status` otherwise.
-    pub fn get_ecu(serial: &str) -> Result<OstreePackage, Error> {
-        let branch = if Path::new(NEW_PACKAGE).exists() {
-            debug!("getting ostree package from `{}`", NEW_PACKAGE);
-            return Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?);
-        } else if Path::new(BOOT_BRANCH).exists() {
-            debug!("getting ostree branch from `{}`", BOOT_BRANCH);
-            String::from_utf8(read_file(BOOT_BRANCH)?).unwrap_or_else(|_| "<error>".into())
-        } else {
-            error!("unknown ostree branch");
-            "<unknown>".into()
-        };
+    /// Install this package using the `ostree` command.
+    pub fn install(&self, creds: &Credentials) -> Result<InstallOutcome, Error> {
+        debug!("installing ostree commit {}", self.commit);
+        let from = Self::get_latest(&self.ecu_serial)?;
+        if from.commit == self.commit {
+            return Ok(InstallOutcome::new(InstallCode::ALREADY_PROCESSED, "".into(), "".into()));
+        }
+        self.get_delta(creds.client, &self.pullUri, &from.commit)
+            .and_then(|dir| Ostree::run(&["static-delta", "apply-offline", &dir]))
+            .or_else(|_| self.pull_commit("sota-remote", creds))
+            .map(|_| ())?;
 
-        debug!("getting ostree branch with `ostree admin status`");
-        Command::new("ostree").arg("admin").arg("status").output()
-            .map_err(|err| Error::Command(format!("couldn't run `ostree admin status`: {}", err)))
-            .and_then(|output| OstreeBranch::parse(serial, &branch, str::from_utf8(&output.stdout)?))
+        let output = Ostree::run(&["admin", "deploy", "--karg-proc-cmdline", &self.commit])?;
+        let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+        let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+        if output.status.success() {
+            write_file(NEW_PACKAGE, &json::to_vec(self)?).unwrap_or_else(|err| error!("couldn't save package info: {}", err));
+            Ok(InstallOutcome::new(InstallCode::OK, stdout, stderr))
+        } else {
+            Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, stdout, stderr))
+        }
+    }
+
+    /// Get the latest OSTree package (including any new updates pending a reboot).
+    pub fn get_latest(serial: &str) -> Result<OstreePackage, Error> {
+        if Path::new(NEW_PACKAGE).exists() {
+            trace!("getting ostree package from `{}`", NEW_PACKAGE);
+            Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?)
+        } else if Path::new(BOOT_BRANCH).exists() {
+            trace!("getting ostree branch from `{}`", BOOT_BRANCH);
+            Ok(Self::get_current(serial, str::from_utf8(&read_file(BOOT_BRANCH)?)?)?)
+        } else {
+            trace!("unknown ostree branch");
+            Ok(Self::get_current(serial, "<unknown>")?)
+        }
+    }
+
+    /// Get the current OSTree package with `ostree admin status`.
+    pub fn get_current(serial: &str, branch: &str) -> Result<OstreePackage, Error> {
+        Ostree::run(&["admin", "status"])
+            .and_then(|output| OstreeBranch::parse(serial, branch, str::from_utf8(&output.stdout)?))
             .and_then(|branches| {
                 branches.into_iter()
                     .filter(|branch| branch.current)
@@ -112,6 +144,60 @@ impl OstreePackage {
                     .nth(0)
                     .ok_or_else(|| Error::Command("current branch unknown".to_string()))
             })
+    }
+
+    /// Extract a static delta between two commits (if it exists) and return the path.
+    pub fn get_delta(&self, client: &Client, server: &str, current_commit: &str) -> Result<String, Error> {
+        debug!("getting a static delta from {}", current_commit);
+        let (current, next)  = (Ostree::hash(current_commit)?, Ostree::hash(&self.commit)?);
+        let (prefix, suffix) = current.split_at(2);
+        let url  = format!("{}/deltas/{}/{}-{}/apply-offline.tar", server, prefix, suffix, next);
+        let data = match client.get(url.parse()?, None).recv().expect("get_delta") {
+            Response::Success(data) => Ok(data),
+            Response::Failed(data)  => Err(data.into()),
+            Response::Error(err)    => Err(err)
+        }?;
+
+        let tar = format!("/tmp/sota-delta-{}-{}.tar", current_commit, self.commit);
+        let mut file = File::create(&tar)?;
+        let _ = io::copy(&mut &*data.body, &mut file)?;
+        Archive::new(File::open(&tar)?).unpack("/tmp/sota-delta")?;
+        Ok(format!("/tmp/sota-delta/{}/{}-{}", prefix, suffix, next))
+    }
+
+    /// Pull a commit from a remote repository with `ostree pull`.
+    pub fn pull_commit(&self, remote: &str, creds: &Credentials) -> Result<Output, Error> {
+        debug!("pulling from ostree remote: {}", remote);
+        if ! Path::new(REMOTE_PATH).exists() {
+            let _ = self.add_remote(remote, creds)?;
+        }
+
+        let mut args = vec!["pull".into(), remote.into()];
+        if let Some(ref token) = creds.token {
+            args.push(format!("--http-header='Authorization=Bearer {}'", token));
+        }
+        args.push(self.commit.clone());
+        Ostree::run(&args)
+    }
+
+    /// Add a remote repository with `ostree remote add`.
+    pub fn add_remote(&self, remote: &str, creds: &Credentials) -> Result<Output, Error> {
+        debug!("adding ostree remote: {}", remote);
+        if Path::new(REMOTE_PATH).exists() {
+            fs::remove_file(REMOTE_PATH)?;
+        }
+
+        let mut args = vec!["remote".into(), "add".into(), "--no-gpg-verify".into()];
+        if let Some(ref ca) = creds.ca_file {
+            args.push(format!("--set=tls-ca-path={}", ca));
+        }
+        if let Some(ref pkey) = creds.pkey_file {
+            args.push(format!("--set=tls-client-cert-path={}", pkey));
+            args.push(format!("--set=tls-client-key-path={}", pkey));
+        }
+        args.push(remote.into());
+        args.push(self.pullUri.clone());
+        Ostree::run(&args)
     }
 }
 

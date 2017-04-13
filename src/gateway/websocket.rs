@@ -9,7 +9,6 @@ use gateway::Gateway;
 use interpreter::CommandExec;
 
 
-// FIXME(PRO-2835): broadcast system events
 pub struct Websocket {
     pub server: String
 }
@@ -53,7 +52,7 @@ fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
                     socket.write_message(Message::Text(reply)).map_err(|err| error!("Writing to websocket: {}", err))
                 });
         });
-    let _ = socket.close();
+    socket.close(None).unwrap_or_else(|err| error!("Closing websocket: {}", err))
 }
 
 
@@ -105,7 +104,7 @@ mod tests {
                     let reply = format!("{}", sock.read_message().expect("reply"));
                     let event = json::from_str::<Event>(&reply).expect("event");
                     assert_eq!(event, Event::InstallingUpdate(id));
-                    sock.close().expect("close");
+                    sock.close(None).expect("close");
                 });
             }
         });
