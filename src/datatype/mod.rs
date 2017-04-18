@@ -7,8 +7,8 @@ pub mod event;
 pub mod install;
 pub mod network;
 pub mod ostree;
+pub mod signature;
 pub mod tuf;
-pub mod verify;
 
 pub use self::auth::{AccessToken, Auth, ClientCredentials};
 pub use self::command::Command;
@@ -22,10 +22,10 @@ pub use self::install::{InstallCode, InstallOutcome, InstallReport, InstallResul
                         InstalledFirmware, InstalledPackage, InstalledSoftware};
 pub use self::network::{Method, SocketAddr, Url};
 pub use self::ostree::OstreePackage;
-pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyValue, PrivateKey,
-                    RoleData, RoleName, RoleMeta, Signature, TufCustom, TufImage,
+pub use self::signature::{Signature, SignatureType};
+pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyType, KeyValue,
+                    PrivateKey, RoleData, RoleName, RoleMeta, TufCustom, TufImage,
                     TufMeta, TufRole, TufSigned};
-pub use self::verify::{KeyType, SigType, Verified, Verifier};
 
 
 // TODO remove this ugly hack ASAP

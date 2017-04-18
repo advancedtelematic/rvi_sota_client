@@ -128,7 +128,7 @@ fn main() {
         let uptane = if let PacMan::Uptane = config.device.package_manager {
             if services.is_some() { exit!(2, "{}", "unexpected [rvi] config with uptane package manager"); }
             let mut uptane = Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
-            let _ = uptane.get_root(&http, &Service::Director).map_err(|err| exit!(2, "couldn't get root.json from director: {}", err));
+            let _ = uptane.get_root(&http, Service::Director).map_err(|err| exit!(2, "couldn't get root.json from director: {}", err));
             Some(uptane)
         } else {
             None

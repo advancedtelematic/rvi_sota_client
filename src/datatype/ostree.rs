@@ -173,7 +173,7 @@ impl OstreePackage {
         }
 
         let mut args = vec!["pull".into(), remote.into()];
-        if let Some(ref token) = creds.token {
+        if let Some(token) = creds.token {
             args.push(format!("--http-header='Authorization=Bearer {}'", token));
         }
         args.push(self.commit.clone());
@@ -188,10 +188,10 @@ impl OstreePackage {
         }
 
         let mut args = vec!["remote".into(), "add".into(), "--no-gpg-verify".into()];
-        if let Some(ref ca) = creds.ca_file {
+        if let Some(ca) = creds.ca_file {
             args.push(format!("--set=tls-ca-path={}", ca));
         }
-        if let Some(ref pkey) = creds.pkey_file {
+        if let Some(pkey) = creds.pkey_file {
             args.push(format!("--set=tls-client-cert-path={}", pkey));
             args.push(format!("--set=tls-client-key-path={}", pkey));
         }

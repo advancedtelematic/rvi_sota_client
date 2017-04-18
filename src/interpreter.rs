@@ -306,9 +306,9 @@ impl CommandInterpreter {
     }
 
     fn get_credentials(&self) -> Credentials {
-        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.clone()) } else { None };
+        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.as_ref()) } else { None };
         let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
-            (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
+            (Some(tls.ca_file.as_ref()), Some(tls.cert_file.as_ref()), Some(tls.pkey_file.as_ref()))
         } else {
             (None, None, None)
         };
@@ -330,15 +330,14 @@ pub fn system_info(cmd: &str) -> Result<String, Error> {
 mod tests {
     use super::*;
 
-    use chan;
-    use chan::{Sender, Receiver};
+    use chan::{self, Sender, Receiver};
     use std::thread;
+    use std::fmt::Debug;
     use uuid::Uuid;
 
     use datatype::{Auth, Command, Config, DownloadComplete, Event, InstallCode};
     use http::TestClient;
     use pacman::PacMan;
-    use pacman::test::assert_rx;
 
 
     fn new_interpreter(replies: Vec<String>, succeeds: bool) -> (Sender<Command>, Receiver<Event>) {
@@ -366,6 +365,11 @@ mod tests {
         InstallResult::new(format!("{}", Uuid::default()), code, "stdout: \nstderr: \n".into())
     }
 
+    fn assert_rx<X: PartialEq + Debug>(rx: &Receiver<X>, vals: &[X]) {
+        for val in vals {
+            assert_eq!(*val, rx.recv().expect(&format!("rx missing: {:?}", val)));
+        }
+    }
 
     #[test]
     fn download_updates() {

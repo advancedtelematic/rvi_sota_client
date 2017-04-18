@@ -14,12 +14,12 @@ use http::Client;
 
 
 /// HTTP client and credentials for use by a package manager.
-pub struct Credentials<'c> {
+pub struct Credentials<'c, 'f> {
     pub client:    &'c Client,
-    pub token:     Option<String>,
-    pub ca_file:   Option<String>,
-    pub cert_file: Option<String>,
-    pub pkey_file: Option<String>,
+    pub token:     Option<&'f str>,
+    pub ca_file:   Option<&'f str>,
+    pub cert_file: Option<&'f str>,
+    pub pkey_file: Option<&'f str>,
 }
 
 

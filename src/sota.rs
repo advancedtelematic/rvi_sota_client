@@ -1,7 +1,6 @@
 use serde_json as json;
-use std::{fs, io};
-use std::fs::File;
-use std::path::PathBuf;
+use std::fs::{self, File};
+use std::io;
 use uuid::Uuid;
 
 use datatype::{Config, DownloadComplete, Error, Package, InstallReport, InstallResult,
@@ -23,23 +22,14 @@ impl<'c, 'h> Sota<'c, 'h> {
         Sota { config: config, client: client }
     }
 
-    /// When using cert authentication returns an endpoint of: `<server>/core/<path>`
-    /// otherwise returns an endpoint of: `<server>/api/v1/mydevice/<device-id>/<path>`.
+    /// When using cert authentication returns an endpoint of: `<tls-server>/core/<path>`
+    /// otherwise returns an endpoint of: `<core-server>/api/v1/mydevice/<device-id>/<path>`.
     fn endpoint(&self, path: &str) -> Url {
-        if self.config.tls.is_some() {
-            self.config.tls.as_ref().unwrap().server.join(&format!("/core/{}", path))
+        if let Some(ref tls) = self.config.tls {
+            tls.server.join(&format!("/core/{}", path))
         } else {
             self.config.core.server.join(&format!("/api/v1/mydevice/{}/{}", self.config.device.uuid, path))
         }
-    }
-
-    /// Returns the path to a package on the device.
-    fn package_path(&self, id: &Uuid) -> Result<String, Error> {
-        let mut path = PathBuf::new();
-        path.push(&self.config.device.packages_dir);
-        path.push(format!("{}", id));
-        let out = path.to_str().ok_or_else(|| Error::Parse(format!("Path is not valid UTF-8: {:?}", path)))?;
-        Ok(out.to_string())
     }
 
     /// Check for any new package updates.
@@ -61,16 +51,15 @@ impl<'c, 'h> Sota<'c, 'h> {
             Response::Error(err)    => Err(err)
         }?;
 
-        let path = self.package_path(&id)?;
-        let mut file = File::create(&path)
-            .map_err(|err| Error::Client(format!("couldn't create path {}: {}", path, err)))?;
+        let path = format!("{}/{}", self.config.device.packages_dir, id);
+        let mut file = File::create(&path).map_err(|err| Error::Client(format!("couldn't create path {}: {}", path, err)))?;
         let _ = io::copy(&mut &*data.body, &mut file)?;
         Ok(DownloadComplete { update_id: id, update_image: path.into(), signature: "".into() })
     }
 
     /// Install an update using the current package manager.
     pub fn install_update(&mut self, id: &Uuid, creds: &Credentials) -> Result<InstallResult, Error> {
-        let path = self.package_path(id)?;
+        let path = format!("{}/{}", self.config.device.packages_dir, id);
         self.config.device
             .package_manager
             .install_package(&path, creds)
