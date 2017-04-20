@@ -101,8 +101,8 @@ impl Uptane {
         }
     }
 
-    /// Verify the signed TUF data with the verifier's keys.
-    fn verify_signed(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
+    /// Verify the signed TUF data using the current verifier's keys.
+    fn verify_tuf(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
         let data = json::from_value::<RoleData>(signed.signed.clone())?;
         let new_ver = self.verifier.verify_signed(role, signed)?;
         let old_ver = self.verifier.set_version(role, new_ver);
@@ -116,13 +116,13 @@ impl Uptane {
         let role_data = json::from_value::<RoleData>(signed.signed.clone())?;
 
         for (id, key) in role_data.keys.ok_or(Error::UptaneMissingKeys)? {
-            self.verifier.add_key(id, key);
+            self.verifier.add_key(id, key)?;
         }
         for (role, meta) in role_data.roles.ok_or(Error::UptaneMissingRoles)? {
             self.verifier.add_meta(role, meta);
         }
 
-        let verified = self.verify_signed(RoleName::Root, signed)?;
+        let verified = self.verify_tuf(RoleName::Root, signed)?;
         if self.persist {
             fs::create_dir_all(format!("{}/{}", self.config.metadata_path, service))?;
             write_file(&format!("{}/{}/root.json", self.config.metadata_path, service), &json)?;
@@ -133,13 +133,13 @@ impl Uptane {
     /// Fetch the specified role's metadata from the Director service.
     pub fn get_director(&mut self, client: &Client, role: RoleName) -> Result<Verified, Error> {
         let json = self.get_json(client, Service::Director, role)?;
-        self.verify_signed(role, json::from_slice::<TufSigned>(&json)?)
+        self.verify_tuf(role, json::from_slice::<TufSigned>(&json)?)
     }
 
     /// Fetch the specified role's metadata from the Repo service.
     pub fn get_repo(&mut self, client: &Client, role: RoleName) -> Result<Verified, Error> {
         let json = self.get_json(client, Service::Repo, role)?;
-        self.verify_signed(role, json::from_slice::<TufSigned>(&json)?)
+        self.verify_tuf(role, json::from_slice::<TufSigned>(&json)?)
     }
 
     /// Send a signed manifest with a list of signed objects to the Director server.
@@ -183,9 +183,15 @@ pub struct Verifier {
 }
 
 impl Verifier {
-    pub fn add_key(&mut self, id: String, key: Key) {
+    pub fn add_key(&mut self, id: String, key: Key) -> Result<(), Error> {
         trace!("inserting to verifier: {}", id);
-        self.keys.insert(id, key);
+        let keyid = key.keyval.key_id()?;
+        if id == keyid {
+            self.keys.insert(id, key);
+            Ok(())
+        } else {
+            Err(Error::TufKeyId(format!("expected `{}`, got `{}`", id, keyid)))
+        }
     }
 
     pub fn add_meta(&mut self, role: RoleName, meta: RoleMeta) {
@@ -204,21 +210,21 @@ impl Verifier {
     }
 
     /// Verify the signed data then return the version.
-    pub fn verify(&self, role: RoleName, signed: TufSigned) -> Result<u64, Error> {
+    pub fn verify_signed(&self, role: RoleName, signed: TufSigned) -> Result<u64, Error> {
         self.verify_signatures(role, &signed)?;
         let tuf_role = json::from_value::<TufRole>(signed.signed)?;
         if role != tuf_role._type {
-            Err(Error::UptaneRole(format!("expected {}, got {}", role, tuf_role._type)))
-        } else if tuf_role.expired()? {
+            Err(Error::UptaneRole(format!("expected `{}`, got `{}`", role, tuf_role._type)))
+        } else if tuf_role.expired() {
             Err(Error::UptaneExpired)
-        } else if tuf_role.version < *self.versions.get(&role).unwrap_or(&0) {
+        } else if tuf_role.version < self.get_version(role) {
             Err(Error::UptaneVersion)
         } else {
             Ok(tuf_role.version)
         }
     }
 
-    /// Check that a role-defined threshold of signatures pass verification.
+    /// Verify that a role-defined threshold of signatures successfully validate.
     pub fn verify_signatures(&self, role: RoleName, signed: &TufSigned) -> Result<(), Error> {
         let cjson = canonicalize_json(&json::to_vec(&signed.signed)?)?;
         let valid = signed.signatures
@@ -234,7 +240,8 @@ impl Verifier {
         }
     }
 
-    fn verify_data(&self, data: &[u8], sig: &Signature) -> bool {
+    /// Verify that the signature matches the data.
+    pub fn verify_data(&self, data: &[u8], sig: &Signature) -> bool {
         let outcome = || -> Result<bool, Error> {
             let key = self.keys.get(&sig.keyid).ok_or_else(|| Error::KeyNotFound(sig.keyid.clone()))?;
             let sig = base64::decode(&sig.sig)?;
@@ -271,7 +278,7 @@ pub fn read_file(path: &str) -> Result<Vec<u8>, Error> {
 
 pub fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
     let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(path)
-        .map_err(|err| Error::Client(format!("couldn't open {} for-remote writing: {}", path, err)))?;
+        .map_err(|err| Error::Client(format!("couldn't open {} for writing: {}", path, err)))?;
     let _ = file.write(&*buf).map_err(|err| Error::Client(format!("couldn't write to {}: {}", path, err)))?;
     Ok(())
 }

@@ -5,8 +5,8 @@ use sota::datatype::Config;
 
 fn test_config(path: &str, is_ok: bool) {
     match (Config::load(path), is_ok) {
-        (Ok(_), false)       => panic!("config parsing ok but should have failed"),
-        (Err(ref err), true) => panic!("config parsing failed: {}", err),
+        (Ok(_),    false) => panic!("config parsing ok but should have failed"),
+        (Err(err), true)  => panic!("config parsing failed: {}", err),
         _ => ()
     }
 }

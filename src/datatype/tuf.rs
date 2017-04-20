@@ -1,5 +1,8 @@
 use base64;
-use chrono::{DateTime, NaiveDateTime, UTC};
+use chrono::{DateTime, UTC};
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
+use pem;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde_json as json;
 use std::fmt::{self, Display, Formatter};
@@ -18,14 +21,13 @@ pub struct TufSigned {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TufRole {
     pub _type:   RoleName,
-    pub expires: String,
+    pub expires: DateTime<UTC>,
     pub version: u64,
 }
 
 impl TufRole {
-    pub fn expired(&self) -> Result<bool, Error> {
-        let expiry = NaiveDateTime::parse_from_str(&self.expires, "%FT%TZ")?;
-        Ok(DateTime::from_utc(expiry, UTC) < UTC::now())
+    pub fn expired(&self) -> bool {
+        self.expires < UTC::now()
     }
 }
 
@@ -124,6 +126,15 @@ pub struct Key {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Hash)]
 pub struct KeyValue {
     pub public: String,
+}
+
+impl KeyValue {
+    pub fn key_id(&self) -> Result<String, Error> {
+        let pem = pem::parse(&self.public)?;
+        let mut hasher = Sha256::new();
+        hasher.input(&pem.contents);
+        Ok(hasher.result_str())
+    }
 }
 
 pub struct PrivateKey {
