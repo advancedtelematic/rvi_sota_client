@@ -2,15 +2,15 @@ use base64;
 use pem;
 use ring::digest;
 use serde_json as json;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::Path;
 
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, OstreePackage, PrivateKey,
-               RoleData, RoleMeta, RoleName, SignatureType, TufMeta, TufRole, TufSigned,
-               UptaneConfig, Url, canonicalize_json};
+               RoleData, RoleMeta, RoleName, Signature, SignatureType, TufMeta, TufRole,
+               TufSigned, UptaneConfig, Url, canonicalize_json};
 use http::{Client, Response};
 
 
@@ -205,7 +205,7 @@ impl Verifier {
 
     /// Verify the signed data then return the version.
     pub fn verify(&self, role: RoleName, signed: TufSigned) -> Result<u64, Error> {
-        self.verify_signatures(&role, &signed)?;
+        self.verify_signatures(role, &signed)?;
         let tuf_role = json::from_value::<TufRole>(signed.signed)?;
         if role != tuf_role._type {
             Err(Error::UptaneRole(format!("expected {}, got {}", role, tuf_role._type)))
@@ -218,35 +218,31 @@ impl Verifier {
         }
     }
 
-    pub fn verify_signatures(&self, role: &RoleName, signed: &TufSigned) -> Result<(), Error> {
-        let cjson = canonicalize_json(json::to_string(&signed.signed)?.as_bytes())?;
-        let mut valid_count = 0;
-        for sig in &signed.signatures {
-            self.keys
-                .get(&sig.keyid)
-                .ok_or_else(|| Error::KeyNotFound(sig.keyid.clone()))
-                .and_then(|key| {
-                    let public = &key.keyval.public;
-                    let pem = pem::parse(public).map_err(Error::Pem)?;
-                    let sig = base64::decode(&sig.sig).map_err(Error::Base64)?;
-                    let sig_type: SignatureType = key.keytype.clone().into();
-                    if sig_type.verify_msg(&cjson, &pem.contents, &sig) {
-                        trace!("successful verification for {}", public);
-                        valid_count += 1;
-                    } else {
-                        trace!("failed verification for {}", public);
-                    }
-                    Ok(())
-                })
-                .unwrap_or_else(|err| error!("verification failed for key {}: {}", sig.keyid, err))
-        }
+    /// Check that a role-defined threshold of signatures pass verification.
+    pub fn verify_signatures(&self, role: RoleName, signed: &TufSigned) -> Result<(), Error> {
+        let cjson = canonicalize_json(&json::to_vec(&signed.signed)?)?;
+        let valid = signed.signatures
+            .iter()
+            .filter_map(|sig| if self.verify_data(&cjson, sig) { Some(&sig.sig) } else { None })
+            .collect::<HashSet<_>>();
 
-        let role = self.roles.get(role).ok_or_else(|| Error::UptaneRole(format!("{}", role)))?;
-        if valid_count < role.threshold {
+        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
+        if valid.len() < meta.threshold {
             Err(Error::UptaneRoleThreshold)
         } else {
             Ok(())
         }
+    }
+
+    fn verify_data(&self, data: &[u8], sig: &Signature) -> bool {
+        let outcome = || -> Result<bool, Error> {
+            let key = self.keys.get(&sig.keyid).ok_or_else(|| Error::KeyNotFound(sig.keyid.clone()))?;
+            let sig = base64::decode(&sig.sig)?;
+            let pem = pem::parse(&key.keyval.public)?;
+            let sig_type: SignatureType = key.keytype.clone().into();
+            Ok(sig_type.verify_msg(data, &pem.contents, &sig))
+        }();
+        outcome.unwrap_or_else(|err| { trace!("failed verification for {}: {}", sig.keyid, err); false })
     }
 }
 
