@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn test_get_update_requests() {
-        let pending_update = UpdateRequest {
+        let pend = UpdateRequest {
             requestId: Uuid::default(),
             status: RequestStatus::Pending,
             packageId: Package {
@@ -124,12 +124,10 @@ mod tests {
             createdAt: "2010-01-01".to_string()
         };
 
-        let json = format!("[{}]", json::to_string(&pending_update).unwrap());
         let mut sota = Sota {
             config: &Config::default(),
-            client: &mut TestClient::from(vec![json.to_string()]),
+            client: &mut TestClient::from(vec![format!("[{}]", json::to_string(&pend).unwrap()).into_bytes()]),
         };
-
         let updates: Vec<UpdateRequest> = sota.get_update_requests().unwrap();
         let ids: Vec<Uuid> = updates.iter().map(|p| p.requestId).collect();
         assert_eq!(ids, vec![Uuid::default()])

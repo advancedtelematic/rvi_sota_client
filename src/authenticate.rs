@@ -55,13 +55,13 @@ mod tests {
 
     #[test]
     fn test_oauth2() {
-        let token = r#"{
+        let token = br#"{
             "access_token": "token",
             "token_type": "type",
             "expires_in": 10,
             "scope": "scope1 scope2"
         }"#;
-        let client = TestClient::from(vec![token.to_string()]);
+        let client = TestClient::from(vec![token.to_vec()]);
         let expect = AccessToken {
             access_token: "token".to_string(),
             token_type:   "type".to_string(),
@@ -73,7 +73,7 @@ mod tests {
 
     #[test]
     fn test_oauth2_bad_json() {
-        let client = TestClient::from(vec![r#"{"apa": 1}"#.to_string()]);
+        let client = TestClient::from(vec![br#"{"apa": 1}"#.to_vec()]);
         assert!(oauth2(test_server(), &client).is_err());
     }
 }

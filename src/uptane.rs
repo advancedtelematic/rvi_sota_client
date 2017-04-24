@@ -4,14 +4,14 @@ use ring::digest;
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
+use std::fs;
 use std::path::Path;
 
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, OstreePackage, PrivateKey,
                RoleData, RoleMeta, RoleName, Signature, SignatureType, TufMeta, TufRole,
                TufSigned, UptaneConfig, Url, canonicalize_json};
 use http::{Client, Response};
+use util::Util;
 
 
 /// Uptane service to communicate with.
@@ -42,7 +42,7 @@ pub struct Uptane {
 
 impl Uptane {
     pub fn new(config: &Config) -> Result<Self, Error> {
-        let private = read_file(&config.uptane.private_key_path)
+        let private = Util::read_file(&config.uptane.private_key_path)
             .map_err(|err| Error::Client(format!("couldn't read uptane.private_key_path: {}", err)))?;
         let priv_id = digest::digest(&digest::SHA256, &private)
             .as_ref()
@@ -94,7 +94,7 @@ impl Uptane {
         let path = format!("{}/{}/{}.json", &self.config.metadata_path, service, &role);
         if Path::new(&path).exists() {
             debug!("reading {}", path);
-            read_file(&path)
+            Util::read_file(&path)
         } else {
             debug!("fetching {}.json from {}", &role, service);
             self.get(client, service, &format!("{}.json", role))
@@ -125,7 +125,7 @@ impl Uptane {
         let verified = self.verify_tuf(RoleName::Root, signed)?;
         if self.persist {
             fs::create_dir_all(format!("{}/{}", self.config.metadata_path, service))?;
-            write_file(&format!("{}/{}/root.json", self.config.metadata_path, service), &json)?;
+            Util::write_file(&format!("{}/{}/root.json", self.config.metadata_path, service), &json)?;
         }
         Ok(verified)
     }
@@ -269,21 +269,6 @@ impl Verified {
 }
 
 
-pub fn read_file(path: &str) -> Result<Vec<u8>, Error> {
-    let mut file = File::open(path).map_err(|err| Error::Client(format!("couldn't open {}: {}", path, err)))?;
-    let mut buf = Vec::new();
-    file.read_to_end(&mut buf).map_err(|err| Error::Client(format!("couldn't read {}: {}", path, err)))?;
-    Ok(buf)
-}
-
-pub fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
-    let mut file = OpenOptions::new().create(true).write(true).truncate(true).open(path)
-        .map_err(|err| Error::Client(format!("couldn't open {} for writing: {}", path, err)))?;
-    let _ = file.write(&*buf).map_err(|err| Error::Client(format!("couldn't write to {}: {}", path, err)))?;
-    Ok(())
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,14 +303,6 @@ mod tests {
         }
     }
 
-    fn client_from_paths(paths: &[&str]) -> TestClient<Vec<u8>> {
-        let mut replies = Vec::new();
-        for path in paths {
-            replies.push(read_file(path).expect("couldn't read file"));
-        }
-        TestClient::from(replies)
-    }
-
     fn extract_custom(targets: HashMap<String, TufMeta>) -> HashMap<String, TufCustom> {
         let mut out = HashMap::new();
         for (file, meta) in targets {
@@ -337,7 +314,7 @@ mod tests {
 
     #[test]
     fn test_read_manifest() {
-        let bytes = read_file("tests/uptane/manifest.json").expect("couldn't read manifest.json");
+        let bytes = Util::read_file("tests/uptane/manifest.json").expect("couldn't read manifest.json");
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "<primary_ecu_serial>");
@@ -350,7 +327,7 @@ mod tests {
     #[test]
     fn test_get_targets() {
         let mut uptane = new_uptane();
-        let client = client_from_paths(&[
+        let client = TestClient::from_paths(&[
             "tests/uptane/root.json",
             "tests/uptane/targets.json",
         ]);
@@ -372,7 +349,7 @@ mod tests {
     #[test]
     fn test_get_snapshot() {
         let mut uptane = new_uptane();
-        let client = client_from_paths(&[
+        let client = TestClient::from_paths(&[
             "tests/uptane/root.json",
             "tests/uptane/snapshot.json",
         ]);
@@ -389,7 +366,7 @@ mod tests {
     #[test]
     fn test_get_timestamp() {
         let mut uptane = new_uptane();
-        let client = client_from_paths(&[
+        let client = TestClient::from_paths(&[
             "tests/uptane/root.json",
             "tests/uptane/timestamp.json",
         ]);

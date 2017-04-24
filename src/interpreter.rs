@@ -340,7 +340,7 @@ mod tests {
     use pacman::PacMan;
 
 
-    fn new_interpreter(replies: Vec<String>, succeeds: bool) -> (Sender<Command>, Receiver<Event>) {
+    fn new_interpreter(replies: Vec<Vec<u8>>, succeeds: bool) -> (Sender<Command>, Receiver<Event>) {
         let (ctx, crx) = chan::sync::<Command>(0);
         let (etx, erx) = chan::sync::<Event>(0);
 

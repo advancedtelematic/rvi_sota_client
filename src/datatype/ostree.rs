@@ -14,7 +14,7 @@ use tar::Archive;
 use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufImage, TufMeta, Url};
 use http::{Client, Response};
 use pacman::Credentials;
-use uptane::{read_file, write_file};
+use util::Util;
 
 
 const NEW_PACKAGE: &'static str = "/tmp/sota-package";
@@ -112,7 +112,7 @@ impl OstreePackage {
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if output.status.success() {
-            write_file(NEW_PACKAGE, &json::to_vec(self)?).unwrap_or_else(|err| error!("couldn't save package info: {}", err));
+            Util::write_file(NEW_PACKAGE, &json::to_vec(self)?).unwrap_or_else(|err| error!("couldn't save package info: {}", err));
             Ok(InstallOutcome::new(InstallCode::OK, stdout, stderr))
         } else {
             Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, stdout, stderr))
@@ -126,7 +126,7 @@ impl OstreePackage {
             Ok(json::from_reader(BufReader::new(File::open(NEW_PACKAGE)?))?)
         } else if Path::new(BOOT_BRANCH).exists() {
             trace!("getting ostree branch from `{}`", BOOT_BRANCH);
-            Ok(Self::get_current(serial, str::from_utf8(&read_file(BOOT_BRANCH)?)?)?)
+            Ok(Self::get_current(serial, str::from_utf8(&Util::read_file(BOOT_BRANCH)?)?)?)
         } else {
             trace!("unknown ostree branch");
             Ok(Self::get_current(serial, "<unknown>")?)
