@@ -15,7 +15,7 @@ use std::str::{self, FromStr};
 use std::sync::Arc;
 use untrusted::Input;
 
-use datatype::{Error, KeyType};
+use datatype::Error;
 
 
 const RSA_PKCS1_PSS_PADDING: c_int = 6;
@@ -66,15 +66,6 @@ impl FromStr for SignatureType {
     }
 }
 
-impl From<KeyType> for SignatureType {
-    fn from(keytype: KeyType) -> Self {
-        match keytype {
-            KeyType::Ed25519 => SignatureType::Ed25519,
-            KeyType::Rsa     => SignatureType::RsaSsaPss,
-        }
-    }
-}
-
 impl SignatureType {
     pub fn sign_msg(&self, msg: &[u8], key: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
@@ -116,15 +107,20 @@ impl SignatureType {
     pub fn verify_msg(&self, msg: &[u8], key: &[u8], sig: &[u8]) -> bool {
         match *self {
             SignatureType::Ed25519 => ed25519::verify(msg, key, sig),
+
             SignatureType::RsaSsaPss => {
-                let outcome = || -> Result<bool, Error> {
+                let verify = || -> Result<bool, Error> {
                     let pub_key = PKey::from_rsa(Rsa::public_key_from_der(key)?)?;
                     let mut verifier = OpensslVerifier::new(MessageDigest::sha256(), &pub_key)?;
                     verifier.pkey_ctx_mut().set_rsa_padding(Padding::from_raw(RSA_PKCS1_PSS_PADDING))?;
                     verifier.update(msg)?;
                     Ok(verifier.finish(sig)?)
-                }();
-                outcome.unwrap_or_else(|err| { trace!("RSA SSA-PSS verification failed: {}", err); false })
+                };
+
+                match verify() {
+                    Ok(outcome) => outcome,
+                    Err(err) => { trace!("RSA SSA-PSS verification failed: {}", err); false }
+                }
             }
         }
     }

@@ -111,7 +111,9 @@ pub struct RoleData {
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct RoleMeta {
     pub keyids:    HashSet<String>,
-    pub threshold: usize,
+    pub threshold: u64,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub version:   u64,
 }
 
 
@@ -119,22 +121,22 @@ pub struct RoleMeta {
 pub struct Key {
     pub keytype: KeyType,
     pub keyval:  KeyValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
+}
+
+impl Key {
+    pub fn key_id(&self) -> Result<String, Error> {
+        let mut hasher = Sha256::new();
+        match self.keytype {
+            KeyType::Ed25519 => hasher.input_str(&format!(r#""{}""#, self.keyval.public)),
+            KeyType::Rsa => hasher.input(&pem::parse(self.keyval.public.as_bytes())?.contents)
+        }
+        Ok(hasher.result_str())
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Hash)]
 pub struct KeyValue {
     pub public: String,
-}
-
-impl KeyValue {
-    pub fn key_id(&self) -> Result<String, Error> {
-        let pem = pem::parse(&self.public)?;
-        let mut hasher = Sha256::new();
-        hasher.input(&pem.contents);
-        Ok(hasher.result_str())
-    }
 }
 
 pub struct PrivateKey {

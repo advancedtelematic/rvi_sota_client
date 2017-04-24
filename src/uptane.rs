@@ -1,4 +1,5 @@
 use base64;
+use hex::FromHex;
 use pem;
 use ring::digest;
 use serde_json as json;
@@ -7,9 +8,9 @@ use std::fmt::{self, Display, Formatter};
 use std::fs;
 use std::path::Path;
 
-use datatype::{Config, EcuCustom, EcuManifests, Error, Key, OstreePackage, PrivateKey,
-               RoleData, RoleMeta, RoleName, Signature, SignatureType, TufMeta, TufRole,
-               TufSigned, UptaneConfig, Url, canonicalize_json};
+use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
+               PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
+               TufMeta, TufRole, TufSigned, UptaneConfig, Url, canonicalize_json};
 use http::{Client, Response};
 use util::Util;
 
@@ -93,10 +94,10 @@ impl Uptane {
     fn get_json(&mut self, client: &Client, service: Service, role: RoleName) -> Result<Vec<u8>, Error> {
         let path = format!("{}/{}/{}.json", &self.config.metadata_path, service, &role);
         if Path::new(&path).exists() {
-            debug!("reading {}", path);
+            debug!("reading {}.json from {}", role, path);
             Util::read_file(&path)
         } else {
-            debug!("fetching {}.json from {}", &role, service);
+            debug!("fetching {}.json from {}", role, service);
             self.get(client, service, &format!("{}.json", role))
         }
     }
@@ -105,7 +106,7 @@ impl Uptane {
     fn verify_tuf(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
         let data = json::from_value::<RoleData>(signed.signed.clone())?;
         let new_ver = self.verifier.verify_signed(role, signed)?;
-        let old_ver = self.verifier.set_version(role, new_ver);
+        let old_ver = self.verifier.set_version(role, new_ver)?;
         Ok(Verified { role: role, data: data, new_ver: new_ver, old_ver: old_ver })
     }
 
@@ -115,11 +116,11 @@ impl Uptane {
         let signed = json::from_slice::<TufSigned>(&json)?;
         let role_data = json::from_value::<RoleData>(signed.signed.clone())?;
 
+        for (role, meta) in role_data.roles.ok_or(Error::UptaneMissingRoles)? {
+            self.verifier.add_meta(role, meta)?;
+        }
         for (id, key) in role_data.keys.ok_or(Error::UptaneMissingKeys)? {
             self.verifier.add_key(id, key)?;
-        }
-        for (role, meta) in role_data.roles.ok_or(Error::UptaneMissingRoles)? {
-            self.verifier.add_meta(role, meta);
         }
 
         let verified = self.verify_tuf(RoleName::Root, signed)?;
@@ -174,39 +175,49 @@ impl Uptane {
 }
 
 
-/// Holds the keys used for verifying metadata and the current metadata versions.
+/// Store the keys and role data used for verifying uptane metadata.
 #[derive(Default)]
 pub struct Verifier {
-    keys:     HashMap<String, Key>,
-    roles:    HashMap<RoleName, RoleMeta>,
-    versions: HashMap<RoleName, u64>,
+    keys:  HashMap<String, Key>,
+    roles: HashMap<RoleName, RoleMeta>,
 }
 
 impl Verifier {
-    pub fn add_key(&mut self, id: String, key: Key) -> Result<(), Error> {
-        trace!("inserting to verifier: {}", id);
-        let keyid = key.keyval.key_id()?;
-        if id == keyid {
-            self.keys.insert(id, key);
-            Ok(())
+    pub fn add_meta(&mut self, role: RoleName, meta: RoleMeta) -> Result<(), Error> {
+        trace!("adding role to verifier: {}", role);
+        if self.roles.get(&role).is_some() {
+            Err(Error::UptaneRole(format!("{} already exists", role)))
+        } else if meta.threshold < 1 {
+            Err(Error::UptaneThreshold(format!("{} threshold too low", role)))
         } else {
-            Err(Error::TufKeyId(format!("expected `{}`, got `{}`", id, keyid)))
+            self.roles.insert(role, meta);
+            Ok(())
         }
     }
 
-    pub fn add_meta(&mut self, role: RoleName, meta: RoleMeta) {
-        trace!("inserting role metadata to verifier: {:?}", meta);
-        self.roles.insert(role, meta);
+    pub fn add_key(&mut self, id: String, key: Key) -> Result<(), Error> {
+        trace!("adding key_id to verifier: {}", id);
+        if id != key.key_id()? {
+            Err(Error::TufKeyId(format!("wrong key_id: {}", id)))
+        } else if self.keys.get(&id).is_some() {
+            Err(Error::TufKeyId(format!("key_id already exists: {}", id)))
+        } else {
+            self.keys.insert(id, key);
+            Ok(())
+        }
     }
 
-    pub fn get_version(&self, role: RoleName) -> u64 {
-        *self.versions.get(&role).unwrap_or(&0)
+    pub fn get_version(&self, role: RoleName) -> Result<u64, Error> {
+        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
+        Ok(meta.version)
     }
 
-    pub fn set_version(&mut self, role: RoleName, version: u64) -> u64 {
-        let old = self.versions.insert(role, version).unwrap_or(0);
-        trace!("{} version changed: {} -> {}", role, old, version);
-        old
+    pub fn set_version(&mut self, role: RoleName, version: u64) -> Result<u64, Error> {
+        let meta = self.roles.get_mut(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
+        let old = meta.version;
+        trace!("updating {} version from {} to {}", role, old, version);
+        meta.version = version;
+        Ok(old)
     }
 
     /// Verify the signed data then return the version.
@@ -217,7 +228,7 @@ impl Verifier {
             Err(Error::UptaneRole(format!("expected `{}`, got `{}`", role, tuf_role._type)))
         } else if tuf_role.expired() {
             Err(Error::UptaneExpired)
-        } else if tuf_role.version < self.get_version(role) {
+        } else if tuf_role.version < self.get_version(role)? {
             Err(Error::UptaneVersion)
         } else {
             Ok(tuf_role.version)
@@ -226,15 +237,18 @@ impl Verifier {
 
     /// Verify that a role-defined threshold of signatures successfully validate.
     pub fn verify_signatures(&self, role: RoleName, signed: &TufSigned) -> Result<(), Error> {
+        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
         let cjson = canonicalize_json(&json::to_vec(&signed.signed)?)?;
         let valid = signed.signatures
             .iter()
-            .filter_map(|sig| if self.verify_data(&cjson, sig) { Some(&sig.sig) } else { None })
+            .filter(|sig| meta.keyids.contains(&sig.keyid))
+            .filter(|sig| self.verify_data(&cjson, sig))
+            .map(|sig| &sig.keyid)
             .collect::<HashSet<_>>();
 
         let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
-        if valid.len() < meta.threshold {
-            Err(Error::UptaneRoleThreshold)
+        if (valid.len() as u64) < meta.threshold {
+            Err(Error::UptaneThreshold(format!("{} of {} ok", valid.len(), meta.threshold)))
         } else {
             Ok(())
         }
@@ -242,14 +256,28 @@ impl Verifier {
 
     /// Verify that the signature matches the data.
     pub fn verify_data(&self, data: &[u8], sig: &Signature) -> bool {
-        let outcome = || -> Result<bool, Error> {
+        let verify = || -> Result<bool, Error> {
             let key = self.keys.get(&sig.keyid).ok_or_else(|| Error::KeyNotFound(sig.keyid.clone()))?;
-            let sig = base64::decode(&sig.sig)?;
-            let pem = pem::parse(&key.keyval.public)?;
-            let sig_type: SignatureType = key.keytype.clone().into();
-            Ok(sig_type.verify_msg(data, &pem.contents, &sig))
-        }();
-        outcome.unwrap_or_else(|err| { trace!("failed verification for {}: {}", sig.keyid, err); false })
+            match key.keytype {
+                KeyType::Ed25519 => {
+                    let sig = Vec::from_hex(&sig.sig)?;
+                    let key = Vec::from_hex(&key.keyval.public)?;
+                    Ok(SignatureType::Ed25519.verify_msg(data, &key, &sig))
+                }
+
+                KeyType::Rsa => {
+                    let sig = base64::decode(&sig.sig)?;
+                    let pem = pem::parse(&key.keyval.public)?;
+                    Ok(SignatureType::RsaSsaPss.verify_msg(data, &pem.contents, &sig))
+                }
+            }
+        };
+
+        match verify() {
+            Ok(true)  => { trace!("successful verification: {}", sig.keyid); true }
+            Ok(false) => { trace!("failed verification: {}", sig.keyid); false }
+            Err(err)  => { trace!("failed verification for {}: {}", sig.keyid, err); false }
+        }
     }
 }
 
