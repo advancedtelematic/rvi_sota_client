@@ -10,13 +10,12 @@ REGISTRY_SERVER="${REGISTRY_SERVER:-http://localhost:8083}"
 PACKAGE_MANAGER="${PACKAGE_MANAGER:-deb}"
 NAMESPACE="${NAMESPACE:-default}"
 
-
 function start_client() {
   export RUST_LOG="${RUST_LOG:-debug}"
   export RUST_BACKTRACE="${RUST_BACKTRACE:-1}"
 
-  sota_client --print --config="${CONFIG_PATH}"
-  exec sota_client --config="${CONFIG_PATH}"
+  sota_client --print --config="${CONFIG_PATH}" ${SOTA_CLIENT_FLAGS}
+  exec sota_client    --config="${CONFIG_PATH}" ${SOTA_CLIENT_FLAGS}
 }
 
 function start_dbus() {
