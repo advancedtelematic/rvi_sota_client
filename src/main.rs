@@ -32,7 +32,7 @@ use sota::interpreter::{CommandExec, CommandMode, CommandInterpreter,
                         EventInterpreter, Interpreter};
 use sota::pacman::PacMan;
 use sota::rvi::{Edge, Services};
-use sota::uptane::{Service, Uptane};
+use sota::uptane::Uptane;
 
 
 macro_rules! exit {
@@ -127,30 +127,23 @@ fn main() {
 
         let uptane = if let PacMan::Uptane = config.device.package_manager {
             if services.is_some() { exit!(2, "{}", "unexpected [rvi] config with uptane package manager"); }
-            let mut uptane = Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
-            let _ = uptane.get_root(&http, Service::Director).map_err(|err| exit!(2, "couldn't get root.json from director: {}", err));
-            Some(uptane)
+            Some(Uptane::new(&http, &config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err)))
         } else {
             None
         };
 
-        let ei_erx  = broadcast.subscribe();
-        let ei_ctx  = ctx.clone();
-        let ei_loop = etx.clone();
-        let ei_auth = auth.clone();
-        let ei_mgr  = config.device.package_manager.clone();
-        let ei_dl   = config.device.auto_download;
-        let ei_sys  = config.device.system_info.clone();
-        let ei_tree = config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub")));
-        scope.spawn(move || EventInterpreter {
+        let mut event_int = EventInterpreter {
             initial: true,
-            loop_tx: ei_loop,
-            auth:    ei_auth,
-            pacman:  ei_mgr,
-            auto_dl: ei_dl,
-            sysinfo: ei_sys,
-            treehub: ei_tree,
-        }.run(ei_erx, ei_ctx));
+            loop_tx: etx.clone(),
+            auth:    auth.clone(),
+            pacman:  config.device.package_manager.clone(),
+            auto_dl: config.device.auto_download,
+            sysinfo: config.device.system_info.clone(),
+            treehub: config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub"))),
+        };
+        let ei_erx = broadcast.subscribe();
+        let ei_ctx = ctx.clone();
+        scope.spawn(move || event_int.run(ei_erx, ei_ctx));
 
         scope.spawn(move || CommandInterpreter {
             mode: if let Some(uptane) = uptane {

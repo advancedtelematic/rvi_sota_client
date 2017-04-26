@@ -11,10 +11,10 @@ use std::process::{Command, Output};
 use std::str;
 use tar::Archive;
 
-use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufImage, TufMeta, Url};
+use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufImage,
+               TufMeta, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
-use util::Util;
 
 
 const NEW_PACKAGE: &'static str = "/tmp/sota-package";

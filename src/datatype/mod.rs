@@ -9,6 +9,7 @@ pub mod network;
 pub mod ostree;
 pub mod signature;
 pub mod tuf;
+pub mod util;
 
 pub use self::auth::{AccessToken, Auth, ClientCredentials};
 pub use self::command::Command;
@@ -26,6 +27,7 @@ pub use self::signature::{Signature, SignatureType};
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyType, KeyValue,
                     PrivateKey, RoleData, RoleName, RoleMeta, TufCustom, TufImage,
                     TufMeta, TufRole, TufSigned};
+pub use self::util::Util;
 
 
 // TODO remove this ugly hack ASAP

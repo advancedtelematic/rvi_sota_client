@@ -3,9 +3,8 @@ use hyper::status::StatusCode;
 use std::cell::RefCell;
 use std::collections::VecDeque;
 
-use datatype::Error;
+use datatype::{Error, Util};
 use http::{Client, Request, Response, ResponseData};
-use util::Util;
 
 
 /// The `TestClient` will return an ordered list of successful HTTP responses.

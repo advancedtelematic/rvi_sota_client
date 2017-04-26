@@ -42,4 +42,3 @@ pub mod pacman;
 pub mod rvi;
 pub mod sota;
 pub mod uptane;
-pub mod util;
