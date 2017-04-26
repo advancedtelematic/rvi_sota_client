@@ -1,15 +1,59 @@
 use base64;
-use chrono::{DateTime, NaiveDateTime, UTC};
+use chrono::{DateTime, UTC};
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
+use pem;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde_json as json;
 use std::fmt::{self, Display, Formatter};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-use datatype::{Error, InstallResult, KeyType, SigType, canonicalize_json};
+use datatype::{Error, InstallResult, Signature, SignatureType, canonicalize_json};
 
 
-#[derive(Serialize, Hash, Eq, PartialEq, Debug, Clone)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
+pub struct TufSigned {
+    pub signatures: Vec<Signature>,
+    pub signed:     json::Value,
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct TufRole {
+    pub _type:   RoleName,
+    pub expires: DateTime<UTC>,
+    pub version: u64,
+}
+
+impl TufRole {
+    pub fn expired(&self) -> bool {
+        self.expires < UTC::now()
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct TufImage {
+    pub filepath: String,
+    pub fileinfo: TufMeta
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct TufMeta {
+    pub length: u64,
+    pub hashes: HashMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub custom: Option<TufCustom>,
+}
+
+#[allow(non_snake_case)]
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+pub struct TufCustom {
+    pub ecuIdentifier: String,
+    pub uri: Option<String>,
+}
+
+
+#[derive(Serialize, PartialEq, Eq, Debug, Clone, Copy, Hash)]
 #[serde(tag = "_type")]
 pub enum RoleName {
     Root,
@@ -22,12 +66,12 @@ impl FromStr for RoleName {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            "root"      | "Root"      => Ok(RoleName::Root),
-            "snapshot"  | "Snapshot"  => Ok(RoleName::Snapshot),
-            "targets"   | "Targets"   => Ok(RoleName::Targets),
-            "timestamp" | "Timestamp" => Ok(RoleName::Timestamp),
-            _                         => Err(Error::UptaneInvalidRole)
+        match s.to_lowercase().as_ref() {
+            "root"      => Ok(RoleName::Root),
+            "snapshot"  => Ok(RoleName::Snapshot),
+            "targets"   => Ok(RoleName::Targets),
+            "timestamp" => Ok(RoleName::Timestamp),
+            _           => Err(Error::TufRole(s.into()))
         }
     }
 }
@@ -35,10 +79,10 @@ impl FromStr for RoleName {
 impl Display for RoleName {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            RoleName::Root      => write!(f, "{}", "root"),
-            RoleName::Targets   => write!(f, "{}", "targets"),
-            RoleName::Snapshot  => write!(f, "{}", "snapshot"),
-            RoleName::Timestamp => write!(f, "{}", "timestamp"),
+            RoleName::Root      => write!(f, "root"),
+            RoleName::Targets   => write!(f, "targets"),
+            RoleName::Snapshot  => write!(f, "snapshot"),
+            RoleName::Timestamp => write!(f, "timestamp"),
         }
     }
 }
@@ -52,7 +96,6 @@ impl Deserialize for RoleName {
         }
     }
 }
-
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct RoleData {
@@ -69,6 +112,8 @@ pub struct RoleData {
 pub struct RoleMeta {
     pub keyids:    HashSet<String>,
     pub threshold: u64,
+    #[serde(skip_serializing, skip_deserializing)]
+    pub version:   u64,
 }
 
 
@@ -76,11 +121,20 @@ pub struct RoleMeta {
 pub struct Key {
     pub keytype: KeyType,
     pub keyval:  KeyValue,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub id: Option<String>,
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
+impl Key {
+    pub fn key_id(&self) -> Result<String, Error> {
+        let mut hasher = Sha256::new();
+        match self.keytype {
+            KeyType::Ed25519 => hasher.input_str(&format!(r#""{}""#, self.keyval.public)),
+            KeyType::Rsa => hasher.input(&pem::parse(self.keyval.public.as_bytes())?.contents)
+        }
+        Ok(hasher.result_str())
+    }
+}
+
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Hash)]
 pub struct KeyValue {
     pub public: String,
 }
@@ -90,68 +144,47 @@ pub struct PrivateKey {
     pub der_key: Vec<u8>,
 }
 
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
-pub struct TufSigned {
-    pub signatures: Vec<Signature>,
-    pub signed:     json::Value,
-}
-
-impl TufSigned {
-    pub fn sign(signed: json::Value, privkey: &PrivateKey, sigtype: SigType) -> Result<TufSigned, Error> {
-        let sig = sigtype.sign(&canonicalize_json(&json::to_vec(&signed)?)?, &privkey.der_key)?;
-        Ok(TufSigned {
+impl PrivateKey {
+    pub fn sign_data(&self, data: json::Value, sig_type: SignatureType) -> Result<TufSigned, Error> {
+        let cjson = canonicalize_json(&json::to_vec(&data)?)?;
+        let signed = TufSigned {
             signatures: vec![Signature {
-                keyid:  privkey.keyid.clone(),
-                method: sigtype,
-                sig:    base64::encode(&sig),
+                keyid:  self.keyid.clone(),
+                method: sig_type,
+                sig:    base64::encode(&sig_type.sign_msg(&cjson, &self.der_key)?),
             }],
-            signed: signed,
-        })
+            signed: data,
+        };
+        Ok(signed)
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct Signature {
-    pub keyid:  String,
-    pub method: SigType,
-    pub sig:    String,
+#[derive(Serialize, PartialEq, Eq, Debug, Clone)]
+pub enum KeyType {
+    Ed25519,
+    Rsa,
 }
 
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct TufRole {
-    pub _type:   RoleName,
-    pub expires: String,
-    pub version: u64,
-}
-
-impl TufRole {
-    pub fn expired(&self) -> Result<bool, Error> {
-        let expiry = NaiveDateTime::parse_from_str(&self.expires, "%FT%TZ")?;
-        Ok(DateTime::from_utc(expiry, UTC) < UTC::now())
+impl Deserialize for KeyType {
+    fn deserialize<D: Deserializer>(de: D) -> Result<Self, D::Error> {
+        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
+            s.parse().map_err(|err| SerdeError::custom(format!("unknown KeyType: {}", err)))
+        } else {
+            Err(SerdeError::custom("unknown KeyType"))
+        }
     }
 }
 
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct TufImage {
-    pub filepath: String,
-    pub fileinfo: TufMeta
-}
+impl FromStr for KeyType {
+    type Err = Error;
 
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TufMeta {
-    pub length: u64,
-    pub hashes: HashMap<String, String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub custom: Option<TufCustom>,
-}
-
-#[allow(non_snake_case)]
-#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
-pub struct TufCustom {
-    pub ecuIdentifier: String,
-    pub uri: Option<String>,
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.to_lowercase().as_ref() {
+            "ed25519" => Ok(KeyType::Ed25519),
+            "rsa"     => Ok(KeyType::Rsa),
+            _         => Err(Error::TufKeyType(s.to_string()))
+        }
+    }
 }
 
 

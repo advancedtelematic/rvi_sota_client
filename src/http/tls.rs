@@ -12,6 +12,8 @@ use std::net::SocketAddr;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use util::Util;
+
 
 lazy_static! {
     static ref CONNECTOR: Mutex<Option<Arc<TlsConnector>>> = Mutex::new(None);
@@ -120,7 +122,7 @@ impl TlsConnector {
 
         tls.cert_file.map(|path| {
             info!("Setting TLS certificate to {}.", path);
-            let x509 = X509::from_pem(&Self::read_file(path))
+            let x509 = X509::from_pem(&Util::read_file(path).expect("couldn't read cert_file"))
                 .expect("couldn't read TLS certificate");
             let context = builder.builder_mut();
             context.set_certificate(&x509).expect("couldn't set TLS certificate");
@@ -128,7 +130,7 @@ impl TlsConnector {
 
         tls.pkey_file.map(|path| {
             info!("Setting TLS private key to {}.", path);
-            let pkey = PKey::private_key_from_pem(&Self::read_file(path))
+            let pkey = PKey::private_key_from_pem(&Util::read_file(path).expect("couldn't read pkey_file"))
                 .expect("couldn't read private key");
             let context = builder.builder_mut();
             context.set_private_key(&pkey).expect("couldn't set private key");
@@ -142,13 +144,6 @@ impl TlsConnector {
         where S: NetworkStream + Send + Sync + Debug
     {
         self.0.connect(domain, stream).map(TlsStream).map_err(|err| HyperError::Ssl(Box::new(err)))
-    }
-
-    fn read_file(path: &str) -> Vec<u8> {
-        let mut file = File::open(path).unwrap_or_else(|err| panic!("couldn't open {}: {}", path, err));
-        let mut buf  = Vec::new();
-        let _ = file.read_to_end(&mut buf).unwrap_or_else(|err| panic!("couldn't read {}: {}", path, err));
-        buf
     }
 }
 

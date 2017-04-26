@@ -19,7 +19,7 @@ timeout = 60
 
 [device]
 uuid = "00000000-0000-0000-0000-000000000000"
-packages_dir = "/tmp/"
+packages_dir = "/tmp"
 package_manager = "off"
 auto_download = true
 #system_info = None

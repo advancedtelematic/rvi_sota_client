@@ -27,11 +27,9 @@ impl Config {
     /// Read a toml config file using default values for missing sections or fields.
     pub fn load(path: &str) -> Result<Config, Error> {
         info!("Loading config file: {}", path);
-        let mut file = File::open(path)
-            .map_err(|err| Error::Config(format!("couldn't open config: {}", err)))?;
+        let mut file = File::open(path).map_err(|err| Error::Config(format!("couldn't open config: {}", err)))?;
         let mut toml = String::new();
-        file.read_to_string(&mut toml)
-            .map_err(|err| Error::Config(format!("couldn't read config: {}", err)))?;
+        file.read_to_string(&mut toml).map_err(|err| Error::Config(format!("couldn't read config: {}", err)))?;
         Config::parse(&toml)
     }
 
@@ -111,14 +109,14 @@ impl PartialConfig {
                 } else {
                     core.polling = Some(false);
                 },
-                (Some(_), Some(_)) => return Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string())),
+                (Some(_), Some(_)) => Err(Error::Config("core.polling_sec and device.polling_interval both set".to_string()))?,
                 _ => ()
             }
 
             // device.certificates_path -> core.ca_file
             match (device.certificates_path.as_mut(), core.ca_file.as_mut()) {
                 (Some(path), None) => { core.ca_file = Some(path.clone()) }
-                (Some(_), Some(_)) => return Err(Error::Config("core.ca_file and device.certificates_path both set".to_string())),
+                (Some(_), Some(_)) => Err(Error::Config("core.ca_file and device.certificates_path both set".to_string()))?,
                 _ => ()
             }
         }
@@ -275,7 +273,7 @@ impl Default for DeviceConfig {
     fn default() -> DeviceConfig {
         DeviceConfig {
             uuid:            Uuid::default(),
-            packages_dir:    "/tmp/".into(),
+            packages_dir:    "/tmp".into(),
             package_manager: PacMan::Off,
             auto_download:   true,
             system_info:     None,
@@ -552,7 +550,7 @@ mod tests {
         r#"
         [device]
         uuid = "00000000-0000-0000-0000-000000000000"
-        packages_dir = "/tmp/"
+        packages_dir = "/tmp"
         package_manager = "off"
         "#;
 
