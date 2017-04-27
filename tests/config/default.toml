@@ -57,3 +57,5 @@ primary_ecu_serial = "primary-serial"
 metadata_path = "/usr/local/etc/sota/metadata"
 private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
 public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
+director_root_keys = []
+repo_root_keys = []
