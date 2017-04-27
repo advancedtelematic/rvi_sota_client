@@ -40,25 +40,27 @@ pub struct Uptane {
 
     pub primary_ecu: String,
     pub device_id:   String,
-    pub verifier:    Verifier,
     pub private_key: PrivateKey,
     pub sig_type:    SignatureType,
+
+    pub director_verifier: Verifier,
+    pub repo_verifier:     Verifier,
 }
 
 impl Uptane {
     pub fn new(client: &Client, config: &Config) -> Result<Self, Error> {
+        let cfg = &config.uptane;
         let der = Util::read_file(&config.uptane.private_key_path)
             .map_err(|err| Error::Client(format!("couldn't read uptane.private_key_path: {}", err)))?;
 
         let mut uptane = Uptane {
-            director_server:  config.uptane.director_server.clone(),
-            repo_server:      config.uptane.repo_server.clone(),
-            metadata_path:    config.uptane.metadata_path.clone(),
+            director_server:  cfg.director_server.clone(),
+            repo_server:      cfg.repo_server.clone(),
+            metadata_path:    cfg.metadata_path.clone(),
             persist_metadata: true,
 
-            primary_ecu: config.uptane.primary_ecu_serial.clone(),
+            primary_ecu: cfg.primary_ecu_serial.clone(),
             device_id:   format!("{}", config.device.uuid),
-            verifier:    Verifier::new(config.uptane.trusted_root_keys.clone()),
             private_key: PrivateKey {
                 keyid: digest::digest(&digest::SHA256, &der)
                     .as_ref()
@@ -68,6 +70,9 @@ impl Uptane {
                 der_key: der
             },
             sig_type: SignatureType::RsaSsaPss,
+
+            director_verifier: Verifier::new(cfg.director_root_keys.clone()),
+            repo_verifier:     Verifier::new(cfg.repo_root_keys.clone()),
         };
 
         let _ = uptane.get_root(client, Service::Director)?;
@@ -79,6 +84,14 @@ impl Uptane {
         match service {
             Service::Director => self.director_server.join(&format!("/{}", endpoint)),
             Service::Repo     => self.repo_server.join(&format!("/{}/{}", self.device_id, endpoint))
+        }
+    }
+
+    /// Returns the respective key verifier for an uptane service.
+    fn verifier(&mut self, service: Service) -> &mut Verifier {
+        match service {
+            Service::Director => &mut self.director_verifier,
+            Service::Repo     => &mut self.repo_verifier
         }
     }
 
@@ -105,13 +118,13 @@ impl Uptane {
     /// Fetch the specified role's metadata from the Director service.
     pub fn get_director(&mut self, client: &Client, role: RoleName) -> Result<Verified, Error> {
         let json = self.get_json(client, Service::Director, role)?;
-        self.verify_tuf(role, json::from_slice::<TufSigned>(&json)?)
+        self.verify_tuf(Service::Director, role, json::from_slice::<TufSigned>(&json)?)
     }
 
     /// Fetch the specified role's metadata from the Repo service.
     pub fn get_repo(&mut self, client: &Client, role: RoleName) -> Result<Verified, Error> {
         let json = self.get_json(client, Service::Repo, role)?;
-        self.verify_tuf(role, json::from_slice::<TufSigned>(&json)?)
+        self.verify_tuf(Service::Repo, role, json::from_slice::<TufSigned>(&json)?)
     }
 
     /// Read local metadata if it exists or download it otherwise.
@@ -133,13 +146,13 @@ impl Uptane {
         let data = json::from_value::<RoleData>(signed.signed.clone())?;
 
         for (role, meta) in data.roles.ok_or(Error::UptaneMissingRoles)? {
-            self.verifier.add_meta(role, meta)?;
+            self.verifier(service).add_meta(role, meta)?;
         }
         for (id, key) in data.keys.ok_or(Error::UptaneMissingKeys)? {
-            self.verifier.add_key(id, key)?;
+            self.verifier(service).add_key(id, key)?;
         }
 
-        let verified = self.verify_tuf(RoleName::Root, signed)?;
+        let verified = self.verify_tuf(service, RoleName::Root, signed)?;
         if self.persist_metadata {
             fs::create_dir_all(format!("{}/{}", self.metadata_path, service))?;
             Util::write_file(&format!("{}/{}/root.json", self.metadata_path, service), &json)?;
@@ -148,10 +161,10 @@ impl Uptane {
     }
 
     /// Verify the signed TUF data using the current verifier's keys.
-    fn verify_tuf(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
+    fn verify_tuf(&mut self, service: Service, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
         let data = json::from_value::<RoleData>(signed.signed.clone())?;
-        let new_ver = self.verifier.verify_signed(role, signed)?;
-        let old_ver = self.verifier.set_version(role, new_ver)?;
+        let new_ver = self.verifier(service).verify_signed(role, signed)?;
+        let old_ver = self.verifier(service).set_version(role, new_ver)?;
         Ok(Verified { role: role, data: data, new_ver: new_ver, old_ver: old_ver })
     }
 
@@ -188,17 +201,14 @@ impl Uptane {
 #[derive(Default)]
 pub struct Verifier {
     trusted_root_keys: HashSet<String>,
+
     keys:  HashMap<String, Key>,
     roles: HashMap<RoleName, RoleMeta>,
 }
 
 impl Verifier {
     pub fn new(trusted_root_keys: HashSet<String>) -> Self {
-        Verifier {
-            trusted_root_keys: trusted_root_keys,
-            keys:  HashMap::default(),
-            roles: HashMap::default()
-        }
+        Verifier { trusted_root_keys: trusted_root_keys, keys: HashMap::default(), roles: HashMap::default() }
     }
 
     pub fn add_meta(&mut self, role: RoleName, meta: RoleMeta) -> Result<(), Error> {
@@ -333,13 +343,17 @@ mod tests {
     use http::TestClient;
 
 
-    fn default_trusted() -> HashSet<String> {
+    fn trusted_director() -> HashSet<String> {
         let mut set = HashSet::new();
         set.insert("4fc5bb052124eeed6fa23ac335c4fc17259d14f3e48ed89464402af28a76808d".into());
         set
     }
 
-    fn new_uptane(trusted_root_keys: HashSet<String>) -> Uptane {
+    fn trusted_repo() -> HashSet<String> {
+        HashSet::new()
+    }
+
+    fn new_uptane(director_root_keys: HashSet<String>, repo_root_keys: HashSet<String>) -> Uptane {
         Uptane {
             director_server: "http://localhost:8001".parse().unwrap(),
             repo_server:     "http://localhost:8002".parse().unwrap(),
@@ -348,12 +362,14 @@ mod tests {
 
             primary_ecu: "test-primary-serial".into(),
             device_id: "uptane-test".into(),
-            verifier:    Verifier::new(trusted_root_keys),
             private_key: PrivateKey {
                 keyid:   "e453c713367595e1a9e5c1de8b2c039fe4178094bdaf2d52b1993fdd1a76ee26".into(),
                 der_key: pem::parse("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDdC9QttkMbF5qB\n2plVU2hhG2sieXS2CVc3E8rm/oYGc9EHnlPMcAuaBtn9jaBo37PVYO+VFInzMu9f\nVMLm7d/hQxv4PjTBpkXvw1Ad0Tqhg/R8Lc4SXPxWxlVhg0ahLn3kDFQeEkrTNW7k\nxpAxWiE8V09ETcPwyNhPfcWeiBePwh8ySJ10IzqHt2kXwVbmL4F/mMX07KBYWIcA\n52TQLs2VhZLIaUBv9ZBxymAvogGz28clx7tHOJ8LZ/daiMzmtv5UbXPdt+q55rLJ\nZ1TuG0CuRqhTOllXnIvAYRQr6WBaLkGGbezQO86MDHBsV5TsG6JHPorrr6ogo+Lf\npuH6dcnHAgMBAAECggEBAMC/fs45fzyRkXYn4srHh14d5YbTN9VAQd/SD3zrdn0L\n4rrs8Y90KHmv/cgeBkFMx+iJtYBev4fk41xScf2icTVhKnOF8sTls1hGDIdjmeeb\nQ8ZAvs++a39TRMJaEW2dN8NyiKsMMlkH3+H3z2ZpfE+8pm8eDHza9dwjBP6fF0SP\nV1XPd2OSrJlvrgBrAU/8WWXYSYK+5F28QtJKsTuiwQylIHyJkd8cgZhgYXlUVvTj\nnHFJblpAT0qphji7p8G4Ejg+LNxu/ZD+D3wQ6iIPgKFVdC4uXmPwlf1LeYqXW0+g\ngTmHY7a/y66yn1H4A5gyfx2EffFMQu0Sl1RqzDVYYjECgYEA9Hy2QsP3pxW27yLs\nCu5e8pp3vZpdkNA71+7v2BVvaoaATnsSBOzo3elgRYsN0On4ObtfQXB3eC9poNuK\nzWxj8bkPbVOCpSpq//sUSqkh/XCmAhDl78BkgmWDb4EFEgcAT2xPBTHkb70jVAXB\nE1HBwsBcXhdxzRt8IYiBG+68d/8CgYEA53SJYpJ809lfpAG0CU986FFD7Fi/SvcX\n21TVMn1LpHuH7MZ2QuehS0SWevvspkIUm5uT3PrhTxdohAInNEzsdeHhTU11utIO\nrKnrtgZXKsBG4idsHu5ZQzp4n3CBEpfPFbOtP/UEKI/IGaJWGXVgG4J6LWmQ9LK9\nilNTaOUQ7jkCgYB+YP0B9DTPLN1cLgwf9mokNA7TdrkJA2r7yuo2I5ZtVUt7xghh\nfWk+VMXMDP4+UMNcbGvn8s/+01thqDrOx0m+iO/djn6JDC01Vz98/IKydImLpdqG\nHUiXUwwnFmVdlTrm01DhmZHA5N8fLr5IU0m6dx8IEExmPt/ioaJDoxvPVwKBgC+8\n1H01M3PKWLSN+WEWOO/9muHLaCEBF7WQKKzSNODG7cEDKe8gsR7CFbtl7GhaJr/1\ndajVQdU7Qb5AZ2+dEgQ6Q2rbOBYBLy+jmE8hvaa+o6APe3hhtp1sGObhoG2CTB7w\nwSH42hO3nBDVb6auk9T4s1Rcep5No1Q9XW28GSLZAoGATFlXg1hqNKLO8xXq1Uzi\nkDrN6Ep/wq80hLltYPu3AXQn714DVwNa3qLP04dAYXbs9IaQotAYVVGf6N1IepLM\nfQU6Q9fp9FtQJdU+Mjj2WMJVWbL0ihcU8VZV5TviNvtvR1rkToxSLia7eh39AY5G\nvkgeMZm7SwqZ9c/ZFnjJDqc=\n-----END PRIVATE KEY-----").unwrap().contents
             },
             sig_type: SignatureType::RsaSsaPss,
+
+            director_verifier: Verifier::new(director_root_keys),
+            repo_verifier:     Verifier::new(repo_root_keys),
         }
     }
 
@@ -380,14 +396,14 @@ mod tests {
 
     #[test]
     fn test_untrusted_root() {
-        let mut uptane = new_uptane(HashSet::default());
+        let mut uptane = new_uptane(HashSet::new(), HashSet::new());
         let client = TestClient::from_paths(&["tests/uptane/root.json"]);
         assert!(uptane.get_root(&client, Service::Director).is_err());
     }
 
     #[test]
     fn test_get_targets() {
-        let mut uptane = new_uptane(default_trusted());
+        let mut uptane = new_uptane(trusted_director(), trusted_repo());
         let client = TestClient::from_paths(&[
             "tests/uptane/root.json",
             "tests/uptane/targets.json",
@@ -409,7 +425,7 @@ mod tests {
 
     #[test]
     fn test_get_snapshot() {
-        let mut uptane = new_uptane(default_trusted());
+        let mut uptane = new_uptane(trusted_director(), trusted_repo());
         let client = TestClient::from_paths(&[
             "tests/uptane/root.json",
             "tests/uptane/snapshot.json",
@@ -426,7 +442,7 @@ mod tests {
 
     #[test]
     fn test_get_timestamp() {
-        let mut uptane = new_uptane(default_trusted());
+        let mut uptane = new_uptane(trusted_director(), trusted_repo());
         let client = TestClient::from_paths(&[
             "tests/uptane/root.json",
             "tests/uptane/timestamp.json",

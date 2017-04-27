@@ -257,7 +257,8 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "uptane-metadata-path", "change the directory used to save Uptane metadata.", "PATH");
     opts.optopt("", "uptane-private-key-path", "change the path to the private key for the primary ECU", "PATH");
     opts.optopt("", "uptane-public-key-path", "change the path to the public key for the primary ECU", "PATH");
-    opts.optopt("", "uptane-trusted-root-keys", "fix a list of trusted root.json Uptane key-ids", "LIST");
+    opts.optopt("", "uptane-director-root-keys", "pin a list of trusted Director root key ids", "LIST");
+    opts.optopt("", "uptane-repo-root-keys", "pin a list of trusted Repo root key ids", "LIST");
 
     let cli = opts.parse(&args[1..]).expect("couldn't parse args");
     if cli.opt_present("help") {
@@ -321,9 +322,8 @@ fn build_config(version: &str) -> Config {
     cli.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
     cli.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
     cli.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
-    if cli.opt_present("uptane-trusted-root-keys") {
-        config.uptane.trusted_root_keys = cli.opt_strs("uptane-trusted-root-keys").into_iter().collect();
-    }
+    if cli.opt_present("uptane-director-root-keys") { config.uptane.director_root_keys = cli.opt_strs("uptane-director-root-keys").into_iter().collect(); }
+    if cli.opt_present("uptane-repo-root-keys") { config.uptane.repo_root_keys = cli.opt_strs("uptane-repo-root-keys").into_iter().collect(); }
 
     if cli.opt_present("print") {
         exit!(0, "{:#?}", config);

@@ -475,7 +475,8 @@ pub struct UptaneConfig {
     pub metadata_path:      String,
     pub private_key_path:   String,
     pub public_key_path:    String,
-    pub trusted_root_keys:  HashSet<String>,
+    pub director_root_keys: HashSet<String>,
+    pub repo_root_keys:     HashSet<String>,
 }
 
 impl Default for UptaneConfig {
@@ -487,7 +488,8 @@ impl Default for UptaneConfig {
             metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
             private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
             public_key_path:    "/usr/local/etc/sota/ecuprimary.pub".to_string(),
-            trusted_root_keys:  HashSet::default(),
+            director_root_keys: HashSet::default(),
+            repo_root_keys:     HashSet::default(),
         }
     }
 }
@@ -500,7 +502,8 @@ struct ParsedUptaneConfig {
     metadata_path:      Option<String>,
     private_key_path:   Option<String>,
     public_key_path:    Option<String>,
-    trusted_root_keys:  Option<HashSet<String>>,
+    director_root_keys: Option<HashSet<String>>,
+    repo_root_keys:     Option<HashSet<String>>,
 }
 
 impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
@@ -513,7 +516,8 @@ impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
             metadata_path:      self.metadata_path.unwrap_or(default.metadata_path),
             private_key_path:   self.private_key_path.unwrap_or(default.private_key_path),
             public_key_path:    self.public_key_path.unwrap_or(default.public_key_path),
-            trusted_root_keys:  self.trusted_root_keys.unwrap_or(default.trusted_root_keys),
+            director_root_keys: self.director_root_keys.unwrap_or(default.director_root_keys),
+            repo_root_keys:     self.repo_root_keys.unwrap_or(default.repo_root_keys),
         }
     }
 }
@@ -605,7 +609,8 @@ mod tests {
         metadata_path = "/usr/local/etc/sota/metadata"
         private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
         public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
-        trusted_root_keys = []
+        director_root_keys = []
+        repo_root_keys = []
         "#;
 
 
