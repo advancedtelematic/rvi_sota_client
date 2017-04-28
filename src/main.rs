@@ -127,7 +127,7 @@ fn main() {
 
         let uptane = if let PacMan::Uptane = config.device.package_manager {
             if services.is_some() { exit!(2, "{}", "unexpected [rvi] config with uptane package manager"); }
-            Some(Uptane::new(&http, &config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err)))
+            Some(Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err)))
         } else {
             None
         };

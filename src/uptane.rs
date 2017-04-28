@@ -44,7 +44,7 @@ pub struct Uptane {
 }
 
 impl Uptane {
-    pub fn new(client: &Client, config: &Config) -> Result<Self, Error> {
+    pub fn new(config: &Config) -> Result<Self, Error> {
         let private_key = Util::read_file(&config.uptane.private_key_path)?;
         let mut uptane = Uptane {
             director_server:  config.uptane.director_server.clone(),
@@ -69,8 +69,6 @@ impl Uptane {
 
         uptane.add_root_keys(Service::Director)?;
         uptane.add_root_keys(Service::Repo)?;
-        uptane.get_director(client, RoleName::Root)?;
-        uptane.get_repo(client, RoleName::Root)?;
         Ok(uptane)
     }
 
