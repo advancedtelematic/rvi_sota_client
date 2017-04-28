@@ -30,9 +30,10 @@ impl Display for Service {
 
 /// Software-over-the-air updates using Uptane verification.
 pub struct Uptane {
-    pub director_server: Url,
-    pub repo_server:     Url,
-    pub metadata_path:   String,
+    pub director_server:  Url,
+    pub repo_server:      Url,
+    pub metadata_path:    String,
+    pub persist_metadata: bool,
 
     pub primary_ecu: String,
     pub private_key: PrivateKey,
@@ -46,9 +47,10 @@ impl Uptane {
     pub fn new(client: &Client, config: &Config) -> Result<Self, Error> {
         let private_key = Util::read_file(&config.uptane.private_key_path)?;
         let mut uptane = Uptane {
-            director_server: config.uptane.director_server.clone(),
-            repo_server:     config.uptane.repo_server.clone(),
-            metadata_path:   config.uptane.metadata_path.clone(),
+            director_server:  config.uptane.director_server.clone(),
+            repo_server:      config.uptane.repo_server.clone(),
+            metadata_path:    config.uptane.metadata_path.clone(),
+            persist_metadata: true,
 
             primary_ecu: config.uptane.primary_ecu_serial.clone(),
             private_key: PrivateKey {
@@ -67,9 +69,8 @@ impl Uptane {
 
         uptane.add_root_keys(Service::Director)?;
         uptane.add_root_keys(Service::Repo)?;
-        uptane.update_root_keys(client, Service::Director)?;
-        uptane.update_root_keys(client, Service::Repo)?;
-
+        uptane.get_director(client, RoleName::Root)?;
+        uptane.get_repo(client, RoleName::Root)?;
         Ok(uptane)
     }
 
@@ -103,17 +104,6 @@ impl Uptane {
         Ok(())
     }
 
-    /// Download, validate and replace the latest `root.json` metadata.
-    fn update_root_keys(&mut self, client: &Client, service: Service) -> Result<(), Error> {
-        let json = self.get(client, service, "root.json")?;
-        let signed = json::from_slice::<TufSigned>(&json)?;
-        let verified = self.verify_metadata(service, RoleName::Root, signed)?;
-        if verified.is_new() {
-            Util::write_file(&format!("{}/{}/root.json", self.metadata_path, service), &json)?;
-        }
-        Ok(())
-    }
-
     /// GET the bytes response from the given endpoint.
     fn get(&mut self, client: &Client, service: Service, endpoint: &str) -> Result<Vec<u8>, Error> {
         let rx = client.get(self.endpoint(service, endpoint), None);
@@ -134,16 +124,26 @@ impl Uptane {
         }
     }
 
-    /// Fetch the specified role's metadata from the Director service.
+    /// Fetch the latest role metadata from the Director service.
     pub fn get_director(&mut self, client: &Client, role: RoleName) -> Result<Verified, Error> {
-        let json = self.get(client, Service::Director, &format!("{}.json", role))?;
-        self.verify_metadata(Service::Director, role, json::from_slice::<TufSigned>(&json)?)
+        self.get_metadata(client, Service::Director, role)
     }
 
-    /// Fetch the specified role's metadata from the Repo service.
+    /// Fetch the latest role metadata from the Repo service.
     pub fn get_repo(&mut self, client: &Client, role: RoleName) -> Result<Verified, Error> {
-        let json = self.get(client, Service::Repo, &format!("{}.json", role))?;
-        self.verify_metadata(Service::Repo, role, json::from_slice::<TufSigned>(&json)?)
+        self.get_metadata(client, Service::Repo, role)
+    }
+
+    /// Fetch the latest role metadata from the given service.
+    pub fn get_metadata(&mut self, client: &Client, service: Service, role: RoleName) -> Result<Verified, Error> {
+        let json = self.get(client, service, &format!("{}.json", role))?;
+        let verified = self.verify_metadata(service, role, json::from_slice::<TufSigned>(&json)?)?;
+        if self.persist_metadata && verified.is_new() {
+            let dir = format!("{}/{}", self.metadata_path, service);
+            Util::write_file(&format!("{}/{}.json", dir, role), &json)?;
+            Util::write_file(&format!("{}/{}.{}.json", dir, verified.new_ver, role), &json)?;
+        }
+        Ok(verified)
     }
 
     /// Verify the signed TUF metadata for a given service and role.
@@ -317,9 +317,10 @@ mod tests {
 
     fn new_uptane() -> Uptane {
         let mut uptane = Uptane {
-            director_server: "http://localhost:8001".parse().unwrap(),
-            repo_server:     "http://localhost:8002".parse().unwrap(),
-            metadata_path:   "tests/uptane".into(),
+            director_server:  "http://localhost:8001".parse().unwrap(),
+            repo_server:      "http://localhost:8002".parse().unwrap(),
+            metadata_path:    "tests/uptane".into(),
+            persist_metadata: false,
 
             primary_ecu: "test-primary-serial".into(),
             private_key: PrivateKey {
