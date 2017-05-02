@@ -182,8 +182,8 @@ impl CommandInterpreter {
 
             (Command::GetUpdateRequests, CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                let timestamp = uptane.get_director(&*self.http, RoleName::Timestamp)?;
-                if timestamp.is_new() {
+                let _ = uptane.get_director(&*self.http, RoleName::Root)?;
+                if uptane.get_director(&*self.http, RoleName::Timestamp)?.is_new() {
                     let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
                     Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or_default())
                 } else {

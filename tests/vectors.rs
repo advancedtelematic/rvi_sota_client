@@ -12,7 +12,7 @@ use hyper::status::StatusCode;
 use sota::datatype::config::UptaneConfig;
 use sota::datatype::network::Url;
 use sota::datatype::signature::SignatureType;
-use sota::datatype::tuf::PrivateKey;
+use sota::datatype::tuf::{RoleName, PrivateKey};
 use sota::http::{http_client, Request, Response, ResponseData};
 use sota::uptane::{Uptane, Verifier, Service};
 use std::fs::File;
@@ -47,7 +47,7 @@ impl http_client::Client for VectorClient {
             code: StatusCode::Ok,
             body: buf,
         };
-        resp_tx.send(Response::Success(data))        
+        resp_tx.send(Response::Success(data))
     }
 }
 
@@ -74,24 +74,29 @@ fn run_test_vector(test_path: &str) {
     config.repo_server = Url(url::Url::parse("file://repo/repo").unwrap());
 
     let mut uptane = Uptane {
-        config: config,
-        persist: false,
-        device_id: "".to_string(),
-        sig_type: SignatureType::Ed25519,
-        priv_key: PrivateKey {
+        director_server:  "http://localhost:8001".parse().unwrap(),
+        repo_server:      "http://localhost:8002".parse().unwrap(),
+        metadata_path:    "tests/uptane".into(),
+        persist_metadata: false,
+
+        primary_ecu: "test-primary-serial".into(),
+        private_key: PrivateKey {
             keyid: "".to_string(),
             der_key: Vec::new(),
 
         },
-        verifier: Verifier::default(),
+        sig_type: SignatureType::Ed25519,
+
+        director_verifier: Verifier::default(),
+        repo_verifier:     Verifier::default(),
     };
 
     let client = VectorClient {
-        path: PathBuf::from(vector_path), 
+        path: PathBuf::from(vector_path),
     };
 
     // TODO this should be replaced by the generic update() function
-    let res = uptane.get_root(&client, Service::Director);
+    let res = uptane.get_director(&client, RoleName::Root);
 
     match (res, &test_vector.error) {
         (Ok(_), &None) => {
