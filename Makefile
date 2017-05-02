@@ -57,6 +57,9 @@ client: src/ ## Compile a new release build of the client.
 image: client ## Build a Docker image for running the client.
 	@docker build --tag advancedtelematic/sota-client run
 
+image-uptane: image ## Build a Docker image for running the client with uptane.
+	@docker build --tag advancedtelematic/sota-client-uptane -f run/DockerfileUptane .
+
 clean: ## Remove all compiled libraries, builds and temporary files.
 	$(CARGO) clean
 	@rm -f run/sota_client {,run/}*.{deb,rpm} /tmp/sota-tpm*

@@ -47,3 +47,5 @@ RUN git clone git://git.gnome.org/libgsystem \
      git \
      gtk-doc-tools \
      python-pip
+
+RUN mkdir /sysroot && ostree admin --sysroot=/sysroot init-fs /sysroot
