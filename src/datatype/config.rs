@@ -266,6 +266,7 @@ pub struct DeviceConfig {
     pub packages_dir:    String,
     pub package_manager: PacMan,
     pub auto_download:   bool,
+    pub report_on_start: bool,
     pub system_info:     Option<String>,
 }
 
@@ -276,6 +277,7 @@ impl Default for DeviceConfig {
             packages_dir:    "/tmp".into(),
             package_manager: PacMan::Off,
             auto_download:   true,
+            report_on_start: true,
             system_info:     None,
         }
     }
@@ -287,6 +289,7 @@ struct ParsedDeviceConfig {
     pub packages_dir:      Option<String>,
     pub package_manager:   Option<PacMan>,
     pub auto_download:     Option<bool>,
+    pub report_on_start:   Option<bool>,
     pub system_info:       Option<String>,
     pub polling_interval:  Option<u64>,
     pub certificates_path: Option<String>,
@@ -300,6 +303,7 @@ impl Defaultify<DeviceConfig> for ParsedDeviceConfig {
             packages_dir:    self.packages_dir.unwrap_or(default.packages_dir),
             package_manager: self.package_manager.unwrap_or(default.package_manager),
             auto_download:   self.auto_download.unwrap_or(default.auto_download),
+            report_on_start: self.report_on_start.unwrap_or(default.report_on_start),
             system_info:     self.system_info.or(default.system_info),
         }
     }

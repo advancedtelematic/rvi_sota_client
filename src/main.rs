@@ -133,7 +133,7 @@ fn main() {
         };
 
         let mut event_int = EventInterpreter {
-            initial: true,
+            initial: config.device.report_on_start,
             loop_tx: etx.clone(),
             auth:    auth.clone(),
             pacman:  config.device.package_manager.clone(),
@@ -206,6 +206,8 @@ fn build_config(version: &str) -> Config {
     opts.optflag("v", "version", "print the version then quit");
     opts.optopt("c", "config", "change config path", "PATH");
 
+    opts.optopt("", "report-on-start", "send system info, packages and manifest after initial authentication", "BOOL");
+
     opts.optopt("", "auth-server", "change the auth server", "URL");
     opts.optopt("", "auth-client-id", "change the auth client id", "ID");
     opts.optopt("", "auth-client-secret", "change the auth client secret", "SECRET");
@@ -272,6 +274,8 @@ fn build_config(version: &str) -> Config {
         cli.opt_str("auth-client-id").map(|id| auth_cfg.client_id = id);
         cli.opt_str("auth-client-secret").map(|secret| auth_cfg.client_secret = secret);
     });
+
+    cli.opt_str("report-on-start").map(|x| config.device.report_on_start = x.parse().expect("Invalid report-on-start parameter."));
 
     cli.opt_str("core-server").map(|text| config.core.server = text.parse().expect("Invalid core-server URL"));
     cli.opt_str("core-polling").map(|polling| config.core.polling = polling.parse().expect("Invalid core-polling boolean"));
