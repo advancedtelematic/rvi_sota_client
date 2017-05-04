@@ -10,6 +10,7 @@ RUN apt-get update && apt-get install -y \
     libarchive-dev \
     libattr1-dev \
     libcap-dev \
+    libcurl4-openssl-dev \
     libfuse-dev \
     libgirepository1.0-dev \
     libglib2.0-dev \
@@ -36,7 +37,7 @@ RUN git clone git://git.gnome.org/libgsystem \
   && git clone https://github.com/ostreedev/ostree.git \
   && cd ostree \
   && git checkout $OSTREE_VERSION \
-  && ./autogen.sh --prefix=/usr \
+  && ./autogen.sh --with-curl --prefix=/usr \
   && make -j $(nproc) \
   && make install \
   && rm -rf /src \
@@ -47,3 +48,5 @@ RUN git clone git://git.gnome.org/libgsystem \
      git \
      gtk-doc-tools \
      python-pip
+
+RUN mkdir /sysroot && ostree admin --sysroot=/sysroot init-fs /sysroot
