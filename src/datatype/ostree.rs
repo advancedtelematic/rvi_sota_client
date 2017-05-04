@@ -20,7 +20,6 @@ use util::Util;
 const NEW_PACKAGE: &'static str = "/tmp/sota-package";
 const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 const REMOTE_PATH: &'static str = "/etc/ostree/remotes.d/sota-remote.conf";
-const OSTREE_REPO: &'static str = "/sysroot/ostree/repo";
 
 
 /// Struct for OSTree related functions.
@@ -31,6 +30,7 @@ impl Ostree {
         debug!("running `ostree` command with args: {:?}", args);
         Command::new("ostree")
             .args(args)
+            .env("OSTREE_REPO", "/sysroot/ostree/repo")
             .env("OSTREE_BOOT_PARTITION", "/boot")
             .output()
             .map_err(|err| Error::Command(format!("ostree: {}", err)))
@@ -173,7 +173,7 @@ impl OstreePackage {
             let _ = self.add_remote(remote, creds)?;
         }
 
-        let mut args = vec!["pull".into(), "--repo".into(), OSTREE_REPO.into(), remote.into()];
+        let mut args = vec!["pull".into(), remote.into()];
         if let Some(token) = creds.token {
             args.push(format!("--http-header='Authorization=Bearer {}'", token));
         }
@@ -188,8 +188,7 @@ impl OstreePackage {
             fs::remove_file(REMOTE_PATH)?;
         }
 
-        let mut args = vec!["remote".into(), "add".into(), "--repo".into(),
-                            OSTREE_REPO.into(), "--no-gpg-verify".into()];
+        let mut args = vec!["remote".into(), "add".into(), "--no-gpg-verify".into()];
         if let Some(ca) = creds.ca_file {
             args.push(format!("--set=tls-ca-path={}", ca));
         }
