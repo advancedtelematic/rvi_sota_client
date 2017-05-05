@@ -1,7 +1,6 @@
 use base64;
 use hex::FromHex;
 use pem;
-use ring::digest;
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
@@ -45,7 +44,6 @@ pub struct Uptane {
 
 impl Uptane {
     pub fn new(config: &Config) -> Result<Self, Error> {
-        let private_key = Util::read_file(&config.uptane.private_key_path)?;
         let mut uptane = Uptane {
             director_server:  config.uptane.director_server.clone(),
             repo_server:      config.uptane.repo_server.clone(),
@@ -53,15 +51,8 @@ impl Uptane {
             persist_metadata: true,
 
             primary_ecu: config.uptane.primary_ecu_serial.clone(),
-            private_key: PrivateKey {
-                keyid: digest::digest(&digest::SHA256, &private_key)
-                    .as_ref()
-                    .iter()
-                    .map(|b| format!("{:02x}", b))
-                    .collect::<String>(),
-                der_key: private_key
-            },
-            sig_type: SignatureType::RsaSsaPss,
+            private_key: PrivateKey::from_der(Util::read_file(&config.uptane.private_key_path)?),
+            sig_type:    SignatureType::RsaSsaPss,
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
@@ -90,6 +81,7 @@ impl Uptane {
 
     /// Add the keys from a service's local `root.json` metadata to its verifier.
     fn add_root_keys(&mut self, service: Service) -> Result<(), Error> {
+        trace!("adding root keys for {}", service);
         let json = Util::read_file(&format!("{}/{}/root.json", self.metadata_path, service))?;
         let signed = json::from_slice::<TufSigned>(&json)?;
         let data = json::from_value::<RoleData>(signed.signed)?;
@@ -134,6 +126,7 @@ impl Uptane {
 
     /// Fetch the latest role metadata from the given service.
     pub fn get_metadata(&mut self, client: &Client, service: Service, role: RoleName) -> Result<Verified, Error> {
+        trace!("getting {} role from {} service", role, service);
         let json = self.get(client, service, &format!("{}.json", role))?;
         let verified = self.verify_metadata(service, role, json::from_slice::<TufSigned>(&json)?)?;
         if self.persist_metadata && verified.is_new() {
@@ -146,6 +139,7 @@ impl Uptane {
 
     /// Verify the signed TUF metadata for a given service and role.
     fn verify_metadata(&mut self, service: Service, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
+        trace!("verifying {} metadata for {} service", role, service);
         let data = json::from_value::<RoleData>(signed.signed.clone())?;
         let new_ver = self.verifier(service).verify_signed(role, signed)?;
         let old_ver = self.verifier(service).set_version(role, new_ver)?;
@@ -252,7 +246,6 @@ impl Verifier {
             .map(|sig| &sig.keyid)
             .collect::<HashSet<_>>();
 
-        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
         if (valid.len() as u64) < meta.threshold {
             Err(Error::UptaneThreshold(format!("{} of {} ok", valid.len(), meta.threshold)))
         } else {

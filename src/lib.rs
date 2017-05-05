@@ -10,12 +10,12 @@ extern crate crypto;
 extern crate dbus;
 extern crate hex;
 extern crate hyper;
-extern crate openssl;
-extern crate pem;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+extern crate openssl;
+extern crate pem;
 extern crate ring;
 extern crate serde;
 #[macro_use]

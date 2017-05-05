@@ -87,8 +87,8 @@ impl Display for RoleName {
     }
 }
 
-impl Deserialize for RoleName {
-    fn deserialize<D: Deserializer>(de: D) -> Result<RoleName, D::Error> {
+impl<'de> Deserialize<'de> for RoleName {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<RoleName, D::Error> {
         if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
             s.parse().map_err(|err| SerdeError::custom(format!("unknown RoleName: {}", err)))
         } else {
@@ -145,6 +145,12 @@ pub struct PrivateKey {
 }
 
 impl PrivateKey {
+    pub fn from_der(der_key: Vec<u8>) -> Self {
+        let mut hasher = Sha256::new();
+        hasher.input(&der_key);
+        PrivateKey { keyid: hasher.result_str(), der_key: der_key }
+    }
+
     pub fn sign_data(&self, data: json::Value, sig_type: SignatureType) -> Result<TufSigned, Error> {
         let cjson = canonicalize_json(&json::to_vec(&data)?)?;
         let signed = TufSigned {
@@ -165,8 +171,8 @@ pub enum KeyType {
     Rsa,
 }
 
-impl Deserialize for KeyType {
-    fn deserialize<D: Deserializer>(de: D) -> Result<Self, D::Error> {
+impl<'de> Deserialize<'de> for KeyType {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
         if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
             s.parse().map_err(|err| SerdeError::custom(format!("unknown KeyType: {}", err)))
         } else {

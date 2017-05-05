@@ -78,8 +78,8 @@ impl Services {
     /// Parse the message as an `RpcRequest<RviMessage<Parameter>>` then delegate
     /// to the specific `Parameter.handle()` function, forwarding any returned
     /// `Event` to the `Services` sender.
-    fn handle_message<P>(&self, id: u64, msg: &str) -> Result<RpcOk<i32>, RpcErr>
-        where P: Parameter + Serialize + Deserialize
+    fn handle_message<'de, P>(&self, id: u64, msg: &'de str) -> Result<RpcOk<i32>, RpcErr>
+        where P: Parameter + Serialize + Deserialize<'de>
     {
         let request = json::from_str::<RpcRequest<RviMessage<P>>>(msg)
             .map_err(|err| RpcErr::invalid_params(id, format!("couldn't decode message: {}", err)))?;

@@ -1,9 +1,10 @@
-use base64::Base64Error;
+use base64::DecodeError as Base64Error;
 use chrono::ParseError as ChronoParseError;
 use hex::FromHexError;
 use hyper::error::Error as HyperError;
 use openssl::error::ErrorStack as OpensslErrors;
 use pem::Error as PemError;
+use ring::error::Unspecified as RingError;
 use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{self, Display, Formatter};
@@ -46,6 +47,7 @@ pub enum Error {
     Pem(PemError),
     Poison(String),
     Recv(RecvError),
+    Ring(RingError),
     Rvi(String),
     SendCommand(SendError<CommandExec>),
     SendEvent(SendError<Event>),
@@ -92,6 +94,7 @@ impl Display for Error {
             Error::Parse(ref err)       => format!("Parse error: {}", err),
             Error::Pem(ref err)         => format!("PEM parse error: {}", err),
             Error::Recv(ref err)        => format!("Recv error: {}", err),
+            Error::Ring(ref err)        => format!("Ring error: {}", err),
             Error::Rvi(ref err)         => format!("RVI error: {}", err),
             Error::SendCommand(ref err) => format!("Command send error: {}", err),
             Error::SendEvent(ref err)   => format!("Event send error: {}", err),
@@ -152,6 +155,7 @@ derive_from!([
     OpensslErrors    => Openssl,
     PemError         => Pem,
     RecvError        => Recv,
+    RingError        => Ring,
     ResponseData     => Http,
     SerdeJsonError   => Json,
     TomlError        => Toml,

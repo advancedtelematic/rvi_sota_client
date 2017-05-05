@@ -83,8 +83,8 @@ impl FromStr for PacMan {
     }
 }
 
-impl Deserialize for PacMan {
-    fn deserialize<D: Deserializer>(de: D) -> Result<PacMan, D::Error> {
+impl<'de> Deserialize<'de> for PacMan {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<PacMan, D::Error> {
         if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
             s.parse().map_err(|err| SerdeError::custom(format!("invalid package manager: {}", err)))
         } else {
