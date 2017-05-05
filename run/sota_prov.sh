@@ -50,12 +50,12 @@ function device_registration() {
 hardware_id="${HARDWARE_IDENTIFIER-$(cat /etc/hostname)}"
 function ecu_registration() {
   echo "Generating ECU keypair"
-  openssl genpkey -algorithm RSA -out "$out_ecu.pem" -pkeyopt rsa_keygen_bits:2048
-  echo "Saved ECU private key to $certdir/$out_ecu.pem"
-  openssl rsa -pubout -in "$out_ecu.pem" -out "$out_ecu.pub"
+  openssl genpkey -algorithm RSA -out "$out_ecu.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+  echo "Saved ECU private key to $certdir/$out_ecu.der"
+  openssl rsa -pubout -in "$out_ecu.der" -inform DER -out "$out_ecu.pub"
   echo "Saved ECU public key to $certdir/$out_ecu.pub"
-  keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_ecu.pub")
 
+  keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_ecu.pub")
   curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     -X POST "$SOTA_GATEWAY_URI/director/ecus" \
     -H 'Content-Type: application/json' \
@@ -106,7 +106,7 @@ repo_server = "$SOTA_GATEWAY_URI/repo"
 primary_ecu_serial = "$device_id"
 primary_ecu_hardware_identifier = "$hardware_id"
 metadata_path = "$certdir/metadata"
-private_key_path = "$certdir/$out_ecu.pem"
+private_key_path = "$certdir/$out_ecu.der"
 public_key_path = "$certdir/$out_ecu.pub"
 EOF
 

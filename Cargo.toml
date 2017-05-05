@@ -13,34 +13,34 @@ path = "src/main.rs"
 doc = false
 
 [dependencies]
-base64 = "0.4.1"
+base64 = "0.5.2"
 chan = "0.1.18"
 chan-signal = "0.2.0"
-chrono = { version = "0.3", features = ["serde"] }
+chrono = { version = "0.3.1", features = ["serde"] }
 crossbeam = "0.2.10"
 dbus = { version = "0.5.1", optional = true }
 env_logger = "0.4.2"
 getopts = "0.2.14"
 hex = "0.2.0"
-hyper = { version = "0.10.8", default-features = false }
+hyper = { version = "0.10.9", default-features = false }
 lazy_static = "0.2.6"
 log = "0.3.6"
 nom = "1.2.4"
-openssl = "0.9.10"
-pem = "0.3.0"
+openssl = "0.9.11"
+pem = "0.4.0"
 ring = { version = "0.7.1", features = [ "rsa_signing" ] }
 rust-crypto = "0.2.36"
-serde_derive = "0.9.13"
-serde = "0.9.13"
-serde_json = "0.9.10"
+serde_derive = "1.0.2"
+serde = "1.0.2"
+serde_json = "1.0.1"
 tar = "0.4.11"
-time = "0.1.36"
-toml = "0.3.1"
+time = "0.1.37"
+toml = "0.4.0"
 tungstenite = { version = "0.2.2", default-features = false, optional = true }
 unix_socket = { version = "0.5.0", optional = true }
 untrusted = "0.3.2"
 url = "1.2.1"
-uuid = { version = "0.4.0", features = ["serde", "v4"] }
+uuid = { version = "0.5.0", features = ["serde", "v4"] }
 
 [features]
 default = ["d-bus", "socket", "websocket"]

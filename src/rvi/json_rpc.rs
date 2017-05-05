@@ -42,14 +42,14 @@ impl<S: Serialize> RpcRequest<S> {
 
 
 /// Encapsulates a successful JSON-RPC response.
-#[derive(Deserialize, Serialize)]
-pub struct RpcOk<D: Deserialize> {
+#[derive(Serialize, Deserialize)]
+pub struct RpcOk<D> {
     pub jsonrpc: String,
     pub id:      u64,
-    pub result:  Option<D>
+    pub result:  Option<D>,
 }
 
-impl<D: Deserialize> RpcOk<D> {
+impl<'de, D: Deserialize<'de>> RpcOk<D> {
     /// Instantiate a new successful JSON-RPC response type.
     pub fn new(id: u64, result: Option<D>) -> RpcOk<D> {
         RpcOk { jsonrpc: "2.0".to_string(), id: id, result: result }

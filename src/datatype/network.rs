@@ -26,8 +26,8 @@ impl FromStr for SocketAddr {
     }
 }
 
-impl Deserialize for SocketAddr {
-    fn deserialize<D: Deserializer>(de: D) -> Result<SocketAddr, D::Error> {
+impl<'de> Deserialize<'de> for SocketAddr {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<SocketAddr, D::Error> {
         if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
             s.parse().map_err(|err| SerdeError::custom(format!("invalid SocketAddr: {}", err)))
         } else {
@@ -82,8 +82,8 @@ impl Serialize for Url {
     }
 }
 
-impl Deserialize for Url {
-    fn deserialize<D: Deserializer>(de: D) -> Result<Url, D::Error> {
+impl<'de> Deserialize<'de> for Url {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Url, D::Error> {
         if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
             s.parse().map_err(|err| SerdeError::custom(format!("invalid Url: {}", err)))
         } else {
