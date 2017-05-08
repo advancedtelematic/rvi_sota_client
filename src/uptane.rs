@@ -1,4 +1,6 @@
 use base64;
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
 use hex::FromHex;
 use pem;
 use serde_json as json;
@@ -44,6 +46,11 @@ pub struct Uptane {
 
 impl Uptane {
     pub fn new(config: &Config) -> Result<Self, Error> {
+        let der_key = Util::read_file(&config.uptane.private_key_path)?;
+        let pub_key = Util::read_file(&config.uptane.public_key_path)?;
+        let mut hasher = Sha256::new();
+        hasher.input(&pub_key);
+
         let mut uptane = Uptane {
             director_server:  config.uptane.director_server.clone(),
             repo_server:      config.uptane.repo_server.clone(),
@@ -51,7 +58,7 @@ impl Uptane {
             persist_metadata: true,
 
             primary_ecu: config.uptane.primary_ecu_serial.clone(),
-            private_key: PrivateKey::from_der(Util::read_file(&config.uptane.private_key_path)?),
+            private_key: PrivateKey { keyid: hasher.result_str(), der_key: der_key },
             sig_type:    SignatureType::RsaSsaPss,
 
             director_verifier: Verifier::default(),

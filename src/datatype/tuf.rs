@@ -145,12 +145,6 @@ pub struct PrivateKey {
 }
 
 impl PrivateKey {
-    pub fn from_der(der_key: Vec<u8>) -> Self {
-        let mut hasher = Sha256::new();
-        hasher.input(&der_key);
-        PrivateKey { keyid: hasher.result_str(), der_key: der_key }
-    }
-
     pub fn sign_data(&self, data: json::Value, sig_type: SignatureType) -> Result<TufSigned, Error> {
         let cjson = canonicalize_json(&json::to_vec(&data)?)?;
         let signed = TufSigned {

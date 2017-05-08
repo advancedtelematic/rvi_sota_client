@@ -67,7 +67,7 @@ impl FromStr for SignatureType {
 impl SignatureType {
     pub fn sign_msg(&self, msg: &[u8], der_key: &[u8]) -> Result<Vec<u8>, Error> {
         match *self {
-            SignatureType::Ed25519 => unimplemented!(),
+            SignatureType::Ed25519 => Ok(ed25519::signature(msg, der_key).as_ref().into()),
 
             SignatureType::RsaSsaPss => {
                 let pair = RSAKeyPair::from_der(Input::from(der_key))?;
@@ -110,23 +110,24 @@ mod tests {
     fn test_msg() -> Vec<u8> { "hello".as_bytes().into() }
     fn flip_bit(data: &mut [u8]) -> &[u8] { data[0] ^= 1; data }
 
-    #[test]
-    fn test_rsa_sign_and_verify() {
-        let priv_key = Util::read_file("tests/keys/rsa.der").expect("read priv");
-        let pub_key = pem::parse(Util::read_file("tests/keys/rsa.pub").expect("read pub")).expect("pub_key").contents;
-        let mut sig = SignatureType::RsaSsaPss.sign_msg(&test_msg(), &priv_key).expect("sign_msg");
-        assert!(SignatureType::RsaSsaPss.verify_msg(&test_msg(), &pub_key, &sig));
-        assert_eq!(false, SignatureType::RsaSsaPss.verify_msg(flip_bit(&mut test_msg()), &pub_key, &sig));
-        assert_eq!(false, SignatureType::RsaSsaPss.verify_msg(&test_msg(), &pub_key, flip_bit(&mut sig)));
+    fn sign_and_verify(sig_type: SignatureType, priv_key: &[u8], pub_key: &[u8]) {
+        let mut sig = sig_type.sign_msg(&test_msg(), &priv_key).expect("sign_msg");
+        assert!(sig_type.verify_msg(&test_msg(), &pub_key, &sig));
+        assert_eq!(false, sig_type.verify_msg(flip_bit(&mut test_msg()), &pub_key, &sig));
+        assert_eq!(false, sig_type.verify_msg(&test_msg(), &pub_key, flip_bit(&mut sig)));
     }
 
     #[test]
-    fn test_ed25519_verify() {
-        // priv_key: 0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==
-        let pub_key = base64::decode("qQi1Q6V7mqZzt12UPYtcFd2oiMYtW+U8VXlXrpW8lMs=").expect("parse key");
-        let mut sig = base64::decode("/VniTdrxQlEXcx5QJGHqI7ptGwTq1wBThbfflb8SLRrEE4LQMkd5yBh/PWGvsU7cFNN+PNhFUZY4QwVq9p4MAg").expect("parse sig");
-        assert!(SignatureType::Ed25519.verify_msg(&test_msg(), &pub_key, &sig));
-        assert_eq!(false, SignatureType::Ed25519.verify_msg(flip_bit(&mut test_msg()), &pub_key, &sig));
-        assert_eq!(false, SignatureType::Ed25519.verify_msg(&test_msg(), &pub_key, flip_bit(&mut sig)));
+    fn test_rsa_sign_and_verify() {
+        let priv_key = Util::read_file("tests/keys/rsa.der").expect("read priv");
+        let pub_key  = Util::read_file("tests/keys/rsa.pub").expect("read pub");
+        sign_and_verify(SignatureType::RsaSsaPss, &priv_key, &pem::parse(pub_key).expect("pem").contents);
+    }
+
+    #[test]
+    fn test_ed25519_sign_and_verify() {
+        let priv_key = base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("priv_key");
+        let pub_key  = base64::decode("qQi1Q6V7mqZzt12UPYtcFd2oiMYtW+U8VXlXrpW8lMs=").expect("parse key");
+        sign_and_verify(SignatureType::Ed25519, &priv_key, &pub_key);
     }
 }
