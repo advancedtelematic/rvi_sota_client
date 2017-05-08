@@ -8,112 +8,104 @@ done
 set -xeo pipefail
 
 : "${SOTA_GATEWAY_URI:?}"
-certdir=${SOTA_CERT_DIR-/usr/local/etc/sota}
-mkdir -p "$certdir" && cd "$certdir"
+device_id="${SOTA_DEVICE_ID-$(ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
+hardware_id="${SOTA_HARDWARE_ID-$(cat /etc/hostname)}"
+primary_serial=$(python -c "import random; print(random.randint(10**12, 10**13-1))")
+cert_dir="${SOTA_CERT_DIR-/usr/local/etc/sota}"
+mkdir -p "$cert_dir" && cd "$cert_dir"
 
 in_reg="${1-credentials}" # input registration credentials file prefix
 out_dev="${2-device}"     # output device credentials file prefix
 out_ca="${3-ca}"          # output ca certificates file prefix
-out_ecu="${4-ecuprimary}" # output primary ecu file prefix
+out_pri="${4-primary}"    # output primary ecu file prefix
+in_ecus="${5-ecus}"       # input secondary ecus file
 
-
-function mk_device_id() {
-  petname || ifconfig -a | grep 'HWaddr ..:' | head -n 1 | sed -e 's/^.*HWaddr //' | sed -e 's/\s*$//'
-}
-device_id="${SOTA_DEVICE_ID-$(mk_device_id)}"
-
-function device_registration() {
-  if [ ! -f "$in_reg.p12" ]; then
-    echo "Missing '$in_reg.p12' in $PWD"
-    exit 1
-  elif [ -f "$out_dev.p12" ]; then
-    echo "Already provisioned '$out_dev.p12' in $PWD"
-    exit 0
-  fi
-
-  openssl pkcs12 -in "$in_reg.p12" -out "$in_reg.pem" -nodes -passin pass:""
-  openssl pkcs12 -in "$in_reg.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
-    | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
-
-  curl -vv -f --cacert "$out_ca.crt" --cert "$in_reg.pem" \
-    -X POST "$SOTA_GATEWAY_URI/devices" \
-    -H 'Content-Type: application/json' \
-    -d '{"deviceId":"'"$device_id"'","ttl":36000}' \
-    -o "$out_dev.p12"
-  echo "Registered device $device_id with server"
-  echo "Received device PKCS-12 bundle"
-
-  openssl pkcs12 -in "$out_dev.p12" -out "$out_dev.pem" -nodes -passin pass:""
-  openssl pkcs12 -in "$out_dev.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
-    | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
-  echo "Created SOTA certificate authority file at $certdir/$out_ca.crt"
-  openssl pkcs12 -in "$out_dev.p12" -clcerts -nokeys -passin pass:"" 2>/dev/null \
-    | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_dev.crt"
-  echo "Created SOTA device certificate at $certdir/$out_ca.crt"
+main() {
+    register_device
+    register_ecus
+    fetch_metadata root director
+    fetch_metadata root repo
+    generate_toml
 }
 
-hardware_id="${HARDWARE_IDENTIFIER-$(cat /etc/hostname)}"
-primary_serial=$(python -c "import random; print(random.randint(10**12, 10**13-1))")
-function ecu_registration() {
-  echo "Generating ECU keypair"
-  openssl genpkey -algorithm RSA -out "$out_ecu.der" -outform DER -pkeyopt rsa_keygen_bits:2048
-  echo "Saved ECU private key to $certdir/$out_ecu.der"
-  openssl rsa -pubout -in "$out_ecu.der" -inform DER -out "$out_ecu.pub"
-  echo "Saved ECU public key to $certdir/$out_ecu.pub"
 
-  keypub=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_ecu.pub")
-  curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
-    -X POST "$SOTA_GATEWAY_URI/director/ecus" \
-    -H 'Content-Type: application/json' \
-    -d '{"primary_ecu_serial":"'"$primary_serial"'", "ecus":[{"ecu_serial":"'"$primary_serial"'", "hardware_identifier":"'"$hardware_id"'", "clientKey": {"keytype": "RSA", "keyval": {"public": "'"$keypub"'"}}}]}'
-  echo "Registered device ECUs with Director service"
+register_device() {
+    echo "Registering device: $device_id"
+    [ ! -f "$in_reg.p12"  ] && { echo "Missing '$in_reg.p12' in $PWD"; exit 1; }
+    [   -f "$out_dev.p12" ] && { echo "Already provisioned '$out_dev.p12' in $PWD"; exit 0; }
+
+    openssl pkcs12 -in "$in_reg.p12" -out "$in_reg.pem" -nodes -passin pass:""
+    openssl pkcs12 -in "$in_reg.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
+        | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
+    curl -vvf --cacert "$out_ca.crt" --cert "$in_reg.pem" "$SOTA_GATEWAY_URI/devices" \
+        -H 'Content-Type: application/json' \
+        -d '{"deviceId":"'"$device_id"'","ttl":365}' \
+        -o "$out_dev.p12"
+    echo "Wrote device bundle to $cert_dir/$out_dev.p12"
+
+    openssl pkcs12 -in "$out_dev.p12" -out "$out_dev.pem" -nodes -passin pass:""
+    echo "Wrote device certificate to $cert_dir/$out_dev.pem"
+    openssl pkcs12 -in "$out_dev.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
+        | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
+    echo "Wrote certificate authority file to $cert_dir/$out_ca.crt"
+    openssl pkcs12 -in "$out_dev.p12" -clcerts -nokeys -passin pass:"" 2>/dev/null \
+        | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_dev.crt"
+    echo "Wrote client certificate to $cert_dir/$out_dev.crt"
 }
 
-function director_metadata() {
-  mkdir -p metadata/director
-  curl --cacert "$out_ca.crt" --cert "$out_dev.pem" \
-    "$SOTA_GATEWAY_URI/director/root.json" \
-    -o metadata/director/root.json
-  echo "Received signed root.json from Director service, stored in $certdir/metadata/director/root.json"
+register_ecus() {
+    echo "Generating RSA keypair for Primary ECU"
+    openssl genpkey -algorithm RSA -out "$out_pri.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+    openssl rsa -pubout -in "$out_pri.der" -inform DER -out "$out_pri.pub"
+    pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_pri.pub")
+    ecus='{"ecu_serial":"'"$primary_serial"'","hardware_identifier":"'"$hardware_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
+
+    echo "Reading secondary ECUs from $cert_dir/$in_ecus"
+    while read -r secondary; do
+        [[ "$secondary" =~ [^\{.*\}$] ]] && ecus+=",$secondary"
+    done < "$in_ecus"
+
+    echo "Registering ECUs with Director service"
+    curl -vvf --cacert "$out_ca.crt" --cert "$out_dev.pem" \
+        "$SOTA_GATEWAY_URI/director/ecus" \
+        -H 'Content-Type: application/json' \
+        -d '{"primary_ecu_serial":"'"$primary_serial"'","ecus":['"$ecus"']}'
 }
 
-function repo_metadata() {
-  mkdir -p metadata/repo
-  curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
-    "$SOTA_GATEWAY_URI/repo/root.json" \
-    -o metadata/repo/root.json
-  echo "Received signed root.json from Repo service, stored in $certdir/metadata/repo/root.json"
+fetch_metadata() {
+    local metadata=$1
+    local service=$2
+    mkdir -p "metadata/$service"
+
+    echo "Fetching $metadata.json from $service"
+    curl -vvf --cacert "$out_ca.crt" --cert "$out_dev.pem" \
+        "$SOTA_GATEWAY_URI/$service/$metadata.json" \
+        -o "metadata/$service/$metadata.json"
 }
 
-echo "Registering device using hardware identifier $device_id"
-device_registration
-echo "Registering device ECUs"
-ecu_registration
-echo "Requesting signed root.json from Director service"
-director_metadata
-echo "Requesting signed root.json from Repo service"
-repo_metadata
-echo "Writing SOTA Client config file to $certdir/sota.toml"
-
-cat > sota.toml <<EOF
+generate_toml() {
+    echo "Writing SOTA config to $cert_dir/sota.toml"
+    cat > sota.toml <<EOF
 [device]
 package_manager = "off"
 system_info = "sota_sysinfo.sh"
 
 [tls]
 server = "$SOTA_GATEWAY_URI"
-ca_file = "$certdir/$out_ca.crt"
-cert_file = "$certdir/$out_dev.crt"
-pkey_file = "$certdir/$out_dev.pem"
+ca_file = "$cert_dir/$out_ca.crt"
+cert_file = "$cert_dir/$out_dev.crt"
+pkey_file = "$cert_dir/$out_dev.pem"
 
 [uptane]
 director_server = "$SOTA_GATEWAY_URI/director"
 repo_server = "$SOTA_GATEWAY_URI/repo"
 primary_ecu_serial = "$primary_serial"
 primary_ecu_hardware_identifier = "$hardware_id"
-metadata_path = "$certdir/metadata"
-private_key_path = "$certdir/$out_ecu.der"
-public_key_path = "$certdir/$out_ecu.pub"
+metadata_path = "$cert_dir/metadata"
+private_key_path = "$cert_dir/$out_pri.der"
+public_key_path = "$cert_dir/$out_pri.pub"
 EOF
+}
 
-echo "Autoprovisioning completed successfully"
+
+main
