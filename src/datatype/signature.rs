@@ -107,27 +107,31 @@ mod tests {
     use datatype::Util;
 
 
-    fn test_msg() -> Vec<u8> { "hello".as_bytes().into() }
-    fn flip_bit(data: &mut [u8]) -> &[u8] { data[0] ^= 1; data }
+    fn flip_bit(mut data: Vec<u8>) -> Vec<u8> { data[0] ^= 1; data }
 
     fn sign_and_verify(sig_type: SignatureType, priv_key: &[u8], pub_key: &[u8]) {
-        let mut sig = sig_type.sign_msg(&test_msg(), &priv_key).expect("sign_msg");
-        assert!(sig_type.verify_msg(&test_msg(), &pub_key, &sig));
-        assert_eq!(false, sig_type.verify_msg(flip_bit(&mut test_msg()), &pub_key, &sig));
-        assert_eq!(false, sig_type.verify_msg(&test_msg(), &pub_key, flip_bit(&mut sig)));
+        let msg = b"hello";
+        let sig = sig_type.sign_msg(msg, &priv_key).expect("sign_msg");
+        let bad_msg = flip_bit(msg.as_ref().into());
+        let bad_sig = flip_bit(sig.clone());
+
+        assert!(sig_type.verify_msg(msg, &pub_key, &sig));
+        assert!(!sig_type.verify_msg(&bad_msg, &pub_key, &sig));
+        assert!(!sig_type.verify_msg(msg, &pub_key, &bad_sig));
     }
 
     #[test]
     fn test_rsa_sign_and_verify() {
-        let priv_key = Util::read_file("tests/keys/rsa.der").expect("read priv");
-        let pub_key  = Util::read_file("tests/keys/rsa.pub").expect("read pub");
-        sign_and_verify(SignatureType::RsaSsaPss, &priv_key, &pem::parse(pub_key).expect("pem").contents);
+        let pri_key = Util::read_file("tests/keys/rsa.der").expect("rsa.der");
+        let pub_pem = Util::read_file("tests/keys/rsa.pub").expect("rsa.pub");
+        let pub_key = pem::parse(pub_pem).expect("pem").contents;
+        sign_and_verify(SignatureType::RsaSsaPss, &pri_key, &pub_key);
     }
 
     #[test]
     fn test_ed25519_sign_and_verify() {
-        let priv_key = base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("priv_key");
-        let pub_key  = base64::decode("qQi1Q6V7mqZzt12UPYtcFd2oiMYtW+U8VXlXrpW8lMs=").expect("parse key");
-        sign_and_verify(SignatureType::Ed25519, &priv_key, &pub_key);
+        let pri_key = base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("pri_key");
+        let pub_key = base64::decode("qQi1Q6V7mqZzt12UPYtcFd2oiMYtW+U8VXlXrpW8lMs=").expect("pub_key");
+        sign_and_verify(SignatureType::Ed25519, &pri_key, &pub_key);
     }
 }
