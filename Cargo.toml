@@ -25,7 +25,6 @@ hex = "0.2.0"
 hyper = { version = "0.10.9", default-features = false }
 lazy_static = "0.2.6"
 log = "0.3.6"
-nom = "1.2.4"
 openssl = "0.9.11"
 pem = "0.4.0"
 ring = { version = "0.7.1", features = [ "rsa_signing" ] }

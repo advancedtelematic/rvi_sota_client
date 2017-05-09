@@ -1,6 +1,3 @@
-#[macro_use]
-extern crate nom; // use before log to avoid error!() macro conflict
-
 extern crate base64;
 extern crate chan;
 extern crate chrono;

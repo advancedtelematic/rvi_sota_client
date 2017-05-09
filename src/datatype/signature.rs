@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error as SerdeError;
 use serde_json as json;
 use std::os::raw::c_int;
-use std::str::{self, FromStr};
+use std::str::FromStr;
 use std::sync::Arc;
 use untrusted::Input;
 
