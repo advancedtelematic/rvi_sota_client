@@ -159,7 +159,7 @@ mod tests {
                 scope.spawn(move || {
                     let id = format!("00000000-0000-0000-0000-00000000000{}", n).parse::<Uuid>().unwrap();
                     let mut stream = UnixStream::connect(CMD_SOCK).expect("open command socket");
-                    let _ = stream.write_all(&format!("inst {}", id).into_bytes()).expect("write to stream");
+                    let _ = stream.write_all(&format!("StartInstall {}", id).into_bytes()).expect("write to stream");
                     stream.shutdown(Shutdown::Write).expect("shut down writing");
                     assert_eq!(Event::InstallingUpdate(id), json::from_reader(&stream).expect("read event"));
                 });
