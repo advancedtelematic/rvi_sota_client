@@ -49,4 +49,8 @@ RUN git clone git://git.gnome.org/libgsystem \
      gtk-doc-tools \
      python-pip
 
-RUN mkdir /sysroot && ostree admin --sysroot=/sysroot init-fs /sysroot
+RUN mkdir /sysroot \
+  && ostree admin --sysroot=/sysroot init-fs /sysroot \
+  && ostree admin --sysroot=/sysroot os-init docker \
+  && mkdir -p /sysroot/boot/loader.0 \
+  && ln -s loader.0 /sysroot/boot/loader
