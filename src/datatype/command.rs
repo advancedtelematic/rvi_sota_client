@@ -49,25 +49,113 @@ impl FromStr for Command {
 
     fn from_str(s: &str) -> Result<Command, Error> {
         let mut args = s.split_whitespace();
-        let arg = args.next().unwrap_or("");
-        let cmd = match arg {
-            "Authenticate"          => Command::Authenticate(Auth::None),
-            "GetUpdateRequests"     => Command::GetUpdateRequests,
-            "ListInstalledPackages" => Command::ListInstalledPackages,
-            "ListSystemInfo"        => Command::ListSystemInfo,
-            "SendInstalledPackages" => Command::SendInstalledPackages(Vec::new()),
-            "SendInstalledSoftware" => Command::SendInstalledSoftware(InstalledSoftware::default()),
-            "SendSystemInfo"        => Command::SendSystemInfo,
-            "SendInstallReport"     => Command::SendInstallReport(InstallReport::default()),
-            "Shutdown"              => Command::Shutdown,
-            "StartDownload"         => Command::StartDownload(Uuid::default()),
-            "StartInstall"          => Command::StartInstall(Uuid::default()),
-            "UptaneInstallOutcome"  => Command::UptaneInstallOutcome(TufSigned::default()),
-            "UptaneSendManifest"    => Command::UptaneSendManifest(vec![TufSigned::default()]),
-            "UptaneStartInstall"    => Command::UptaneStartInstall(OstreePackage::default()),
-            _ => return Err(Error::Command(format!("unknown command: {}", arg)))
-        };
-        parse_arguments(cmd, args.collect::<Vec<_>>())
+        let cmd = args.next().unwrap_or("");
+        let args = args.collect::<Vec<_>>();
+
+        match cmd {
+            "Authenticate" => match args.len() {
+                0 => Err(Error::Command("usage: Authenticate <type> | Authenticate <client-id> <client-secret>".to_string())),
+                1 if args[0] == "none" => Ok(Command::Authenticate(Auth::None)),
+                1 if args[0] == "cert" => Ok(Command::Authenticate(Auth::Certificate)),
+                2 => {
+                    let creds = ClientCredentials { client_id: args[0].into(), client_secret: args[1].into() };
+                    Ok(Command::Authenticate(Auth::Credentials(creds)))
+                },
+                _ => Err(Error::Command(format!("unexpected Authenticate args: {:?}", args))),
+            },
+
+            "GetUpdateRequests" => match args.len() {
+                0 => Ok(Command::GetUpdateRequests),
+                _ => Err(Error::Command(format!("unexpected GetUpdateRequests args: {:?}", args))),
+            },
+
+            "ListInstalledPackages" => match args.len() {
+                0 => Ok(Command::ListInstalledPackages),
+                _ => Err(Error::Command(format!("unexpected ListInstalledPackages args: {:?}", args))),
+            },
+
+            "ListSystemInfo" => match args.len() {
+                0 => Ok(Command::ListSystemInfo),
+                _ => Err(Error::Command(format!("unexpected ListSystemInfo args: {:?}", args))),
+            },
+
+            "SendInstalledPackages" => match args.len() {
+                0 | 1 => Err(Error::Command("usage: SendInstalledPackages (<name> <version> )+".to_string())),
+                n if n % 2 == 0 => {
+                    let packages = args.chunks(2)
+                        .map(|chunk| Package { name: chunk[0].into(), version: chunk[1].into() })
+                        .collect::<Vec<Package>>();
+                    Ok(Command::SendInstalledPackages(packages))
+                }
+                _ => Err(Error::Command("SendInstalledPackages expects an even number of 'name version' pairs".into())),
+            },
+
+            "SendInstalledSoftware" => match args.len() {
+                // FIXME(PRO-1160): args
+                _ => Err(Error::Command(format!("unexpected SendInstalledSoftware args: {:?}", args))),
+            },
+
+            "SendSystemInfo" => match args.len() {
+                0 => Ok(Command::SendSystemInfo),
+                _ => Err(Error::Command(format!("unexpected SendSystemInfo args: {:?}", args))),
+            },
+
+            "SendInstallReport" => match args.len() {
+                0 | 1 => Err(Error::Command("usage: SendInstallReport <update-id> <result-code>".to_string())),
+                2 => {
+                    let code = args[1].parse::<InstallCode>().map_err(|err| Error::Command(format!("couldn't parse InstallCode: {}", err)))?;
+                    Ok(Command::SendInstallReport(InstallResult::new(args[0].into(), code, "".to_string()).into_report()))
+                }
+                _ => Err(Error::Command(format!("unexpected SendInstallReport args: {:?}", args))),
+            },
+
+            "Shutdown" => match args.len() {
+                0 => Ok(Command::Shutdown),
+                _ => Err(Error::Command(format!("unexpected Shutdown args: {:?}", args))),
+            },
+
+            "StartDownload" => match args.len() {
+                0 => Err(Error::Command("usage: StartDownload <id>".to_string())),
+                1 => {
+                    let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
+                    Ok(Command::StartDownload(uuid))
+                }
+                _ => Err(Error::Command(format!("unexpected StartDownload args: {:?}", args))),
+            },
+
+            "StartInstall" => match args.len() {
+                0 => Err(Error::Command("usage: StartInstall <id>".to_string())),
+                1 => {
+                    let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
+                    Ok(Command::StartInstall(uuid))
+                }
+                _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
+            },
+
+            "UptaneInstallOutcome" => match args.len() {
+                // FIXME(PRO-1160): args
+                _ => Err(Error::Command(format!("unexpected UptaneInstallOutcome args: {:?}", args))),
+            },
+
+            "UptaneSendManifest" => match args.len() {
+                // FIXME(PRO-1160): args
+                _ => Err(Error::Command(format!("unexpected UptaneSendManifest args: {:?}", args))),
+            },
+
+            "UptaneStartInstall" => match args.len() {
+                0 | 1 | 2 => Err(Error::Command("usage: UptaneStartInstall <serial> <refname> <commit>".to_string())),
+                3 => Ok(Command::UptaneStartInstall(OstreePackage {
+                    ecu_serial:  args[0].to_string(),
+                    refName:     args[1].to_string(),
+                    commit:      args[2].to_string(),
+                    description: "".to_string(),
+                    pullUri:     "".to_string(),
+                })),
+                _ => Err(Error::Command(format!("unexpected UptaneStartInstall args: {:?}", args))),
+            },
+
+            _ => Err(Error::Command(format!("unknown command: {}", cmd)))
+        }
     }
 }
 
@@ -77,115 +165,6 @@ impl Display for Command {
             Command::SendInstalledPackages(_) => write!(f, "SendInstalledPackages"),
             _ => write!(f, "{:?}", self)
         }
-    }
-}
-
-fn parse_arguments(cmd: Command, args: Vec<&str>) -> Result<Command, Error> {
-    match cmd {
-        Command::Authenticate(_) => match args.len() {
-            0 => Err(Error::Command("usage: Authenticate <type> | Authenticate <client-id> <client-secret>".to_string())),
-            1 if args[0] == "none" => Ok(Command::Authenticate(Auth::None)),
-            1 if args[0] == "cert" => Ok(Command::Authenticate(Auth::Certificate)),
-            2 => Ok(Command::Authenticate(Auth::Credentials(ClientCredentials {
-                client_id:     args[0].to_string(),
-                client_secret: args[1].to_string()
-            }))),
-            _ => Err(Error::Command(format!("unexpected Authenticate args: {:?}", args))),
-        },
-
-        Command::GetUpdateRequests => match args.len() {
-            0 => Ok(Command::GetUpdateRequests),
-            _ => Err(Error::Command(format!("unexpected GetUpdateRequests args: {:?}", args))),
-        },
-
-        Command::ListInstalledPackages => match args.len() {
-            0 => Ok(Command::ListInstalledPackages),
-            _ => Err(Error::Command(format!("unexpected ListInstalledPackages args: {:?}", args))),
-        },
-
-        Command::ListSystemInfo => match args.len() {
-            0 => Ok(Command::ListSystemInfo),
-            _ => Err(Error::Command(format!("unexpected ListSystemInfo args: {:?}", args))),
-        },
-
-        Command::SendInstalledPackages(_) => match args.len() {
-            0 | 1 => Err(Error::Command("usage: SendInstalledPackages (<name> <version> )+".to_string())),
-            n if n % 2 == 0 => {
-                let (names, versions): (Vec<(_, &str)>, Vec<(_, &str)>) =
-                    args.into_iter().enumerate().partition(|&(n, _)| n % 2 == 0);
-                let packages = names.into_iter().zip(versions.into_iter())
-                    .map(|((_, name), (_, version))| Package {
-                        name:    name.to_string(),
-                        version: version.to_string()
-                    }).collect::<Vec<Package>>();
-                Ok(Command::SendInstalledPackages(packages))
-            }
-            _ => Err(Error::Command("SendInstalledPackages expects an even number of 'name version' pairs".into())),
-        },
-
-        Command::SendInstalledSoftware(_) => match args.len() {
-            // FIXME(PRO-1160): args
-            _ => Err(Error::Command(format!("unexpected SendInstalledSoftware args: {:?}", args))),
-        },
-
-        Command::SendSystemInfo => match args.len() {
-            0 => Ok(Command::SendSystemInfo),
-            _ => Err(Error::Command(format!("unexpected SendSystemInfo args: {:?}", args))),
-        },
-
-        Command::SendInstallReport(_) => match args.len() {
-            0 | 1 => Err(Error::Command("usage: SendInstallReport <update-id> <result-code>".to_string())),
-            2 => {
-                let code = args[1].parse::<InstallCode>().map_err(|err| Error::Command(format!("couldn't parse InstallCode: {}", err)))?;
-                Ok(Command::SendInstallReport(InstallResult::new(args[0].into(), code, "".to_string()).into_report()))
-            }
-            _ => Err(Error::Command(format!("unexpected SendInstallReport args: {:?}", args))),
-        },
-
-        Command::Shutdown => match args.len() {
-            0 => Ok(Command::Shutdown),
-            _ => Err(Error::Command(format!("unexpected Shutdown args: {:?}", args))),
-        },
-
-        Command::StartDownload(_) => match args.len() {
-            0 => Err(Error::Command("usage: StartDownload <id>".to_string())),
-            1 => {
-                let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
-                Ok(Command::StartDownload(uuid))
-            }
-            _ => Err(Error::Command(format!("unexpected StartDownload args: {:?}", args))),
-        },
-
-        Command::StartInstall(_) => match args.len() {
-            0 => Err(Error::Command("usage: StartInstall <id>".to_string())),
-            1 => {
-                let uuid = args[0].parse::<Uuid>().map_err(|err| Error::Command(format!("couldn't parse UpdateResultId: {}", err)))?;
-                Ok(Command::StartInstall(uuid))
-            }
-            _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
-        },
-
-        Command::UptaneInstallOutcome(_) => match args.len() {
-            // FIXME(PRO-1160): args
-            _ => Err(Error::Command(format!("unexpected UptaneInstallOutcome args: {:?}", args))),
-        },
-
-        Command::UptaneSendManifest(_) => match args.len() {
-            // FIXME(PRO-1160): args
-            _ => Err(Error::Command(format!("unexpected UptaneSendManifest args: {:?}", args))),
-        },
-
-        Command::UptaneStartInstall(_) => match args.len() {
-            0 | 1 | 2 => Err(Error::Command("usage: UptaneStartInstall <serial> <refname> <commit>".to_string())),
-            3 => Ok(Command::UptaneStartInstall(OstreePackage {
-                ecu_serial:  args[0].to_string(),
-                refName:     args[1].to_string(),
-                commit:      args[2].to_string(),
-                description: "".to_string(),
-                pullUri:     "".to_string(),
-            })),
-            _ => Err(Error::Command(format!("unexpected UptaneStartInstall args: {:?}", args))),
-        },
     }
 }
 
@@ -243,13 +222,10 @@ mod tests {
     #[test]
     fn send_installed_packages_test() {
         assert_eq!("SendInstalledPackages n1 v1 n2 v2".parse::<Command>().unwrap(),
-                   Command::SendInstalledPackages(vec![Package {
-                       name:    "n1".to_string(),
-                       version: "v1".to_string()
-                   }, Package {
-                       name:    "n2".to_string(),
-                       version: "v2".to_string()
-                   }]));
+                   Command::SendInstalledPackages(vec![
+                       Package { name: "n1".into(), version: "v1".into() },
+                       Package { name: "n2".into(), version: "v2".into() },
+                   ]));
         assert!("SendInstalledPackages".parse::<Command>().is_err());
         assert!("SendInstalledPackages n1 v1 n2".parse::<Command>().is_err());
     }

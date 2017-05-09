@@ -34,7 +34,7 @@ impl Ostree {
             .env("OSTREE_SYSROOT", "/sysroot")
             .env("OSTREE_BOOT_PARTITION", "/boot")
             .output()
-            .map_err(|err| Error::Command(format!("ostree: {}", err)))
+            .map_err(|err| Error::OSTree(err.to_string()))
             .and_then(|output| {
                 if output.status.success() {
                     Ok(output)
@@ -144,7 +144,7 @@ impl OstreePackage {
                     .filter(|branch| branch.current)
                     .map(|branch| branch.package)
                     .nth(0)
-                    .ok_or_else(|| Error::Command("current branch unknown".to_string()))
+                    .ok_or_else(|| Error::OSTree("current branch unknown".to_string()))
             })
     }
 
