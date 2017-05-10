@@ -3,7 +3,7 @@ extern crate chan;
 extern crate chrono;
 extern crate crossbeam;
 extern crate crypto;
-#[cfg(feature = "d-bus")]
+#[cfg(feature = "rvi")]
 extern crate dbus;
 extern crate hex;
 extern crate hyper;
@@ -36,6 +36,7 @@ pub mod gateway;
 pub mod http;
 pub mod interpreter;
 pub mod pacman;
+#[cfg(feature = "rvi")]
 pub mod rvi;
 pub mod sota;
 pub mod uptane;
