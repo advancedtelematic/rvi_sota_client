@@ -42,8 +42,9 @@ url = "1.2.1"
 uuid = { version = "0.5.0", features = ["serde", "v4"] }
 
 [features]
-default = ["d-bus", "socket", "websocket"]
-d-bus = ["dbus"]
+default = ["socket"]
+all = ["rvi", "socket", "websocket"]
+rvi = ["dbus"]
 socket = ["unix_socket"]
 websocket = ["tungstenite"]
 

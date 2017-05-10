@@ -32,7 +32,7 @@ DOCKER_RUN := \
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
 
-.PHONY: help start generate test test doc client image test deb rpm sota-version package-version
+.PHONY: help start generate test doc client image image-uptane deb rpm sota-version package-version
 .DEFAULT_GOAL := help
 
 help:
@@ -45,7 +45,7 @@ generate: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
-	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET) --features=$(FEATURES)
+	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET) --features=all
 
 doc: ## Generate documentation for the sota crate.
 	$(CARGO) doc --lib --no-deps --release --features=$(FEATURES)

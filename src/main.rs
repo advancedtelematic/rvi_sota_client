@@ -4,7 +4,8 @@ extern crate crossbeam;
 extern crate env_logger;
 extern crate getopts;
 extern crate hyper;
-#[macro_use] extern crate log;
+#[macro_use]
+extern crate log;
 extern crate sota;
 extern crate time;
 
@@ -20,7 +21,7 @@ use std::time::Duration;
 
 use sota::datatype::{Command, Config, Event};
 use sota::gateway::{Console, Gateway, Http};
-#[cfg(feature = "d-bus")]
+#[cfg(feature = "rvi")]
 use sota::gateway::DBus;
 #[cfg(feature = "socket")]
 use sota::gateway::Socket;
@@ -31,6 +32,7 @@ use sota::http::{AuthClient, TlsClient};
 use sota::interpreter::{CommandExec, CommandMode, CommandInterpreter,
                         EventInterpreter, Interpreter};
 use sota::pacman::PacMan;
+#[cfg(feature = "rvi")]
 use sota::rvi::{Edge, Services};
 use sota::uptane::Uptane;
 
@@ -45,11 +47,9 @@ macro_rules! exit {
 
 fn main() {
     let version = start_logging();
-    let config  = build_config(&version);
-
+    let config = build_config(&version);
     TlsClient::init(config.tls_data());
     let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
-    let http = AuthClient::from(auth.clone());
 
     let (ctx, crx) = chan::async::<CommandExec>();
     let (etx, erx) = chan::async::<Event>();
@@ -73,14 +73,14 @@ fn main() {
         }
 
         if config.gateway.dbus {
-            #[cfg(feature = "d-bus")] {
+            #[cfg(not(feature = "rvi"))]
+            exit!(2, "{}", "dbus gateway requires 'rvi' binary feature");
+            #[cfg(feature = "rvi")] {
                 let dbus_ctx = ctx.clone();
                 let dbus_erx = broadcast.subscribe();
                 let mut dbus = DBus { cfg: config.dbus.clone() };
                 scope.spawn(move || dbus.start(dbus_ctx, dbus_erx));
             }
-            #[cfg(not(feature = "d-bus"))]
-            exit!(2, "{}", "binary not compiled with 'd-bus' feature but dbus gateway enabled");
         }
 
         if config.gateway.http {
@@ -90,17 +90,19 @@ fn main() {
             scope.spawn(move || http.start(http_ctx, http_erx));
         }
 
-        let services = if config.gateway.rvi {
-            let rvi_edge = config.network.rvi_edge_server.clone();
-            let services = Services::new(config.rvi.clone(), format!("{}", config.device.uuid), etx.clone());
-            let mut edge = Edge::new(services.clone(), rvi_edge, config.rvi.client.clone());
-            scope.spawn(move || edge.start());
-            Some(services)
-        } else {
-            None
-        };
+        if config.gateway.rvi {
+            #[cfg(not(feature = "rvi"))]
+            exit!(2, "{}", "rvi gateway requires 'rvi' binary feature");
+            #[cfg(feature = "rvi")] {
+                let services = Services::new(config.rvi.clone(), format!("{}", config.device.uuid), etx.clone());
+                let mut edge = Edge::new(services, config.network.rvi_edge_server.clone(), config.rvi.client.clone());
+                scope.spawn(move || edge.start());
+            }
+        }
 
         if config.gateway.socket {
+            #[cfg(not(feature = "socket"))]
+            exit!(2, "{}", "socket gateway requires 'socket' binary feature");
             #[cfg(feature = "socket")] {
                 let socket_ctx = ctx.clone();
                 let socket_erx = broadcast.subscribe();
@@ -110,27 +112,18 @@ fn main() {
                 };
                 scope.spawn(move || socket.start(socket_ctx, socket_erx));
             }
-            #[cfg(not(feature = "socket"))]
-            exit!(2, "{}", "binary not compiled with 'socket' feature but socket gateway enabled");
         }
 
         if config.gateway.websocket {
+            #[cfg(not(feature = "websocket"))]
+            exit!(2, "{}", "websocket gateway requires 'websocket' binary feature");
             #[cfg(feature = "websocket")] {
                 let ws_ctx = ctx.clone();
                 let ws_erx = broadcast.subscribe();
                 let mut ws = Websocket { server: config.network.websocket_server.clone() };
                 scope.spawn(move || ws.start(ws_ctx, ws_erx));
             }
-            #[cfg(not(feature = "websocket"))]
-            exit!(2, "{}", "binary not compiled with 'websocket' feature but websocket gateway enabled");
         }
-
-        let uptane = if let PacMan::Uptane = config.device.package_manager {
-            if services.is_some() { exit!(2, "{}", "unexpected [rvi] config with uptane package manager"); }
-            Some(Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err)))
-        } else {
-            None
-        };
 
         let mut event_int = EventInterpreter {
             initial: true,
@@ -145,18 +138,28 @@ fn main() {
         let ei_ctx = ctx.clone();
         scope.spawn(move || event_int.run(ei_erx, ei_ctx));
 
-        scope.spawn(move || CommandInterpreter {
-            mode: if let Some(uptane) = uptane {
-                CommandMode::Uptane(Rc::new(RefCell::new(uptane)))
-            } else if let Some(services) = services {
-                CommandMode::Rvi(Rc::new(RefCell::new(services)))
-            } else {
-                CommandMode::Sota
-            },
-            config: config,
-            auth:   auth,
-            http:   Box::new(http),
-        }.run(crx, etx));
+        scope.spawn(move || {
+            let mut mode = CommandMode::Sota;
+            if let PacMan::Uptane = config.device.package_manager {
+                let uptane = Uptane::new(&config).unwrap_or_else(|err| exit!(2, "couldn't start uptane: {}", err));
+                mode = CommandMode::Uptane(Rc::new(RefCell::new(uptane)));
+            }
+            #[cfg(feature = "rvi")] {
+                if config.gateway.rvi {
+                    let services = Services::new(config.rvi.clone(), format!("{}", config.device.uuid), etx.clone());
+                    mode = CommandMode::Rvi(Rc::new(RefCell::new(services)));
+                }
+            }
+
+            let http = Box::new(AuthClient::from(auth.clone()));
+            let mut cmd_int = CommandInterpreter {
+                mode:   mode,
+                config: config,
+                auth:   auth,
+                http:   http,
+            };
+            cmd_int.run(crx, etx)
+        });
 
         scope.spawn(move || broadcast.start());
     });

@@ -1,5 +1,5 @@
 pub mod console;
-#[cfg(feature = "d-bus")]
+#[cfg(feature = "rvi")]
 pub mod dbus;
 pub mod http;
 #[cfg(feature = "socket")]
@@ -8,7 +8,7 @@ pub mod socket;
 pub mod websocket;
 
 pub use self::console::Console;
-#[cfg(feature = "d-bus")]
+#[cfg(feature = "rvi")]
 pub use self::dbus::DBus;
 pub use self::http::Http;
 #[cfg(feature = "socket")]

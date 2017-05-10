@@ -8,6 +8,7 @@ use datatype::{Auth, Command, Config, EcuCustom, Error, Event, InstallCode, Inst
                RoleName, RequestStatus, Url};
 use http::{AuthClient, Client};
 use pacman::{Credentials, PacMan};
+#[cfg(feature = "rvi")]
 use rvi::Services;
 use sota::Sota;
 use uptane::Uptane;
@@ -129,6 +130,7 @@ pub struct CommandExec {
 #[derive(Clone)]
 pub enum CommandMode {
     Sota,
+    #[cfg(feature = "rvi")]
     Rvi(Rc<RefCell<Services>>),
     Uptane(Rc<RefCell<Uptane>>),
 }
@@ -217,6 +219,7 @@ impl CommandInterpreter {
                 Event::InstalledPackagesSent
             }
 
+            #[cfg(feature = "rvi")]
             (Command::SendInstalledSoftware(sw), CommandMode::Rvi(services)) => {
                 let services = services.borrow_mut();
                 services.remote.lock().unwrap().send_installed_software(sw).map_err(Error::Rvi)?;
@@ -230,6 +233,7 @@ impl CommandInterpreter {
                 Event::SystemInfoSent
             }
 
+            #[cfg(feature = "rvi")]
             (Command::SendInstallReport(report), CommandMode::Rvi(services)) => {
                 let services = services.borrow_mut();
                 services.remote.lock().unwrap().send_update_report(report.clone()).map_err(Error::Rvi)?;
@@ -242,6 +246,7 @@ impl CommandInterpreter {
                 Event::InstallReportSent(report)
             }
 
+            #[cfg(feature = "rvi")]
             (Command::StartDownload(id), CommandMode::Rvi(services)) => {
                 let services = services.borrow_mut();
                 services.remote.lock().unwrap().send_download_started(id).map_err(Error::Rvi)?;
