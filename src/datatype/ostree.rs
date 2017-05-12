@@ -31,7 +31,6 @@ impl Ostree {
         Command::new("ostree")
             .args(args)
             .env("OSTREE_REPO", "/sysroot/ostree/repo")
-            .env("OSTREE_SYSROOT", "/sysroot")
             .env("OSTREE_BOOT_PARTITION", "/boot")
             .output()
             .map_err(|err| Error::OSTree(err.to_string()))
