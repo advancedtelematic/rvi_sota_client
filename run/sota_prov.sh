@@ -13,7 +13,7 @@ out_ecu="${4-ecuprimary}" # output primary ecu file prefix
 
 
 function mk_device_id() {
-  ifconfig -a | grep 'HWaddr ..:' | head -n 1 | sed -e 's/^.*HWaddr //' | sed -e 's/\s*$//'
+  petname || ifconfig -a | grep 'HWaddr ..:' | head -n 1 | sed -e 's/^.*HWaddr //' | sed -e 's/\s*$//'
 }
 device_id="${SOTA_DEVICE_ID-$(mk_device_id)}"
 
