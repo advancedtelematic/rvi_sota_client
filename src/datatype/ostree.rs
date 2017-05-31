@@ -170,7 +170,13 @@ impl OstreePackage {
     pub fn pull_commit(&self, remote: &str, creds: &Credentials) -> Result<Output, Error> {
         debug!("pulling from ostree remote: {}", remote);
         if ! Path::new(REMOTE_PATH).exists() {
-            let _ = self.add_remote(remote, creds)?;
+            let output = Ostree::run(&["remote", "list"])?;
+            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+            if stdout.contains(remote) {
+                debug!("`ostree remote list`'s stdout, '{}', contains '{}'", stdout, remote);
+            } else {
+                let _ = self.add_remote(remote, creds)?;
+            }
         }
 
         let mut args = vec!["pull".into(), remote.into()];
