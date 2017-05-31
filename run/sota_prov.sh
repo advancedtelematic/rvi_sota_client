@@ -1,5 +1,10 @@
 #!/bin/bash
 
+while [[ "$(timedatectl status | grep NTP)" != "NTP synchronized: yes" ]]; do 
+  sleep 5
+  echo "Waiting for NTP sync..."
+done
+
 set -xeo pipefail
 
 : "${SOTA_GATEWAY_URI:?}"
