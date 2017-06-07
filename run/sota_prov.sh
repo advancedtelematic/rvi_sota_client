@@ -53,6 +53,7 @@ function device_registration() {
 }
 
 hardware_id="${HARDWARE_IDENTIFIER-$(cat /etc/hostname)}"
+primary_serial=$(python -c "import random; print(random.randint(10**12, 10**13-1))")
 function ecu_registration() {
   echo "Generating ECU keypair"
   openssl genpkey -algorithm RSA -out "$out_ecu.der" -outform DER -pkeyopt rsa_keygen_bits:2048
@@ -64,7 +65,7 @@ function ecu_registration() {
   curl -vv -f --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     -X POST "$SOTA_GATEWAY_URI/director/ecus" \
     -H 'Content-Type: application/json' \
-    -d '{"primary_ecu_serial":"'"$device_id"'", "ecus":[{"ecu_serial":"'"$device_id"'", "hardware_identifier":"'"$hardware_id"'", "clientKey": {"keytype": "RSA", "keyval": {"public": "'"$keypub"'"}}}]}'
+    -d '{"primary_ecu_serial":"'"$primary_serial"'", "ecus":[{"ecu_serial":"'"$primary_serial"'", "hardware_identifier":"'"$hardware_id"'", "clientKey": {"keytype": "RSA", "keyval": {"public": "'"$keypub"'"}}}]}'
   echo "Registered device ECUs with Director service"
 }
 
@@ -108,7 +109,7 @@ pkey_file = "$certdir/$out_dev.pem"
 [uptane]
 director_server = "$SOTA_GATEWAY_URI/director"
 repo_server = "$SOTA_GATEWAY_URI/repo"
-primary_ecu_serial = "$device_id"
+primary_ecu_serial = "$primary_serial"
 primary_ecu_hardware_identifier = "$hardware_id"
 metadata_path = "$certdir/metadata"
 private_key_path = "$certdir/$out_ecu.der"
