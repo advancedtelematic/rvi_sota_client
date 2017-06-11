@@ -12,7 +12,7 @@ use datatype::Error;
 
 
 /// Encapsulate a socket address for implementing additional traits.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Serialize, Clone, Debug, Eq, PartialEq)]
 pub struct SocketAddr(pub StdSocketAddr);
 
 impl FromStr for SocketAddr {

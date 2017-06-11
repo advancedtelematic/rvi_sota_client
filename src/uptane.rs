@@ -6,10 +6,11 @@ use pem;
 use serde_json as json;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
+use std::mem;
 
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
                PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
-               TufMeta, TufRole, TufSigned, Url, Util, canonicalize_json};
+               TufMeta, TufSigned, Url, Util, canonicalize_json};
 use http::{Client, Response};
 
 
@@ -135,22 +136,14 @@ impl Uptane {
     pub fn get_metadata(&mut self, client: &Client, service: Service, role: RoleName) -> Result<Verified, Error> {
         trace!("getting {} role from {} service", role, service);
         let json = self.get(client, service, &format!("{}.json", role))?;
-        let verified = self.verify_metadata(service, role, json::from_slice::<TufSigned>(&json)?)?;
-        if self.persist_metadata && verified.is_new() {
+        let signed = json::from_slice::<TufSigned>(&json)?;
+        let verified = self.verifier(service).verify_signed(role, signed)?;
+        if verified.is_new() && self.persist_metadata {
             let dir = format!("{}/{}", self.metadata_path, service);
             Util::write_file(&format!("{}/{}.json", dir, role), &json)?;
             Util::write_file(&format!("{}/{}.{}.json", dir, verified.new_ver, role), &json)?;
         }
         Ok(verified)
-    }
-
-    /// Verify the signed TUF metadata for a given service and role.
-    fn verify_metadata(&mut self, service: Service, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
-        trace!("verifying {} metadata for {} service", role, service);
-        let data = json::from_value::<RoleData>(signed.signed.clone())?;
-        let new_ver = self.verifier(service).verify_signed(role, signed)?;
-        let old_ver = self.verifier(service).set_version(role, new_ver)?;
-        Ok(Verified { role: role, data: data, new_ver: new_ver, old_ver: old_ver })
     }
 
     /// Send a signed manifest with a list of signed objects to the Director server.
@@ -167,17 +160,14 @@ impl Uptane {
     }
 
     /// Extract a list of `OstreePackage`s from the targets.json metadata.
-    pub fn extract_packages(targets: HashMap<String, TufMeta>, treehub: &Url) -> Vec<OstreePackage> {
+    pub fn into_packages(targets: HashMap<String, TufMeta>, hash_type: &str, treehub: &Url) -> Result<Vec<OstreePackage>, Error> {
+        let pkg = |ecu, refname, commit| OstreePackage::new(ecu, refname, commit, "".into(), treehub);
         targets.into_iter()
-            .filter_map(|(refname, mut meta)| {
-                if let Some(commit) = meta.hashes.remove("sha256") {
-                    let ecu = meta.custom.expect("custom field").ecuIdentifier;
-                    Some(OstreePackage::new(ecu, refname, commit, "".into(), treehub))
-                } else {
-                    error!("couldn't get sha256 for {}", refname);
-                    None
-                }
-            }).collect::<Vec<_>>()
+            .map(|(refname, mut meta)| match (meta.hashes.remove(hash_type), meta.custom) {
+                (Some(commit), Some(custom)) => Ok(pkg(custom.ecuIdentifier, refname, commit)),
+                (None, _) => Err(Error::UptaneTarget(format!("{} missing {} hash", refname, hash_type))),
+                (_, None) => Err(Error::UptaneTarget(format!("{} missing custom field", refname)))
+            }).collect()
     }
 }
 
@@ -214,43 +204,39 @@ impl Verifier {
         }
     }
 
-    pub fn get_version(&self, role: RoleName) -> Result<u64, Error> {
-        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
-        Ok(meta.version)
-    }
+    /// Verify that the signed data is valid.
+    pub fn verify_signed(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
+        let current = {
+            let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("{} not found", role)))?;
+            self.verify_signatures(&meta, &signed)?;
+            meta.version
+        };
 
-    pub fn set_version(&mut self, role: RoleName, version: u64) -> Result<u64, Error> {
-        let meta = self.roles.get_mut(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
-        let old = meta.version;
-        trace!("updating {} version from {} to {}", role, old, version);
-        meta.version = version;
-        Ok(old)
-    }
-
-    /// Verify the signed data then return the version.
-    pub fn verify_signed(&self, role: RoleName, signed: TufSigned) -> Result<u64, Error> {
-        self.verify_signatures(role, &signed)?;
-        let tuf_role = json::from_value::<TufRole>(signed.signed)?;
-        if role != tuf_role._type {
-            Err(Error::UptaneRole(format!("expected `{}`, got `{}`", role, tuf_role._type)))
-        } else if tuf_role.expired() {
+        let data = json::from_value::<RoleData>(signed.signed)?;
+        if data._type != role {
+            Err(Error::UptaneRole(format!("expected `{}`, got `{}`", role, data._type)))
+        } else if data.expired() {
             Err(Error::UptaneExpired)
-        } else if tuf_role.version < self.get_version(role)? {
+        } else if data.version < current {
             Err(Error::UptaneVersion)
+        } else if data.version > current {
+            let meta = self.roles.get_mut(&role).expect("get_mut role");
+            let old = mem::replace(&mut meta.version, data.version);
+            debug!("{} version updated from {} to {}", role, old, data.version);
+            Ok(Verified { role: role, data: data, new_ver: meta.version, old_ver: old })
         } else {
-            Ok(tuf_role.version)
+            Ok(Verified { role: role, data: data, new_ver: current, old_ver: current })
         }
     }
 
     /// Verify that a role-defined threshold of signatures successfully validate.
-    pub fn verify_signatures(&self, role: RoleName, signed: &TufSigned) -> Result<(), Error> {
-        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
+    pub fn verify_signatures(&self, meta: &RoleMeta, signed: &TufSigned) -> Result<(), Error> {
         let cjson = canonicalize_json(&json::to_vec(&signed.signed)?)?;
         let valid = signed.signatures
             .iter()
             .filter(|sig| meta.keyids.contains(&sig.keyid))
             .filter(|sig| self.verify_data(&cjson, sig))
-            .map(|sig| &sig.keyid)
+            .map(|sig| &sig.sig)
             .collect::<HashSet<_>>();
 
         if (valid.len() as u64) < meta.threshold {

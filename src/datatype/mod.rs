@@ -26,7 +26,7 @@ pub use self::ostree::OstreePackage;
 pub use self::signature::{Signature, SignatureType};
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyType, KeyValue,
                     PrivateKey, RoleData, RoleName, RoleMeta, TufCustom, TufImage,
-                    TufMeta, TufRole, TufSigned};
+                    TufMeta, TufSigned};
 pub use self::util::Util;
 
 

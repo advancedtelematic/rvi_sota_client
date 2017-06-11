@@ -19,19 +19,6 @@ pub struct TufSigned {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct TufRole {
-    pub _type:   RoleName,
-    pub expires: DateTime<UTC>,
-    pub version: u64,
-}
-
-impl TufRole {
-    pub fn expired(&self) -> bool {
-        self.expires < UTC::now()
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TufImage {
     pub filepath: String,
     pub fileinfo: TufMeta
@@ -106,6 +93,12 @@ pub struct RoleData {
     pub roles:   Option<HashMap<RoleName, RoleMeta>>, // root only
     pub targets: Option<HashMap<String, TufMeta>>,    // targets only
     pub meta:    Option<HashMap<String, TufMeta>>,    // timestamp/snapshot only
+}
+
+impl RoleData {
+    pub fn expired(&self) -> bool {
+        self.expires < UTC::now()
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

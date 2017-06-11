@@ -22,7 +22,7 @@ const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
 const REMOTE_PATH: &'static str = "/etc/ostree/remotes.d/sota-remote.conf";
 
 
-/// Struct for OSTree related functions.
+/// Empty container for static `OSTree` functions.
 pub struct Ostree;
 
 impl Ostree {

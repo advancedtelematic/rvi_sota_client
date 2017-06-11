@@ -26,6 +26,10 @@ use interpreter::CommandExec;
 /// System-wide errors that are returned from `Result` type failures.
 #[derive(Debug)]
 pub enum Error {
+    AtomicAbort(String),
+    AtomicPayload,
+    AtomicStep(String),
+    AtomicTimeout,
     Base64(Base64Error),
     Client(String),
     Command(String),
@@ -62,6 +66,7 @@ pub enum Error {
     UptaneMissingKeys,
     UptaneMissingRoles,
     UptaneRole(String),
+    UptaneTarget(String),
     UptaneThreshold(String),
     UptaneVersion,
     UrlParse(UrlParseError),
@@ -73,6 +78,10 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
+            Error::AtomicAbort(ref err) => format!("Atomic transaction abort: {}", err),
+            Error::AtomicPayload        => "Atomic payload too large".into(),
+            Error::AtomicStep(ref err)  => format!("Atomic transition invalid: {}", err),
+            Error::AtomicTimeout        => "Atomic transaction timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),
             Error::Command(ref err)     => format!("Unknown Command: {}", err),
@@ -109,7 +118,8 @@ impl Display for Error {
             Error::UptaneMissingKeys    => "Uptane: missing `keys` field".into(),
             Error::UptaneMissingRoles   => "Uptane: missing `roles` field".into(),
             Error::UptaneRole(ref err)  => format!("Uptane role: {}", err),
-            Error::UptaneThreshold(ref err) => format!("Uptane role threshold not met: {}", err),
+            Error::UptaneTarget(ref err) => format!("Uptane role: {}", err),
+            Error::UptaneThreshold(ref err) => format!("Uptane targets metadata: {}", err),
             Error::UptaneVersion        => "Uptane: metadata version older than current".into(),
             Error::UrlParse(ref err)    => format!("Url parse error: {}", err),
             Error::Utf8(ref err)        => format!("Utf8 error: {}", err),

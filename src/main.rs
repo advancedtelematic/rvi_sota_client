@@ -167,16 +167,11 @@ fn main() {
 
 fn start_logging() -> String {
     let version = option_env!("SOTA_VERSION").unwrap_or("unknown");
-
     let mut builder = LogBuilder::new();
-    builder.format(move |record: &LogRecord| {
-        let timestamp = format!("{}", time::now_utc().rfc3339());
-        format!("{} ({}): {} - {}", timestamp, version, record.level(), record.args())
-    });
+    builder.format(move |log| format!("{} ({}): {} - {}", time::now_utc().rfc3339(), version, log.level(), log.args()));
     builder.filter(Some("hyper"), LogLevelFilter::Info);
     builder.parse(&env::var("RUST_LOG").unwrap_or_else(|_| "INFO".to_string()));
     builder.init().expect("builder already initialized");
-
     version.to_string()
 }
 
@@ -200,8 +195,8 @@ fn start_update_poller(interval: u64, ctx: &Sender<CommandExec>) {
 }
 
 fn build_config(version: &str) -> Config {
-    let args     = env::args().collect::<Vec<String>>();
-    let program  = args[0].clone();
+    let args = env::args().collect::<Vec<_>>();
+    let program = &args[0];
     let mut opts = Options::new();
 
     opts.optflag("h", "help", "print this help menu then quit");

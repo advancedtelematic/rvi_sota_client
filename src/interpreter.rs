@@ -4,7 +4,7 @@ use std::process::{self, Command as ShellCommand};
 use std::rc::Rc;
 
 use authenticate::oauth2;
-use datatype::{Auth, Command, Config, EcuCustom, Error, Event, InstallCode, InstallResult,
+use datatype::{Auth, Command, Config, Error, Event, InstallCode, InstallResult,
                RoleName, RequestStatus, Url};
 use http::{AuthClient, Client};
 use pacman::{Credentials, PacMan};
@@ -108,9 +108,9 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
             }
 
             Event::UptaneTargetsUpdated(targets) => {
-                for pkg in Uptane::extract_packages(targets, self.treehub.as_ref().expect("treehub url")) {
-                    queue(Command::UptaneStartInstall(pkg));
-                }
+                Uptane::into_packages(targets, "sha256", self.treehub.as_ref().expect("treehub url"))
+                    .map(|packages| queue(Command::UptaneStartInstall(packages)))
+                    .unwrap_or_else(|err| error!("couldn't install uptane targets: {}", err));
             }
 
             _ => ()
@@ -149,10 +149,7 @@ impl Interpreter<CommandExec, Event> for  CommandInterpreter {
         info!("CommandInterpreter received: {}", &exec.cmd);
         let event = match self.process_command(exec.cmd, etx) {
             Ok(ev) => ev,
-            Err(Error::HttpAuth(resp)) => {
-                error!("{}", resp);
-                Event::NotAuthenticated
-            }
+            Err(Error::HttpAuth(resp)) => { error!("{}", resp); Event::NotAuthenticated }
             Err(err) => Event::Error(err.to_string())
         };
         exec.etx.map(|etx| etx.send(event.clone()));
@@ -283,21 +280,8 @@ impl CommandInterpreter {
                 Event::UptaneManifestSent
             }
 
-            (Command::UptaneStartInstall(package), CommandMode::Uptane(uptane)) => {
-                let uptane = uptane.borrow_mut();
-                if package.ecu_serial == self.config.uptane.primary_ecu_serial {
-                    let outcome = package.install(&self.get_credentials())?;
-                    let result  = outcome.into_result(package.refName.clone());
-                    let success = result.result_code.is_success();
-                    let version = uptane.signed_version(Some(EcuCustom { operation_result: result }))?;
-                    if success {
-                        Event::UptaneInstallComplete(version)
-                    } else {
-                        Event::UptaneInstallFailed(version)
-                    }
-                } else {
-                    Event::UptaneInstallNeeded(package)
-                }
+            (Command::UptaneStartInstall(packages), CommandMode::Uptane(uptane)) => {
+                unimplemented!()
             }
 
             (Command::SendInstalledSoftware(_), _) => unreachable!("Command::SendInstalledSoftware expects CommandMode::Rvi"),
