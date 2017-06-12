@@ -9,6 +9,8 @@ use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
+use std::net::AddrParseError;
+use std::num::ParseIntError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 use std::sync::PoisonError;
@@ -26,6 +28,7 @@ use interpreter::CommandExec;
 /// System-wide errors that are returned from `Result` type failures.
 #[derive(Debug)]
 pub enum Error {
+    Addr(AddrParseError),
     AtomicAbort(String),
     AtomicPayload,
     AtomicStep(String),
@@ -41,6 +44,7 @@ pub enum Error {
     HttpAuth(ResponseData),
     Hyper(HyperError),
     Io(IoError),
+    Int(ParseIntError),
     Json(SerdeJsonError),
     KeyNotFound(String),
     KeySign(String),
@@ -78,6 +82,7 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
+            Error::Addr(ref err)        => format!("Address parse error: {}", err),
             Error::AtomicAbort(ref err) => format!("Atomic transaction abort: {}", err),
             Error::AtomicPayload        => "Atomic payload too large".into(),
             Error::AtomicStep(ref err)  => format!("Atomic transition invalid: {}", err),
@@ -93,6 +98,7 @@ impl Display for Error {
             Error::HttpAuth(ref err)    => format!("HTTP authorization error: {}", err),
             Error::Hyper(ref err)       => format!("Hyper error: {}", err),
             Error::Io(ref err)          => format!("IO error: {}", err),
+            Error::Int(ref err)         => format!("Integer parse error: {}", err),
             Error::Json(ref err)        => format!("JSON parse error: {}", err),
             Error::KeyNotFound(ref err) => format!("Key not found: {}", err),
             Error::KeySign(ref err)     => format!("Key signing error: {}", err),
@@ -156,6 +162,7 @@ macro_rules! derive_from {
 }
 
 derive_from!([
+    AddrParseError   => Addr,
     Base64Error      => Base64,
     ChronoParseError => DateTime,
     FromHexError     => Hex,
@@ -163,6 +170,7 @@ derive_from!([
     HyperError       => Hyper,
     IoError          => Io,
     OpensslErrors    => Openssl,
+    ParseIntError    => Int,
     PemError         => Pem,
     RecvError        => Recv,
     RingError        => Ring,

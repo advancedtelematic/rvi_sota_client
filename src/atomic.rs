@@ -11,24 +11,6 @@ use uuid::Uuid;
 
 use datatype::{Error, Util};
 
-/*
-for package in packages {
-    if package.ecu_serial == self.config.uptane.primary_ecu_serial {
-    let outcome = package.install(&self.get_credentials())?;
-    let result  = outcome.into_result(package.refName.clone());
-    let success = result.result_code.is_success();
-    let version = uptane.signed_version(Some(EcuCustom { operation_result: result }))?;
-    if success {
-    Event::UptaneInstallComplete(version)
-        } else {
-            Event::UptaneInstallFailed(version)
-        }
-    } else {
-        Event::UptaneInstallNeeded(package)
-    }
-}
-*/
-
 
 lazy_static! {
     static ref VALID_TRANSITIONS: HashMap<State, Vec<State>> = hashmap! {
@@ -43,11 +25,19 @@ lazy_static! {
 const BUFFER_SIZE: usize = 100*1024;
 
 
-/// Execute a transition to the next state using the payload data.
-pub trait Transition: Send {
-    fn exec(&self, state: State, payload: &[u8]) -> Result<(), String>;
+/// Request a `Follower` to move to `State::Ready` for a specific transaction.
+pub trait WakeUp: Send {
+    fn wake_up(&mut self, txid: Uuid, serial: String) -> Result<(), String>;
 }
 
+/// Execute a transition to the next state using the payload data.
+pub trait Transition: Send {
+    fn transition(&mut self, state: State, payload: &[u8]) -> Result<(), String>;
+}
+
+
+/// A mapping from serials to the payloads to be delivered at each state.
+pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
 
 /// Send a message to be picked up by either a `Leader` or a `Follower`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -66,9 +56,6 @@ pub enum State {
     Commit,
     Abort,
 }
-
-/// A mapping from serials to the payloads to be delivered at each state.
-pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
 
 
 /// Holds a receiver and transmitter for UDP messages across the network.
@@ -262,8 +249,13 @@ impl Leader {
         self.acks.get_mut(&state).expect("get acks")
     }
 
-    pub fn committed(&self) -> &HashSet<String> { self.acks.get(&State::Commit).expect("commit acks") }
-    pub fn aborted(&self) -> &HashSet<String> { self.acks.get(&State::Abort).expect("abort acks") }
+    pub fn committed(&self) -> &HashSet<String> {
+        self.acks.get(&State::Commit).expect("commit acks")
+    }
+
+    pub fn aborted(&self) -> &HashSet<String> {
+        self.acks.get(&State::Abort).expect("abort acks")
+    }
 }
 
 
@@ -391,8 +383,8 @@ impl Follower {
         Ok(())
     }
 
-    fn transition(&self, state: State, payload: &[u8]) -> Result<(), String> {
-        self.transition.as_ref().expect("transition").exec(state, payload)
+    fn transition(&mut self, state: State, payload: &[u8]) -> Result<(), String> {
+        self.transition.as_mut().expect("transition").transition(state, payload)
     }
 
     fn ack(&self) -> Message {
@@ -431,12 +423,12 @@ mod tests {
 
     struct Success;
     impl Transition for Success {
-        fn exec(&self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
+        fn transition(&mut self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
     }
 
     struct VerifyPayload;
     impl Transition for VerifyPayload {
-        fn exec(&self, state: State, payload: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, payload: &[u8]) -> Result<(), String> {
             if state == State::Verify && payload != b"verify payload" {
                 Err("unexpected payload".into())
             } else {
@@ -447,28 +439,28 @@ mod tests {
 
     struct VerifyFail;
     impl Transition for VerifyFail {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Verify { Err("verify failed".into()) } else { Ok(()) }
         }
     }
 
     struct PrepareFail;
     impl Transition for PrepareFail {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Prepare { Err("prepare failed".into()) } else { Ok(()) }
         }
     }
 
     struct CommitFail;
     impl Transition for CommitFail {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Commit { Err("commit failed".into()) } else { Ok(()) }
         }
     }
 
     struct VerifyTimeout;
     impl Transition for VerifyTimeout {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Verify {
                 thread::sleep(Duration::from_secs(1));
                 Err("verify timeout".into())
@@ -480,7 +472,7 @@ mod tests {
 
     struct PrepareTimeout;
     impl Transition for PrepareTimeout {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Prepare {
                 thread::sleep(Duration::from_secs(1));
                 Err("verify timeout".into())
@@ -492,7 +484,7 @@ mod tests {
 
     struct CommitTimeout;
     impl Transition for CommitTimeout {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Commit {
                 thread::sleep(Duration::from_secs(1));
                 Err("commit timeout".into())
@@ -504,21 +496,21 @@ mod tests {
 
     struct VerifyCrash;
     impl Transition for VerifyCrash {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Verify { panic!("verify crashed"); } else { Ok(()) }
         }
     }
 
     struct PrepareCrash;
     impl Transition for PrepareCrash {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Prepare { panic!("prepare crashed"); } else { Ok(()) }
         }
     }
 
     struct CommitCrash;
     impl Transition for CommitCrash {
-        fn exec(&self, state: State, _: &[u8]) -> Result<(), String> {
+        fn transition(&mut self, state: State, _: &[u8]) -> Result<(), String> {
             if state == State::Commit { panic!("commit crashed"); } else { Ok(()) }
         }
     }

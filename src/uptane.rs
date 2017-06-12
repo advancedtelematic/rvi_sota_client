@@ -4,14 +4,19 @@ use crypto::sha2::Sha256;
 use hex::FromHex;
 use pem;
 use serde_json as json;
+use std::{mem, thread};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
-use std::mem;
+use std::net::Ipv4Addr;
+use std::time::Duration;
+use uuid::Uuid;
 
+use atomic::{Follower, Leader, Payloads, State, Transition};
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
                PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
                TufMeta, TufSigned, Url, Util, canonicalize_json};
 use http::{Client, Response};
+use pacman::Credentials;
 
 
 /// Uptane service to communicate with.
@@ -43,6 +48,10 @@ pub struct Uptane {
 
     pub director_verifier: Verifier,
     pub repo_verifier:     Verifier,
+
+    pub multicast_addr: Ipv4Addr,
+    pub multicast_port: u16,
+    pub atomic_timeout: Duration,
 }
 
 impl Uptane {
@@ -64,6 +73,10 @@ impl Uptane {
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
+
+            multicast_addr: config.uptane.multicast_address,
+            multicast_port: config.uptane.multicast_port,
+            atomic_timeout: Duration::from_secs(config.uptane.atomic_timeout_sec),
         };
 
         uptane.add_root_keys(Service::Director)?;
@@ -137,11 +150,12 @@ impl Uptane {
         trace!("getting {} role from {} service", role, service);
         let json = self.get(client, service, &format!("{}.json", role))?;
         let signed = json::from_slice::<TufSigned>(&json)?;
-        let verified = self.verifier(service).verify_signed(role, signed)?;
+        let mut verified = self.verifier(service).verify_signed(role, signed)?;
         if verified.is_new() && self.persist_metadata {
             let dir = format!("{}/{}", self.metadata_path, service);
             Util::write_file(&format!("{}/{}.json", dir, role), &json)?;
             Util::write_file(&format!("{}/{}.{}.json", dir, verified.new_ver, role), &json)?;
+            verified.json = Some(json);
         }
         Ok(verified)
     }
@@ -159,16 +173,70 @@ impl Uptane {
         self.private_key.sign_data(json::to_value(version)?, self.sig_type)
     }
 
-    /// Extract a list of `OstreePackage`s from the targets.json metadata.
-    pub fn into_packages(targets: HashMap<String, TufMeta>, hash_type: &str, treehub: &Url) -> Result<Vec<OstreePackage>, Error> {
-        let pkg = |ecu, refname, commit| OstreePackage::new(ecu, refname, commit, "".into(), treehub);
-        targets.into_iter()
-            .map(|(refname, mut meta)| match (meta.hashes.remove(hash_type), meta.custom) {
-                (Some(commit), Some(custom)) => Ok(pkg(custom.ecuIdentifier, refname, commit)),
-                (None, _) => Err(Error::UptaneTarget(format!("{} missing {} hash", refname, hash_type))),
-                (_, None) => Err(Error::UptaneTarget(format!("{} missing custom field", refname)))
-            }).collect()
+    /// Start a new local `OstreePackage` installation.
+    pub fn local_install(&mut self, package: OstreePackage, creds: Credentials)
+                         -> Result<(Vec<TufSigned>, bool), Error>
+    {
+        let outcome = package.install(&creds)?;
+        let result  = outcome.into_result(package.refName.clone());
+        let success = result.result_code.is_success();
+        let version = self.signed_version(Some(EcuCustom { operation_result: result }))?;
+        Ok((vec![version], success))
     }
+
+    /// Start a new transaction that will attempt to apply the updates atomically.
+    pub fn distributed_install(&mut self, verified: Verified, treehub: Url, creds: Credentials)
+                               -> Result<(Vec<TufSigned>, bool), Error>
+    {
+        let txid = Uuid::new_v4();
+        let primary = self.primary_ecu.clone();
+        if let Some(ref targets) = verified.data.targets {
+            if targets.len() == 1 && targets.get(&primary).is_some() {
+                let meta = targets.get(&primary).expect("primary target").clone();
+                return self.local_install(Uptane::into_package(meta, primary, "sha256", &treehub)?, creds);
+            }
+        }
+
+        let (addr, port, timeout) = (self.multicast_addr, self.multicast_port, self.atomic_timeout);
+        let payloads = Uptane::into_payloads(verified)?;
+        let recover_l = Some(format!("/tmp/sota-atomic-leader-{}", txid));
+        let recover_f = Some(format!("/tmp/sota-atomic-follower-{}", txid));
+        let mut leader = Leader::new(txid, payloads, addr, port, timeout, recover_l)?;
+        thread::spawn(move || {
+            Follower::new(txid, primary, Box::new(UptaneTransition), addr, port, timeout, recover_f)
+                .expect("couldn't start follower")
+                .listen()
+        });
+
+        leader.commit()?;
+        self.into_signed_versions(leader)
+    }
+
+    /// Convert from `TufMeta` into an `OstreePackage`.
+    fn into_package(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url)
+                    -> Result<OstreePackage, Error>
+    {
+        match (meta.hashes.remove(hash_type), meta.custom) {
+            (Some(commit), Some(custom)) => {
+                Ok(OstreePackage::new(custom.ecuIdentifier, refname, commit, "".into(), treehub))
+            }
+            (None, _) => Err(Error::UptaneTarget(format!("{} missing {} hash", refname, hash_type))),
+            (_, None) => Err(Error::UptaneTarget(format!("{} missing custom field", refname))),
+        }
+    }
+
+    fn into_payloads(_: Verified) -> Result<Payloads, Error> {
+        unimplemented!()
+    }
+
+    fn into_signed_versions(&self, _: Leader) -> Result<(Vec<TufSigned>, bool), Error> {
+        unimplemented!()
+    }
+}
+
+struct UptaneTransition;
+impl Transition for UptaneTransition {
+    fn transition(&mut self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
 }
 
 
@@ -223,9 +291,9 @@ impl Verifier {
             let meta = self.roles.get_mut(&role).expect("get_mut role");
             let old = mem::replace(&mut meta.version, data.version);
             debug!("{} version updated from {} to {}", role, old, data.version);
-            Ok(Verified { role: role, data: data, new_ver: meta.version, old_ver: old })
+            Ok(Verified { role: role, data: data, json: None, new_ver: meta.version, old_ver: old })
         } else {
-            Ok(Verified { role: role, data: data, new_ver: current, old_ver: current })
+            Ok(Verified { role: role, data: data, json: None, new_ver: current, old_ver: current })
         }
     }
 
@@ -274,9 +342,11 @@ impl Verifier {
 }
 
 /// Encapsulate successfully verified data with additional metadata.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Verified {
     pub role: RoleName,
     pub data: RoleData,
+    pub json: Option<Vec<u8>>,
     pub new_ver: u64,
     pub old_ver: u64,
 }
@@ -315,6 +385,10 @@ mod tests {
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
+
+            multicast_addr: Ipv4Addr::new(224,0,0,251),
+            multicast_port: 1234,
+            atomic_timeout: Duration::from_secs(60),
         };
         uptane.add_root_keys(Service::Director).expect("add director root keys");
         uptane

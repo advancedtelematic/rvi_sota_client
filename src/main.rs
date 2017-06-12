@@ -13,7 +13,7 @@ use chan::{Sender, Receiver};
 use chan_signal::Signal;
 use env_logger::LogBuilder;
 use getopts::Options;
-use log::{LogLevelFilter, LogRecord};
+use log::LogLevelFilter;
 use std::{env, process, thread};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -132,7 +132,6 @@ fn main() {
             pacman:  config.device.package_manager.clone(),
             auto_dl: config.device.auto_download,
             sysinfo: config.device.system_info.clone(),
-            treehub: config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub"))),
         };
         let ei_erx = broadcast.subscribe();
         let ei_ctx = ctx.clone();
@@ -255,6 +254,9 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "uptane-metadata-path", "change the directory used to save Uptane metadata.", "PATH");
     opts.optopt("", "uptane-private-key-path", "change the path to the private key for the primary ECU", "PATH");
     opts.optopt("", "uptane-public-key-path", "change the path to the public key for the primary ECU", "PATH");
+    opts.optopt("", "uptane-multicast-address", "change the UDP multicast address for atomic updates", "IP");
+    opts.optopt("", "uptane-multicast-port", "change the UDP multicast port for atomic updates", "PORT");
+    opts.optopt("", "uptane-atomic-timeout-sec", "change the atomic update timeout duration", "SEC");
 
     let cli = opts.parse(&args[1..]).expect("couldn't parse args");
     if cli.opt_present("help") {
@@ -318,6 +320,9 @@ fn build_config(version: &str) -> Config {
     cli.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
     cli.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
     cli.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
+    cli.opt_str("uptane-multicast-address").map(|addr| config.uptane.multicast_address = addr.parse().expect("Invalid uptane-multicast-address"));
+    cli.opt_str("uptane-multicast-port").map(|port| config.uptane.multicast_port = port.parse().expect("Invalid uptane-multicast-port"));
+    cli.opt_str("uptane-atomic-timeout-sec").map(|sec| config.uptane.atomic_timeout_sec = sec.parse().expect("Invalid uptane-atomic-timeout-sec"));
 
     if cli.opt_present("print") {
         exit!(0, "{:#?}", config);

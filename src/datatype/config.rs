@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::prelude::*;
 use std::ops::Deref;
+use std::net::Ipv4Addr;
 use toml;
 use uuid::Uuid;
 
@@ -474,6 +475,9 @@ pub struct UptaneConfig {
     pub metadata_path:      String,
     pub private_key_path:   String,
     pub public_key_path:    String,
+    pub multicast_address:  Ipv4Addr,
+    pub multicast_port:     u16,
+    pub atomic_timeout_sec: u64,
 }
 
 impl Default for UptaneConfig {
@@ -485,6 +489,9 @@ impl Default for UptaneConfig {
             metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
             private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
             public_key_path:    "/usr/local/etc/sota/ecuprimary.pub".to_string(),
+            multicast_address:  "224.0.0.1".parse().unwrap(),
+            multicast_port:     9999,
+            atomic_timeout_sec: 60,
         }
     }
 }
@@ -497,6 +504,9 @@ struct ParsedUptaneConfig {
     metadata_path:      Option<String>,
     private_key_path:   Option<String>,
     public_key_path:    Option<String>,
+    multicast_address:  Option<Ipv4Addr>,
+    multicast_port:     Option<u16>,
+    atomic_timeout_sec: Option<u64>,
 }
 
 impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
@@ -509,6 +519,9 @@ impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
             metadata_path:      self.metadata_path.unwrap_or(default.metadata_path),
             private_key_path:   self.private_key_path.unwrap_or(default.private_key_path),
             public_key_path:    self.public_key_path.unwrap_or(default.public_key_path),
+            multicast_address:  self.multicast_address.unwrap_or(default.multicast_address),
+            multicast_port:     self.multicast_port.unwrap_or(default.multicast_port),
+            atomic_timeout_sec: self.atomic_timeout_sec.unwrap_or(default.atomic_timeout_sec),
         }
     }
 }
@@ -600,6 +613,9 @@ mod tests {
         metadata_path = "/usr/local/etc/sota/metadata"
         private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
         public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
+        multicast_address = "224.0.0.1"
+        multicast_port = 9999
+        atomic_timeout_sec = 60
         "#;
 
 

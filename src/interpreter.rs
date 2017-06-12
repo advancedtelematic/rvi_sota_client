@@ -35,7 +35,6 @@ pub struct EventInterpreter {
     pub pacman:  PacMan,
     pub auto_dl: bool,
     pub sysinfo: Option<String>,
-    pub treehub: Option<Url>,
 }
 
 impl Interpreter<Event, CommandExec> for EventInterpreter {
@@ -100,7 +99,7 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
             }
 
             Event::UptaneInstallComplete(signed) | Event::UptaneInstallFailed(signed) => {
-                queue(Command::UptaneSendManifest(vec![signed]));
+                queue(Command::UptaneSendManifest(signed));
             }
 
             Event::UptaneManifestNeeded if self.pacman == PacMan::Uptane => {
@@ -108,9 +107,7 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
             }
 
             Event::UptaneTargetsUpdated(targets) => {
-                Uptane::into_packages(targets, "sha256", self.treehub.as_ref().expect("treehub url"))
-                    .map(|packages| queue(Command::UptaneStartInstall(packages)))
-                    .unwrap_or_else(|err| error!("couldn't install uptane targets: {}", err));
+                queue(Command::UptaneStartInstall(targets));
             }
 
             _ => ()
@@ -184,7 +181,7 @@ impl CommandInterpreter {
                 let _ = uptane.get_director(&*self.http, RoleName::Root)?;
                 if uptane.get_director(&*self.http, RoleName::Timestamp)?.is_new() {
                     let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
-                    Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or_default())
+                    Event::UptaneTargetsUpdated(targets)
                 } else {
                     Event::UptaneTimestampUpdated
                 }
@@ -206,8 +203,7 @@ impl CommandInterpreter {
             }
 
             (Command::ListSystemInfo, _) => {
-                let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                Event::FoundSystemInfo(system_info(cmd)?)
+                Event::FoundSystemInfo(self.system_info()?)
             }
 
             (Command::SendInstalledPackages(packages), _) => {
@@ -225,8 +221,7 @@ impl CommandInterpreter {
 
             (Command::SendSystemInfo, _) => {
                 let mut sota = Sota::new(&self.config, &*self.http);
-                let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                sota.send_system_info(system_info(cmd)?.into_bytes())?;
+                sota.send_system_info(self.system_info()?.into_bytes())?;
                 Event::SystemInfoSent
             }
 
@@ -261,7 +256,7 @@ impl CommandInterpreter {
             (Command::StartInstall(id), CommandMode::Sota) => {
                 let mut sota = Sota::new(&self.config, &*self.http);
                 etx.send(Event::InstallingUpdate(id));
-                let result = sota.install_update(&id, &self.get_credentials())?;
+                let result = sota.install_update(&id, &self.credentials())?;
                 if result.result_code.is_success() {
                     Event::InstallComplete(result)
                 } else {
@@ -280,13 +275,18 @@ impl CommandInterpreter {
                 Event::UptaneManifestSent
             }
 
-            (Command::UptaneStartInstall(packages), CommandMode::Uptane(uptane)) => {
-                unimplemented!()
+            (Command::UptaneStartInstall(targets), CommandMode::Uptane(uptane)) => {
+                let mut uptane = uptane.borrow_mut();
+                let (signed, ok) = uptane.distributed_install(targets, self.treehub()?, self.credentials())?;
+                if ok {
+                    Event::UptaneInstallComplete(signed)
+                } else {
+                    Event::UptaneInstallFailed(signed)
+                }
             }
 
             (Command::SendInstalledSoftware(_), _) => unreachable!("Command::SendInstalledSoftware expects CommandMode::Rvi"),
             (Command::StartInstall(_), _)          => unreachable!("Command::StartInstall expects CommandMode::Sota"),
-            (Command::UptaneInstallOutcome(_), _)  => unreachable!("Command::UptaneInstallOutcome expects CommandMode::Uptane"),
             (Command::UptaneSendManifest(_), _)    => unreachable!("Command::UptaneSendManifest expects CommandMode::Uptane"),
             (Command::UptaneStartInstall(_), _)    => unreachable!("Command::UptaneStartInstall expects CommandMode::Uptane"),
         };
@@ -294,8 +294,23 @@ impl CommandInterpreter {
         Ok(event)
     }
 
-    fn get_credentials(&self) -> Credentials {
-        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.as_ref()) } else { None };
+    /// Generate a new system information report.
+    fn system_info(&self) -> Result<String, Error> {
+        let cmd = self.config.device.system_info.as_ref()
+            .ok_or_else(|| Error::Config("device.system_info not set".into()))?;
+        ShellCommand::new(cmd)
+            .output()
+            .map_err(|err| Error::SystemInfo(err.to_string()))
+            .and_then(|info| Ok(String::from_utf8(info.stdout)?))
+    }
+
+    /// Retrieve the current access token and device certificates for TLS.
+    fn credentials(&self) -> Credentials {
+        let token = if let Auth::Token(ref t) = self.auth {
+            Some(t.access_token.as_ref())
+        } else {
+            None
+        };
         let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
             (Some(tls.ca_file.as_ref()), Some(tls.cert_file.as_ref()), Some(tls.pkey_file.as_ref()))
         } else {
@@ -303,15 +318,13 @@ impl CommandInterpreter {
         };
         Credentials { client: &*self.http, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
     }
-}
 
-
-/// Generate a new system information report.
-pub fn system_info(cmd: &str) -> Result<String, Error> {
-    ShellCommand::new(cmd)
-        .output()
-        .map_err(|err| Error::SystemInfo(err.to_string()))
-        .and_then(|info| Ok(String::from_utf8(info.stdout)?))
+    /// Return the treehub URL.
+    fn treehub(&self) -> Result<Url, Error> {
+        self.config.tls.as_ref()
+            .map(|ref tls| tls.server.join("/treehub"))
+            .ok_or_else(|| Error::Config("tls.server required".into()))
+    }
 }
 
 

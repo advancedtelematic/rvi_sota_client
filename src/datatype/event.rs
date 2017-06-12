@@ -4,6 +4,7 @@ use uuid::Uuid;
 
 use datatype::{DownloadComplete, InstallReport, InstallResult, OstreePackage,
                Package, TufMeta, TufSigned, UpdateAvailable, UpdateRequest};
+use uptane::Verified;
 
 
 /// System-wide events that are broadcast to all interested parties.
@@ -62,11 +63,11 @@ pub enum Event {
     /// The updated snapshot.json metadata.
     UptaneSnapshotUpdated(HashMap<String, TufMeta>),
     /// The updated target.json metadata.
-    UptaneTargetsUpdated(HashMap<String, TufMeta>),
+    UptaneTargetsUpdated(Verified),
     /// An update was installed to the primary ECU.
-    UptaneInstallComplete(TufSigned),
+    UptaneInstallComplete(Vec<TufSigned>),
     /// An update was not installed to the primary ECU.
-    UptaneInstallFailed(TufSigned),
+    UptaneInstallFailed(Vec<TufSigned>),
     /// An event requesting an external ECU to install a package.
     UptaneInstallNeeded(OstreePackage),
     /// A manifest should be sent to the Director server.

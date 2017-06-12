@@ -3,7 +3,8 @@ use std::str::FromStr;
 use uuid::Uuid;
 
 use datatype::{Auth, ClientCredentials, Error, InstallCode, InstallReport, InstallResult,
-               InstalledSoftware, OstreePackage, Package, TufSigned};
+               InstalledSoftware, Package, TufSigned};
+use uptane::Verified;
 
 
 /// System-wide commands that are sent to the interpreter.
@@ -38,10 +39,8 @@ pub enum Command {
 
     /// Send the current manifest to the Director server.
     UptaneSendManifest(Vec<TufSigned>),
-    /// Install a list of OSTree packages to their respective ECUs.
-    UptaneStartInstall(Vec<OstreePackage>),
-    /// Notification from a remote ECU of an installation outcome.
-    UptaneInstallOutcome(TufSigned),
+    /// Install the verified targets.json metadata to their respective ECUs.
+    UptaneStartInstall(Verified),
 }
 
 impl FromStr for Command {
@@ -132,30 +131,12 @@ impl FromStr for Command {
                 _ => Err(Error::Command(format!("unexpected StartInstall args: {:?}", args))),
             },
 
-            "UptaneInstallOutcome" => match args.len() {
-                // FIXME(PRO-1160): args
-                _ => Err(Error::Command(format!("unexpected UptaneInstallOutcome args: {:?}", args))),
-            },
-
             "UptaneSendManifest" => match args.len() {
                 // FIXME(PRO-1160): args
                 _ => Err(Error::Command(format!("unexpected UptaneSendManifest args: {:?}", args))),
             },
 
             "UptaneStartInstall" => match args.len() {
-                0 | 1 | 2 => Err(Error::Command("usage: UptaneStartInstall (<serial> <refname> <commit>)+".to_string())),
-                n if n % 3 == 0 => {
-                    let packages = args.chunks(3)
-                        .map(|chunk| OstreePackage {
-                            ecu_serial:  chunk[0].into(),
-                            refName:     chunk[1].into(),
-                            commit:      chunk[2].into(),
-                            description: "".into(),
-                            pullUri:     "".into(),
-                        })
-                        .collect::<Vec<OstreePackage>>();
-                    Ok(Command::UptaneStartInstall(packages))
-                },
                 _ => Err(Error::Command(format!("unexpected UptaneStartInstall args: {:?}", args))),
             },
 
@@ -177,7 +158,7 @@ impl Display for Command {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatype::{Auth, Command, ClientCredentials, OstreePackage, Package, InstallCode};
+    use datatype::{Auth, Command, ClientCredentials, Package, InstallCode};
 
 
     const DEFAULT_UUID: &'static str = "00000000-0000-0000-0000-000000000000";
@@ -270,24 +251,12 @@ mod tests {
     }
 
     #[test]
-    fn uptane_install_outcome_test() {
-        assert!("UptaneInstallOutcome".parse::<Command>().is_err());
-    }
-
-    #[test]
     fn uptane_send_manifest_test() {
         assert!("UptaneSendManifest".parse::<Command>().is_err());
     }
 
     #[test]
     fn uptane_start_install_test() {
-        let pkg = |s, r, c| OstreePackage { ecu_serial: s, refName: r, commit: c, description: "".into(), pullUri: "".into() };
-        assert_eq!("UptaneStartInstall s1 r1 c1 s2 r2 c2".parse::<Command>().unwrap(),
-                   Command::UptaneStartInstall(vec![
-                       pkg("s1".into(), "r1".into(), "c1".into()),
-                       pkg("s2".into(), "r2".into(), "c2".into())
-                   ]));
         assert!("UptaneStartInstall".parse::<Command>().is_err());
-        assert!("UptaneStartInstall s1 r1".parse::<Command>().is_err());
     }
 }
