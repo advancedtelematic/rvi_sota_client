@@ -13,7 +13,6 @@ extern crate lazy_static;
 extern crate log;
 #[macro_use]
 extern crate maplit;
-//#[cfg(feature = "uptane")]
 extern crate net2;
 extern crate openssl;
 extern crate pem;

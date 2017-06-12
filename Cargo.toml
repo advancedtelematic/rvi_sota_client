@@ -45,11 +45,10 @@ uuid = { version = "0.5.0", features = ["serde", "v4"] }
 
 [features]
 default = ["socket"]
-#all = ["rvi", "socket", "uptane", "websocket"]
 all = ["rvi", "socket", "websocket"]
+docker = ["all"]
 rvi = ["dbus"]
 socket = ["unix_socket"]
-#uptane = ["net2"]
 websocket = ["tungstenite"]
 
 [profile.release]

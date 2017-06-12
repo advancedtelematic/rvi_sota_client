@@ -677,6 +677,7 @@ mod tests {
         assert_eq!(leader.aborted(), &hashset!{"c".into()});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_verify_crash() {
         let (txid, addr, port, timeout, payloads) = defaults(9);
@@ -703,6 +704,7 @@ mod tests {
         assert_eq!(leader.aborted(), &hashset!{});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_prepare_crash() {
         let (txid, addr, port, timeout, payloads) = defaults(10);
@@ -729,6 +731,7 @@ mod tests {
         assert_eq!(leader.aborted(), &hashset!{});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_commit_crash() {
         let (txid, addr, port, timeout, payloads) = defaults(10);
