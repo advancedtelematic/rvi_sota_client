@@ -7,11 +7,10 @@ use serde_json as json;
 use std::{mem, thread};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddrV4};
 use std::time::Duration;
-use uuid::Uuid;
 
-use atomic::{Follower, Leader, Payloads, State, Transition};
+use atomic::{Follower, Leader, Multicast, Next, Payloads, State};
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
                PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
                TufMeta, TufSigned, Url, Util, canonicalize_json};
@@ -188,9 +187,8 @@ impl Uptane {
     pub fn distributed_install(&mut self, mut verified: Verified, treehub: Url, creds: Credentials)
                                -> Result<(Vec<TufSigned>, bool), Error>
     {
-        let txid = Uuid::new_v4();
-        let primary = self.primary_ecu.clone();
-        let (addr, port, timeout) = (self.multicast_addr, self.multicast_port, self.atomic_timeout);
+        let (addr, port) = (self.multicast_addr, self.multicast_port);
+        let (timeout, primary) = (self.atomic_timeout, self.primary_ecu.clone());
 
         if let Some(targets) = verified.data.targets.as_mut() {
             if targets.get(&primary).is_some() && targets.len() == 1 {
@@ -198,14 +196,14 @@ impl Uptane {
                 let package = Uptane::into_package(meta, primary, "sha256", &treehub)?;
                 return self.local_install(package, creds);
             } else if targets.get(&primary).is_some() {
-                let transition = Box::new(PrimaryTransition);
-                let mut follower = Follower::new(txid, primary, transition, addr, port, timeout, None)?;
+                let bus = Box::new(Multicast::new(SocketAddrV4::new(addr, port))?);
+                let mut follower = Follower::new(primary, bus, Box::new(Primary), timeout, None);
                 thread::spawn(move || follower.listen());
             }
         }
 
-        let payloads = Uptane::to_payloads(verified)?;
-        let mut leader = Leader::new(txid, payloads, addr, port, timeout, None)?;
+        let bus = Box::new(Multicast::new(SocketAddrV4::new(addr, port))?);
+        let mut leader = Leader::new(bus, Uptane::into_payloads(verified)?, timeout, None)?;
         leader.commit()?;
         self.into_signed_versions(leader)
     }
@@ -220,7 +218,7 @@ impl Uptane {
         }
     }
 
-    fn to_payloads(verified: Verified) -> Result<Payloads, Error> {
+    fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
         let json = verified.json.unwrap_or(Vec::new());
         let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
         let payloads = targets.into_iter()
@@ -234,9 +232,11 @@ impl Uptane {
     }
 }
 
-struct PrimaryTransition;
-impl Transition for PrimaryTransition {
-    fn transition(&mut self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
+/// Define the state transitions for a primary ECU.
+pub struct Primary;
+
+impl Next for Primary {
+    fn next(&mut self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
 }
 
 
@@ -373,7 +373,7 @@ mod tests {
         let mut uptane = Uptane {
             director_server:  "http://localhost:8001".parse().unwrap(),
             repo_server:      "http://localhost:8002".parse().unwrap(),
-            metadata_path:    "tests/uptane".into(),
+            metadata_path:    "tests/uptane_basic".into(),
             persist_metadata: false,
 
             primary_ecu: "test-primary-serial".into(),
@@ -405,7 +405,7 @@ mod tests {
 
     #[test]
     fn test_read_manifest() {
-        let bytes = Util::read_file("tests/uptane/director/manifest.json").expect("couldn't read manifest.json");
+        let bytes = Util::read_file("tests/uptane_basic/director/manifest.json").expect("couldn't read manifest.json");
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "<primary_ecu_serial>");
@@ -418,7 +418,7 @@ mod tests {
     #[test]
     fn test_get_targets() {
         let mut uptane = new_uptane();
-        let client = TestClient::from_paths(&["tests/uptane/director/targets.json"]);
+        let client = TestClient::from_paths(&["tests/uptane_basic/director/targets.json"]);
         let verified = uptane.get_director(&client, RoleName::Targets).expect("get targets");
         assert!(verified.is_new());
         let targets = verified.data.targets.expect("missing targets");
@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn test_get_snapshot() {
         let mut uptane = new_uptane();
-        let client = TestClient::from_paths(&["tests/uptane/director/snapshot.json"]);
+        let client = TestClient::from_paths(&["tests/uptane_basic/director/snapshot.json"]);
         let verified = uptane.get_director(&client, RoleName::Snapshot).expect("couldn't get snapshot");
         let metadata = verified.data.meta.as_ref().expect("missing meta");
         assert!(verified.is_new());
@@ -448,7 +448,7 @@ mod tests {
     #[test]
     fn test_get_timestamp() {
         let mut uptane = new_uptane();
-        let client = TestClient::from_paths(&["tests/uptane/director/timestamp.json"]);
+        let client = TestClient::from_paths(&["tests/uptane_basic/director/timestamp.json"]);
         let verified = uptane.get_director(&client, RoleName::Timestamp).expect("couldn't get timestamp");
         let metadata = verified.data.meta.as_ref().expect("missing meta");
         assert!(verified.is_new());

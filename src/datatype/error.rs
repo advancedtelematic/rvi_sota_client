@@ -30,8 +30,8 @@ use interpreter::CommandExec;
 pub enum Error {
     Addr(AddrParseError),
     AtomicAbort(String),
+    AtomicBus(String),
     AtomicPayload,
-    AtomicStep(String),
     AtomicTimeout,
     Base64(Base64Error),
     Client(String),
@@ -84,8 +84,8 @@ impl Display for Error {
         let inner: String = match *self {
             Error::Addr(ref err)        => format!("Address parse error: {}", err),
             Error::AtomicAbort(ref err) => format!("Atomic transaction abort: {}", err),
+            Error::AtomicBus(ref err)   => format!("Atomic bus error: {}", err),
             Error::AtomicPayload        => "Atomic payload too large".into(),
-            Error::AtomicStep(ref err)  => format!("Atomic transition invalid: {}", err),
             Error::AtomicTimeout        => "Atomic transaction timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),

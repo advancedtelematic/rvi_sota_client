@@ -489,7 +489,7 @@ impl Default for UptaneConfig {
             metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
             private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
             public_key_path:    "/usr/local/etc/sota/ecuprimary.pub".to_string(),
-            multicast_address:  "224.0.0.1".parse().unwrap(),
+            multicast_address:  "224.0.0.101".parse().unwrap(),
             multicast_port:     9999,
             atomic_timeout_sec: 60,
         }
@@ -613,7 +613,7 @@ mod tests {
         metadata_path = "/usr/local/etc/sota/metadata"
         private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
         public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
-        multicast_address = "224.0.0.1"
+        multicast_address = "224.0.0.101"
         multicast_port = 9999
         atomic_timeout_sec = 60
         "#;
