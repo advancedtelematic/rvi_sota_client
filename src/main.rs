@@ -38,6 +38,7 @@ use sota::uptane::Uptane;
 
 
 macro_rules! exit {
+    ($code:expr, $fmt:expr) => { exit!($code, "{}", $fmt) };
     ($code:expr, $fmt:expr, $($arg:tt)*) => {{
         println!($fmt, $($arg)*);
         process::exit($code);
@@ -49,7 +50,7 @@ fn main() {
     let version = start_logging();
     let config = build_config(&version);
     TlsClient::init(config.tls_data());
-    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, err));
 
     let (ctx, crx) = chan::async::<CommandExec>();
     let (etx, erx) = chan::async::<Event>();
@@ -74,7 +75,7 @@ fn main() {
 
         if config.gateway.dbus {
             #[cfg(not(feature = "rvi"))]
-            exit!(2, "{}", "dbus gateway requires 'rvi' binary feature");
+            exit!(2, "dbus gateway requires 'rvi' binary feature");
             #[cfg(feature = "rvi")] {
                 let dbus_ctx = ctx.clone();
                 let dbus_erx = broadcast.subscribe();
@@ -92,7 +93,7 @@ fn main() {
 
         if config.gateway.rvi {
             #[cfg(not(feature = "rvi"))]
-            exit!(2, "{}", "rvi gateway requires 'rvi' binary feature");
+            exit!(2, "rvi gateway requires 'rvi' binary feature");
             #[cfg(feature = "rvi")] {
                 let services = Services::new(config.rvi.clone(), format!("{}", config.device.uuid), etx.clone());
                 let mut edge = Edge::new(services, config.network.rvi_edge_server.clone(), config.rvi.client.clone());
@@ -102,7 +103,7 @@ fn main() {
 
         if config.gateway.socket {
             #[cfg(not(feature = "socket"))]
-            exit!(2, "{}", "socket gateway requires 'socket' binary feature");
+            exit!(2, "socket gateway requires 'socket' binary feature");
             #[cfg(feature = "socket")] {
                 let socket_ctx = ctx.clone();
                 let socket_erx = broadcast.subscribe();
@@ -116,7 +117,7 @@ fn main() {
 
         if config.gateway.websocket {
             #[cfg(not(feature = "websocket"))]
-            exit!(2, "{}", "websocket gateway requires 'websocket' binary feature");
+            exit!(2, "websocket gateway requires 'websocket' binary feature");
             #[cfg(feature = "websocket")] {
                 let ws_ctx = ctx.clone();
                 let ws_erx = broadcast.subscribe();
@@ -260,9 +261,9 @@ fn build_config(version: &str) -> Config {
 
     let cli = opts.parse(&args[1..]).expect("couldn't parse args");
     if cli.opt_present("help") {
-        exit!(0, "{}", opts.usage(&format!("Usage: {} [options]", program)));
+        exit!(0, opts.usage(&format!("{} [options]", program)));
     } else if cli.opt_present("version") {
-        exit!(0, "{}", version);
+        exit!(0, version);
     }
     let file = cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()).expect("No config provided");
     let mut config = Config::load(&file).expect("Error loading config");

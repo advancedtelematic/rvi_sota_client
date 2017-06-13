@@ -185,48 +185,48 @@ impl Uptane {
     }
 
     /// Start a new transaction that will attempt to apply the updates atomically.
-    pub fn distributed_install(&mut self, verified: Verified, treehub: Url, creds: Credentials)
+    pub fn distributed_install(&mut self, mut verified: Verified, treehub: Url, creds: Credentials)
                                -> Result<(Vec<TufSigned>, bool), Error>
     {
         let txid = Uuid::new_v4();
         let primary = self.primary_ecu.clone();
-        if let Some(ref targets) = verified.data.targets {
-            if targets.len() == 1 && targets.get(&primary).is_some() {
-                let meta = targets.get(&primary).expect("primary target").clone();
-                return self.local_install(Uptane::into_package(meta, primary, "sha256", &treehub)?, creds);
+        let (addr, port, timeout) = (self.multicast_addr, self.multicast_port, self.atomic_timeout);
+
+        if let Some(targets) = verified.data.targets.as_mut() {
+            if targets.get(&primary).is_some() && targets.len() == 1 {
+                let meta = targets.remove(&primary).expect("primary target");
+                let package = Uptane::into_package(meta, primary, "sha256", &treehub)?;
+                return self.local_install(package, creds);
+            } else if targets.get(&primary).is_some() {
+                let transition = Box::new(PrimaryTransition);
+                let mut follower = Follower::new(txid, primary, transition, addr, port, timeout, None)?;
+                thread::spawn(move || follower.listen());
             }
         }
 
-        let (addr, port, timeout) = (self.multicast_addr, self.multicast_port, self.atomic_timeout);
-        let payloads = Uptane::into_payloads(verified)?;
-        let recover_l = Some(format!("/tmp/sota-atomic-leader-{}", txid));
-        let recover_f = Some(format!("/tmp/sota-atomic-follower-{}", txid));
-        let mut leader = Leader::new(txid, payloads, addr, port, timeout, recover_l)?;
-        thread::spawn(move || {
-            Follower::new(txid, primary, Box::new(UptaneTransition), addr, port, timeout, recover_f)
-                .expect("couldn't start follower")
-                .listen()
-        });
-
+        let payloads = Uptane::to_payloads(verified)?;
+        let mut leader = Leader::new(txid, payloads, addr, port, timeout, None)?;
         leader.commit()?;
         self.into_signed_versions(leader)
     }
 
-    /// Convert from `TufMeta` into an `OstreePackage`.
-    fn into_package(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url)
-                    -> Result<OstreePackage, Error>
-    {
+    fn into_package(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url) -> Result<OstreePackage, Error> {
         match (meta.hashes.remove(hash_type), meta.custom) {
             (Some(commit), Some(custom)) => {
-                Ok(OstreePackage::new(custom.ecuIdentifier, refname, commit, "".into(), treehub))
+                Ok(OstreePackage::new(custom.ecuIdentifier, refname, commit, treehub))
             }
-            (None, _) => Err(Error::UptaneTarget(format!("{} missing {} hash", refname, hash_type))),
-            (_, None) => Err(Error::UptaneTarget(format!("{} missing custom field", refname))),
+            (None, _) => Err(Error::UptaneTargets(format!("{} missing {} hash", refname, hash_type))),
+            (_, None) => Err(Error::UptaneTargets(format!("{} missing custom field", refname))),
         }
     }
 
-    fn into_payloads(_: Verified) -> Result<Payloads, Error> {
-        unimplemented!()
+    fn to_payloads(verified: Verified) -> Result<Payloads, Error> {
+        let json = verified.json.unwrap_or(Vec::new());
+        let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
+        let payloads = targets.into_iter()
+            .map(|(serial, _)| (serial, hashmap!{State::Verify => json.clone()}))
+            .collect::<Payloads>();
+        Ok(payloads)
     }
 
     fn into_signed_versions(&self, _: Leader) -> Result<(Vec<TufSigned>, bool), Error> {
@@ -234,8 +234,8 @@ impl Uptane {
     }
 }
 
-struct UptaneTransition;
-impl Transition for UptaneTransition {
+struct PrimaryTransition;
+impl Transition for PrimaryTransition {
     fn transition(&mut self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
 }
 
