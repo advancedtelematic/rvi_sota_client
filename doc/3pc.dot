@@ -1,0 +1,16 @@
+digraph three_phase_commit {
+  Ready
+  Verify
+  Prepare
+  Commit [style=filled, color=limegreen]
+  Abort [style=filled, color=tomato]
+  Ready -> Verify[label = " send txid to secondaries"];
+  Verify -> Verify[label = " secondary ack", fontcolor=limegreen]
+  Verify -> Prepare[label = " verify ok", fontcolor=limegreen];
+  Verify -> Abort[label = " verification failed", fontcolor=tomato];
+  Prepare -> Prepare[label = " secondary ack", fontcolor=limegreen]
+  Prepare -> Commit[label = " apply update", fontcolor=limegreen];
+  Prepare -> Abort[label = " don't apply update", fontcolor=tomato];
+  Commit -> Commit[label = " secondary ack", fontcolor=limegreen]
+  Commit -> Abort[label = " try to abort", fontcolor=tomato, style=dotted];
+}
