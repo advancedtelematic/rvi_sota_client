@@ -29,9 +29,9 @@ use interpreter::CommandExec;
 #[derive(Debug)]
 pub enum Error {
     Addr(AddrParseError),
-    AtomicAbort(String),
-    AtomicBus(String),
+    AtomicAbort,
     AtomicPayload,
+    AtomicState,
     AtomicTimeout,
     Base64(Base64Error),
     Client(String),
@@ -83,10 +83,10 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
             Error::Addr(ref err)        => format!("Address parse error: {}", err),
-            Error::AtomicAbort(ref err) => format!("Atomic transaction abort: {}", err),
-            Error::AtomicBus(ref err)   => format!("Atomic bus error: {}", err),
-            Error::AtomicPayload        => "Atomic payload too large".into(),
-            Error::AtomicTimeout        => "Atomic transaction timed out".into(),
+            Error::AtomicAbort          => "Atomic transaction: abort".into(),
+            Error::AtomicPayload        => "Atomic transaction: payload too large".into(),
+            Error::AtomicState          => "Atomic transaction: bad state transition".into(),
+            Error::AtomicTimeout        => "Atomic transaction: timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),
             Error::Command(ref err)     => format!("Unknown Command: {}", err),

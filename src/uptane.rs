@@ -7,10 +7,10 @@ use serde_json as json;
 use std::{mem, thread};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
-use std::net::{Ipv4Addr, SocketAddrV4};
+use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Follower, Leader, Multicast, Next, Payloads, State};
+use atomic::{Bus, Follower, Leader, Multicast, Next, Payloads, State};
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
                PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
                TufMeta, TufSigned, Url, Util, canonicalize_json};
@@ -48,9 +48,9 @@ pub struct Uptane {
     pub director_verifier: Verifier,
     pub repo_verifier:     Verifier,
 
-    pub multicast_addr: Ipv4Addr,
-    pub multicast_port: u16,
-    pub atomic_timeout: Duration,
+    pub atomic_wake_addr: SocketAddrV4,
+    pub atomic_msg_addr:  SocketAddrV4,
+    pub atomic_timeout:   Duration,
 }
 
 impl Uptane {
@@ -73,8 +73,8 @@ impl Uptane {
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
 
-            multicast_addr: config.uptane.multicast_address,
-            multicast_port: config.uptane.multicast_port,
+            atomic_wake_addr: *config.uptane.atomic_wake_up,
+            atomic_msg_addr:  *config.uptane.atomic_message,
             atomic_timeout: Duration::from_secs(config.uptane.atomic_timeout_sec),
         };
 
@@ -187,8 +187,9 @@ impl Uptane {
     pub fn distributed_install(&mut self, mut verified: Verified, treehub: Url, creds: Credentials)
                                -> Result<(Vec<TufSigned>, bool), Error>
     {
-        let (addr, port) = (self.multicast_addr, self.multicast_port);
         let (timeout, primary) = (self.atomic_timeout, self.primary_ecu.clone());
+        let (wake_addr, msg_addr) = (self.atomic_wake_addr, self.atomic_msg_addr);
+        let bus = || -> Result<Box<Bus>, Error> { Ok(Box::new(Multicast::new(wake_addr, msg_addr)?)) };
 
         if let Some(targets) = verified.data.targets.as_mut() {
             if targets.get(&primary).is_some() && targets.len() == 1 {
@@ -196,14 +197,12 @@ impl Uptane {
                 let package = Uptane::into_package(meta, primary, "sha256", &treehub)?;
                 return self.local_install(package, creds);
             } else if targets.get(&primary).is_some() {
-                let bus = Box::new(Multicast::new(SocketAddrV4::new(addr, port))?);
-                let mut follower = Follower::new(primary, bus, Box::new(Primary), timeout, None);
+                let mut follower = Follower::new(primary, bus()?, Box::new(Primary), timeout, None);
                 thread::spawn(move || follower.listen());
             }
         }
 
-        let bus = Box::new(Multicast::new(SocketAddrV4::new(addr, port))?);
-        let mut leader = Leader::new(bus, Uptane::into_payloads(verified)?, timeout, None)?;
+        let mut leader = Leader::new(bus()?, Uptane::into_payloads(verified)?, timeout, None)?;
         leader.commit()?;
         self.into_signed_versions(leader)
     }
@@ -361,9 +360,9 @@ impl Verified {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use pem;
     use std::collections::HashMap;
+    use std::net::Ipv4Addr;
 
     use datatype::{EcuManifests, EcuVersion, TufCustom, TufMeta, TufSigned};
     use http::TestClient;
@@ -386,9 +385,9 @@ mod tests {
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
 
-            multicast_addr: Ipv4Addr::new(224,0,0,251),
-            multicast_port: 1234,
-            atomic_timeout: Duration::from_secs(60),
+            atomic_wake_addr: SocketAddrV4::new(Ipv4Addr::new(232,0,0,101), 23211),
+            atomic_msg_addr:  SocketAddrV4::new(Ipv4Addr::new(232,0,0,102), 23212),
+            atomic_timeout:   Duration::from_secs(60),
         };
         uptane.add_root_keys(Service::Director).expect("add director root keys");
         uptane

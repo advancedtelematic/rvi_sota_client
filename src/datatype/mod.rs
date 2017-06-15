@@ -21,7 +21,7 @@ pub use self::error::Error;
 pub use self::event::Event;
 pub use self::install::{InstallCode, InstallOutcome, InstallReport, InstallResult,
                         InstalledFirmware, InstalledPackage, InstalledSoftware};
-pub use self::network::{Method, SocketAddr, Url};
+pub use self::network::{Method, SocketAddrV4, Url};
 pub use self::ostree::OstreePackage;
 pub use self::signature::{Signature, SignatureType};
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyType, KeyValue,

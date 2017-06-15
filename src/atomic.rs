@@ -14,7 +14,7 @@ use datatype::{Error, TufSigned, Util};
 
 lazy_static! {
     static ref VALID_TRANSITIONS: HashMap<State, Vec<State>> = hashmap! {
-        State::Sleep   => vec![State::Ready],
+        State::Idle    => vec![State::Ready],
         State::Ready   => vec![State::Verify],
         State::Verify  => vec![State::Abort, State::Prepare],
         State::Prepare => vec![State::Abort, State::Commit],
@@ -28,7 +28,9 @@ const BUFFER_SIZE: usize = 100*1024;
 
 /// Define the interface for communication between nodes.
 pub trait Bus: Send {
+    fn read_wake_up(&mut self) -> Result<(String, Uuid), Error>;
     fn read_message(&mut self) -> Result<Message, Error>;
+    fn write_wake_up(&self, serial: String, txid: Uuid) -> Result<(), Error>;
     fn write_message(&self, msg: &Message) -> Result<(), Error>;
 }
 
@@ -44,7 +46,6 @@ pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
 /// Send a message to be picked up by either a `Leader` or a `Follower`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Message {
-    Wake  { txid: Uuid, serial: String },
     Next  { txid: Uuid, serial: String, state: State, payload: Vec<u8> },
     Ack   { txid: Uuid, serial: String, state: State },
     Query { txid: Uuid },
@@ -54,7 +55,7 @@ pub enum Message {
 /// An enumeration of all possible states for a `Leader` or `Follower`.
 #[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum State {
-    Sleep,
+    Idle,
     Ready,
     Verify,
     Prepare,
@@ -83,11 +84,17 @@ pub struct Leader {
 }
 
 impl Leader {
-    /// Create a new `Leader` to coordinate `Follower` changes for a specific txid.
+    /// Create a new `Leader` that will wake up each `Follower` defined in the
+    /// payload data.
     pub fn new(bus: Box<Bus>, payloads: Payloads, timeout: Duration, recover: Option<String>) -> Result<Self, Error> {
-        let mut leader = Leader {
-            txid:  Uuid::new_v4(),
-            state: State::Sleep,
+        let txid = Uuid::new_v4();
+        for (serial, _) in &payloads {
+            bus.write_wake_up(serial.clone(), txid)?;
+        }
+
+        Ok(Leader {
+            txid:  txid,
+            state: State::Idle,
 
             payloads: payloads,
             acks: hashmap! {
@@ -103,13 +110,7 @@ impl Leader {
             started: Some(Instant::now()),
             bus:     Some(bus),
             signed:  Some(Vec::new()),
-        };
-
-        for (serial, _) in &leader.payloads {
-            leader.write_message(&Message::Wake { txid: leader.txid, serial: serial.clone() })?;
-        }
-        leader.transition(State::Ready)?;
-        Ok(leader)
+        })
     }
 
     /// Recover from a crash by requesting an update on all `Follower` states.
@@ -121,23 +122,22 @@ impl Leader {
         Ok(leader)
     }
 
-    /// Start the three-phase commit process with each `Follower`.
+    /// Ensure each `Follower` is awake then execute the three-phase commit process.
     pub fn commit(&mut self) -> Result<(), Error> {
-        info!("Transaction {} starting.", self.txid);
+        self.transition(State::Ready)?;
         self.transition(State::Verify)?;
         self.transition(State::Prepare)?;
         self.transition(State::Commit)?;
-        info!("Transaction {} complete.", self.txid);
 
         if let Some(ref path) = self.recover {
             fs::remove_file(path)?;
         }
-        Ok(())
+        Ok(info!("Transaction {} complete.", self.txid))
     }
 
     /// Transition all followers to the next state.
     pub fn transition(&mut self, state: State) -> Result<(), Error> {
-        if ! self.valid_transition(state) { return Ok(()) }
+        self.valid_transition(state)?;
         info!("Transaction {} moving to {:?}.", self.txid, state);
         self.checkpoint(state)?;
         self.send_request(state)?;
@@ -145,19 +145,8 @@ impl Leader {
         while self.state == state && self.acks(state).len() < self.payloads.len() {
             self.read_message()
                 .and_then(|msg| self.handle_response(msg))
-                .or_else(|err| {
-                    if is_waiting(&err) && self.is_timeout() {
-                        self.transition(State::Abort)?;
-                        Err(Error::AtomicTimeout)
-                    } else if is_waiting(&err) {
-                        self.write_message(&Message::Query { txid: self.txid })
-                    } else {
-                        self.transition(State::Abort)?;
-                        Err(err)
-                    }
-                })?;
+                .or_else(|err| self.handle_error(err))?;
         }
-
         Ok(())
     }
 
@@ -183,7 +172,8 @@ impl Leader {
                 debug!("ack from {}: {:?}", serial, state);
                 let _ = self.acks(state).insert(serial);
                 if state == State::Abort && self.state != State::Abort {
-                    self.transition(State::Abort)
+                    self.transition(State::Abort)?;
+                    Err(Error::AtomicAbort)
                 } else {
                     Ok(())
                 }
@@ -192,9 +182,20 @@ impl Leader {
                 if txid == self.txid { self.signed.as_mut().expect("signed").push(signed); }
                 Ok(())
             }
-            Message::Wake  { .. } => Ok(()),
             Message::Next  { .. } => Ok(()),
             Message::Query { .. } => Ok(()),
+        }
+    }
+
+    fn handle_error(&mut self, err: Error) -> Result<(), Error> {
+        if is_waiting(&err) && self.is_timeout() {
+            self.transition(State::Abort)?;
+            Err(Error::AtomicTimeout)
+        } else if is_waiting(&err) {
+            self.write_message(&Message::Query { txid: self.txid })
+        } else {
+            self.transition(State::Abort)?;
+            Err(err)
         }
     }
 
@@ -223,8 +224,12 @@ impl Leader {
         Instant::now().duration_since(self.started.expect("started")) > self.timeout
     }
 
-    fn valid_transition(&self, state: State) -> bool {
-        VALID_TRANSITIONS.get(&self.state).expect("transitions").contains(&state)
+    fn valid_transition(&self, state: State) -> Result<(), Error> {
+        if VALID_TRANSITIONS.get(&self.state).expect("transition").contains(&state) {
+            Ok(())
+        } else {
+            Err(Error::AtomicState)
+        }
     }
 
     fn read_message(&mut self) -> Result<Message, Error> {
@@ -255,12 +260,12 @@ pub struct Follower {
 }
 
 impl Follower {
-    /// Create a `Follower` that listens for bus requests for state transitions.
+    /// Create a `Follower` that listens on the bus for state transitions messages.
     pub fn new(serial: String, bus: Box<Bus>, next: Box<Next>, timeout: Duration, recover: Option<String>) -> Self {
         Follower {
             txid:    None,
             serial:  serial,
-            state:   State::Sleep,
+            state:   State::Idle,
             timeout: timeout,
             recover: recover,
 
@@ -283,20 +288,20 @@ impl Follower {
     /// Block until a wake-up signal is received then read new transaction
     /// messages until we reach a terminating state.
     pub fn listen(&mut self) -> Result<(), Error> {
+        while self.state == State::Idle {
+            self.read_wake_up()
+                .and_then(|(serial, txid)| {
+                    if serial != self.serial { return Ok(()) }
+                    self.txid = Some(txid);
+                    self.transition(State::Ready, &Vec::new())
+                })
+                .or_else(|err| self.handle_error(err))?
+        }
+
         while self.state != State::Commit && self.state != State::Abort {
             self.read_message()
                 .and_then(|msg| self.handle_request(msg))
-                .or_else(|err| {
-                    if is_waiting(&err) && self.is_timeout() {
-                        self.transition(State::Abort, &Vec::new())?;
-                        Err(Error::AtomicTimeout)
-                    } else if is_waiting(&err) {
-                        self.write_ack()
-                    } else {
-                        let _ = self.transition(State::Abort, &Vec::new());
-                        Err(err)
-                    }
-                })?
+                .or_else(|err| self.handle_error(err))?
         }
 
         if let Some(ref path) = self.recover {
@@ -307,11 +312,6 @@ impl Follower {
 
     fn handle_request(&mut self, msg: Message) -> Result<(), Error> {
         match msg {
-            Message::Wake { txid, serial } => {
-                if serial != self.serial || self.state != State::Sleep { return Ok(()) }
-                self.txid = Some(txid);
-                self.transition(State::Ready, &Vec::new())
-            }
             Message::Next { txid, serial, state, payload } => {
                 if txid != self.txid() || serial != self.serial { return Ok(()) }
                 self.transition(state, &payload)
@@ -325,15 +325,29 @@ impl Follower {
         }
     }
 
+    fn handle_error(&mut self, err: Error) -> Result<(), Error> {
+        if is_waiting(&err) && self.is_timeout() {
+            self.transition(State::Abort, &Vec::new())?;
+            Err(Error::AtomicTimeout)
+        } else if is_waiting(&err) {
+            self.write_ack()
+        } else {
+            self.transition(State::Abort, &Vec::new())?;
+            Err(err)
+        }
+    }
+
     fn transition(&mut self, state: State, payload: &[u8]) -> Result<(), Error> {
-        if self.state == state || ! self.valid_transition(state) { return Ok(()) }
+        if self.state == state { return Ok(()) }
+        self.valid_transition(state)?;
+
         debug!("serial {}: moving to {:?}", self.serial, state);
         self.checkpoint(state, payload)?;
         self.next(state, payload)
             .or_else(|reason| {
                 error!("serial {}: {}", self.serial, reason);
                 self.transition(State::Abort, &Vec::new())?;
-                Err(Error::AtomicAbort(reason))
+                Err(Error::AtomicAbort)
             })
             .and_then(|_| self.write_ack())
     }
@@ -359,8 +373,16 @@ impl Follower {
         Instant::now().duration_since(self.started.expect("started")) > self.timeout
     }
 
-    fn valid_transition(&self, state: State) -> bool {
-        VALID_TRANSITIONS.get(&self.state).expect("transitions").contains(&state)
+    fn valid_transition(&self, state: State) -> Result<(), Error> {
+        if VALID_TRANSITIONS.get(&self.state).expect("transitions").contains(&state) {
+            Ok(())
+        } else {
+            Err(Error::AtomicState)
+        }
+    }
+
+    fn read_wake_up(&mut self) -> Result<(String, Uuid), Error> {
+        self.bus.as_mut().expect("bus").read_wake_up()
     }
 
     fn read_message(&mut self) -> Result<Message, Error> {
@@ -387,12 +409,23 @@ fn is_waiting(err: &Error) -> bool {
 
 /// Listens for and sends UDP multicast messages.
 pub struct Multicast {
-    socket: UdpSocket,
-    addr: SocketAddrV4,
+    wake_up: UdpSocket,
+    message: UdpSocket,
+    wake_addr: SocketAddrV4,
+    msg_addr:  SocketAddrV4,
 }
 
 impl Multicast {
-    pub fn new(addr: SocketAddrV4) -> Result<Self, Error> {
+    pub fn new(wake_addr: SocketAddrV4, msg_addr: SocketAddrV4) -> Result<Self, Error> {
+        Ok(Multicast {
+            wake_up: Multicast::new_socket(wake_addr)?,
+            message: Multicast::new_socket(msg_addr)?,
+            wake_addr: wake_addr,
+            msg_addr:  msg_addr,
+        })
+    }
+
+    fn new_socket(addr: SocketAddrV4) -> Result<UdpSocket, Error> {
         let any = Ipv4Addr::new(0,0,0,0);
         let socket = UdpBuilder::new_v4()?
             .reuse_address(true)?
@@ -403,20 +436,32 @@ impl Multicast {
         socket.set_recv_buffer_size(BUFFER_SIZE)?;
         socket.set_read_timeout(Some(Duration::from_secs(1)))?;
         socket.join_multicast_v4(&addr.ip(), &any)?;
-        Ok(Multicast { socket: socket, addr: addr })
+        Ok(socket)
     }
 }
 
 impl Bus for Multicast {
+    fn read_wake_up(&mut self) -> Result<(String, Uuid), Error> {
+        let mut buf = Box::new(vec![0; BUFFER_SIZE]);
+        let (len, _) = self.wake_up.recv_from(&mut buf).map_err(Error::Io)?;
+        Ok(json::from_slice(&buf[..len])?)
+    }
+
+    fn write_wake_up(&self, serial: String, txid: Uuid) -> Result<(), Error> {
+        trace!("writing wake_up: ({}, {})", serial, txid);
+        let _ = self.wake_up.send_to(&json::to_vec(&(serial, txid))?, self.wake_addr)?;
+        Ok(())
+    }
+
     fn read_message(&mut self) -> Result<Message, Error> {
         let mut buf = Box::new(vec![0; BUFFER_SIZE]);
-        let (len, _) = self.socket.recv_from(&mut buf).map_err(Error::Io)?;
+        let (len, _) = self.message.recv_from(&mut buf).map_err(Error::Io)?;
         Ok(json::from_slice(&buf[..len])?)
     }
 
     fn write_message(&self, msg: &Message) -> Result<(), Error> {
         trace!("writing message: {:?}", msg);
-        let _ = self.socket.send_to(&json::to_vec(msg)?, self.addr)?;
+        let _ = self.message.send_to(&json::to_vec(msg)?, self.msg_addr)?;
         Ok(())
     }
 }
@@ -517,7 +562,10 @@ mod tests {
 
 
     fn bus() -> Box<Bus> {
-        Box::new(Multicast::new(SocketAddrV4::new(Ipv4Addr::new(232,0,0,101), 23201)).expect("multicast"))
+        Box::new(Multicast::new(
+            SocketAddrV4::new(Ipv4Addr::new(232,0,0,101), 23201),
+            SocketAddrV4::new(Ipv4Addr::new(232,0,0,102), 23202),
+        ).expect("multicast"))
     }
 
     fn serials(prefix: &str) -> (String, String, String) {
@@ -576,7 +624,7 @@ mod tests {
         thread::spawn(move || assert!(fc.listen().is_err()));
 
         let mut leader = Leader::new(bus(), payloads(&a, &b, &c), *TIMEOUT, None).expect("leader");
-        assert!(leader.commit().is_ok());
+        assert!(leader.commit().is_err());
         assert_eq!(leader.committed(), &hashset!{});
         assert_eq!(leader.aborted(), &hashset!{a, b, c});
     }
@@ -592,7 +640,7 @@ mod tests {
         thread::spawn(move || assert!(fc.listen().is_err()));
 
         let mut leader = Leader::new(bus(), payloads(&a, &b, &c), *TIMEOUT, None).expect("leader");
-        assert!(leader.commit().is_ok());
+        assert!(leader.commit().is_err());
         assert_eq!(leader.committed(), &hashset!{});
         assert_eq!(leader.aborted(), &hashset!{a, b, c});
     }

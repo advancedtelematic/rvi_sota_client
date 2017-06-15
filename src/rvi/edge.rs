@@ -5,19 +5,19 @@ use serde_json::Value;
 use std::str;
 use std::io::Read;
 
-use datatype::{SocketAddr, Url};
+use datatype::{SocketAddrV4, Url};
 use rvi::{RpcErr, RpcOk, RpcRequest, Services};
 
 
 /// The HTTP server endpoint for `RVI` client communication.
 pub struct Edge {
-    rvi_edge: SocketAddr,
+    rvi_edge: SocketAddrV4,
     services: Services,
 }
 
 impl Edge {
     /// Create a new `Edge` by registering each `RVI` service.
-    pub fn new(mut services: Services, rvi_edge: SocketAddr, rvi_client: Url) -> Self {
+    pub fn new(mut services: Services, rvi_edge: SocketAddrV4, rvi_client: Url) -> Self {
         services.register_services(|service| {
             let req = RpcRequest::new("register_service", RegisterServiceRequest {
                 network_address: format!("http://{}", rvi_edge),

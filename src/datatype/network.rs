@@ -3,7 +3,7 @@ use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, Serializer};
 use serde_json as json;
 use std::fmt::{self, Display, Formatter};
-use std::net::{SocketAddr as StdSocketAddr};
+use std::net::{SocketAddrV4 as NetSocketAddrV4};
 use std::ops::Deref;
 use std::str::FromStr;
 use url;
@@ -13,38 +13,38 @@ use datatype::Error;
 
 /// Encapsulate a socket address for implementing additional traits.
 #[derive(Serialize, Clone, Debug, Eq, PartialEq)]
-pub struct SocketAddr(pub StdSocketAddr);
+pub struct SocketAddrV4(pub NetSocketAddrV4);
 
-impl FromStr for SocketAddr {
+impl FromStr for SocketAddrV4 {
     type Err = Error;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match StdSocketAddr::from_str(s) {
-            Ok(addr) => Ok(SocketAddr(addr)),
-            Err(err) => Err(Error::Parse(format!("couldn't parse SocketAddr: {}", err)))
+        match NetSocketAddrV4::from_str(s) {
+            Ok(addr) => Ok(SocketAddrV4(addr)),
+            Err(err) => Err(Error::Parse(format!("couldn't parse SocketAddrV4: {}", err)))
         }
     }
 }
 
-impl<'de> Deserialize<'de> for SocketAddr {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<SocketAddr, D::Error> {
+impl<'de> Deserialize<'de> for SocketAddrV4 {
+    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<SocketAddrV4, D::Error> {
         if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("invalid SocketAddr: {}", err)))
+            s.parse().map_err(|err| SerdeError::custom(format!("invalid SocketAddrV4: {}", err)))
         } else {
-            Err(SerdeError::custom("Not a SocketAddr"))
+            Err(SerdeError::custom("Not a SocketAddrV4"))
         }
     }
 }
 
-impl Deref for SocketAddr {
-    type Target = StdSocketAddr;
+impl Deref for SocketAddrV4 {
+    type Target = NetSocketAddrV4;
 
-    fn deref(&self) -> &StdSocketAddr {
+    fn deref(&self) -> &NetSocketAddrV4 {
         &self.0
     }
 }
 
-impl Display for SocketAddr {
+impl Display for SocketAddrV4 {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "{}", self.0)
     }
