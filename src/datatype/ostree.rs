@@ -1,7 +1,6 @@
 use base64;
 use hex::FromHex;
 use serde_json as json;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::ffi::OsStr;
 use std::fs::{self, File};
@@ -11,8 +10,7 @@ use std::process::{Command, Output};
 use std::str;
 use tar::Archive;
 
-use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufImage,
-               TufMeta, Url, Util};
+use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufMeta, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -75,24 +73,8 @@ impl OstreePackage {
 
     /// Convert the current `OstreePackage` into an `EcuVersion`.
     pub fn into_version(self, custom: Option<EcuCustom>) -> EcuVersion {
-        let mut hashes = HashMap::new();
-        hashes.insert("sha256".to_string(), self.commit);
-
-        EcuVersion {
-            attacks_detected: "".to_string(),
-            custom: custom,
-            ecu_serial: self.ecu_serial,
-            installed_image: TufImage {
-                filepath: self.refName,
-                fileinfo: TufMeta {
-                    length: 0,
-                    hashes: hashes,
-                    custom: None
-                }
-            },
-            previous_timeserver_time: "1970-01-01T00:00:00Z".to_string(),
-            timeserver_time: "1970-01-01T00:00:00Z".to_string(),
-        }
+        let meta = TufMeta::from("sha256".into(), self.commit);
+        EcuVersion::from(self.ecu_serial, self.refName, meta, custom)
     }
 
     /// Install this package using the `ostree` command.

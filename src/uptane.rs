@@ -10,7 +10,7 @@ use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Bus, Follower, Leader, Multicast, Next, Payloads, State};
+use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step};
 use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
                PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
                TufMeta, TufSigned, Url, Util, canonicalize_json};
@@ -184,27 +184,47 @@ impl Uptane {
     }
 
     /// Start a new transaction that will attempt to apply the updates atomically.
-    pub fn distributed_install(&mut self, mut verified: Verified, treehub: Url, creds: Credentials)
+    pub fn distributed_install(&mut self, verified: Verified, treehub: Url, creds: Credentials)
                                -> Result<(Vec<TufSigned>, bool), Error>
     {
         let (timeout, primary) = (self.atomic_timeout, self.primary_ecu.clone());
         let (wake_addr, msg_addr) = (self.atomic_wake_addr, self.atomic_msg_addr);
         let bus = || -> Result<Box<Bus>, Error> { Ok(Box::new(Multicast::new(wake_addr, msg_addr)?)) };
 
-        if let Some(targets) = verified.data.targets.as_mut() {
-            if targets.get(&primary).is_some() && targets.len() == 1 {
-                let meta = targets.remove(&primary).expect("primary target");
-                let package = Uptane::into_package(meta, primary, "sha256", &treehub)?;
-                return self.local_install(package, creds);
-            } else if targets.get(&primary).is_some() {
-                let mut follower = Follower::new(primary, bus()?, Box::new(Primary), timeout, None);
-                thread::spawn(move || follower.listen());
+        if let Some(targets) = verified.data.targets.as_ref() {
+            let packages = targets.iter()
+                .map(|(refname, meta)| if let Some(ref custom) = meta.custom {
+                    Ok((&custom.ecuIdentifier, refname, meta))
+                } else {
+                    Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
+                })
+                .collect::<Result<Vec<(_, _, _)>, _>>()?;
+            let local_package = packages.iter()
+                .filter(|&&(ecu, _, _)| *ecu == primary)
+                .map(|&(_, refname, meta)| Uptane::into_package(meta.clone(), refname.clone(), "sha256", &treehub))
+                .nth(0);
+
+            if let Some(pkg) = local_package {
+                if packages.len() == 1 {
+                    return self.local_install(pkg?, creds);
+                }
+                let next = Box::new(PrimaryStep {
+                    sig_type:    self.sig_type,
+                    private_key: self.private_key.clone(),
+                    package:     pkg?
+                });
+                let mut secondary = Secondary::new(primary, bus()?, next, timeout, None);
+                thread::spawn(move || secondary.listen());
             }
         }
 
-        let mut leader = Leader::new(bus()?, Uptane::into_payloads(verified)?, timeout, None)?;
-        leader.commit()?;
-        self.into_signed_versions(leader)
+        let mut primary = Primary::new(bus()?, Uptane::into_payloads(verified)?, timeout, None);
+        match primary.commit() {
+            Ok(()) => Ok((primary.signed().iter().map(|(_, signed)| signed.clone()).collect(), true)),
+            Err(Error::AtomicAbort(_)) |
+            Err(Error::AtomicTimeout)  => Ok((primary.signed().iter().map(|(_, signed)| signed.clone()).collect(), false)),
+            Err(err) => Err(err)
+        }
     }
 
     fn into_package(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url) -> Result<OstreePackage, Error> {
@@ -225,17 +245,24 @@ impl Uptane {
             .collect::<Payloads>();
         Ok(payloads)
     }
-
-    fn into_signed_versions(&self, _: Leader) -> Result<(Vec<TufSigned>, bool), Error> {
-        unimplemented!()
-    }
 }
 
 /// Define the state transitions for a primary ECU.
-pub struct Primary;
+pub struct PrimaryStep {
+    sig_type:    SignatureType,
+    private_key: PrivateKey,
+    package:     OstreePackage,
+}
 
-impl Next for Primary {
-    fn next(&mut self, _: State, _: &[u8]) -> Result<(), String> { Ok(()) }
+impl Step for PrimaryStep {
+    fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, String> {
+        if state == State::Commit {
+            unimplemented!()
+            //Ok(Some(self.private_key.sign_data(self.data, self.sig_type).map_err(|err| format!("{}", err))?)
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 

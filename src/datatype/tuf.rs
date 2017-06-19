@@ -32,6 +32,12 @@ pub struct TufMeta {
     pub custom: Option<TufCustom>,
 }
 
+impl TufMeta {
+    pub fn from(hash_type: String, commit: String) -> Self {
+        TufMeta { length: 0, hashes: hashmap!{ hash_type => commit }, custom: None }
+    }
+}
+
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TufCustom {
@@ -132,6 +138,7 @@ pub struct KeyValue {
     pub public: String,
 }
 
+#[derive(Clone)]
 pub struct PrivateKey {
     pub keyid:   String,
     pub der_key: Vec<u8>,
@@ -196,6 +203,22 @@ pub struct EcuVersion {
     pub timeserver_time:          String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<EcuCustom>,
+}
+
+impl EcuVersion {
+    pub fn from(ecu_serial: String, refname: String, meta: TufMeta, custom: Option<EcuCustom>) -> Self {
+        EcuVersion {
+            attacks_detected: "".into(),
+            custom: custom,
+            ecu_serial: ecu_serial,
+            installed_image: TufImage {
+                filepath: refname,
+                fileinfo: meta
+            },
+            previous_timeserver_time: "1970-01-01T00:00:00Z".into(),
+            timeserver_time: "1970-01-01T00:00:00Z".into(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

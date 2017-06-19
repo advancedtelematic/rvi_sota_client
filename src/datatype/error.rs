@@ -20,6 +20,7 @@ use toml::de::Error as TomlError;
 use tungstenite::Error as WebsocketError;
 use url::ParseError as UrlParseError;
 
+use atomic::State;
 use datatype::Event;
 use http::ResponseData;
 use interpreter::CommandExec;
@@ -29,9 +30,10 @@ use interpreter::CommandExec;
 #[derive(Debug)]
 pub enum Error {
     Addr(AddrParseError),
-    AtomicAbort,
+    AtomicAbort(String),
     AtomicPayload,
-    AtomicState,
+    AtomicSigned,
+    AtomicState(State, State),
     AtomicTimeout,
     Base64(Base64Error),
     Client(String),
@@ -83,10 +85,11 @@ impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
             Error::Addr(ref err)        => format!("Address parse error: {}", err),
-            Error::AtomicAbort          => "Atomic transaction: abort".into(),
-            Error::AtomicPayload        => "Atomic transaction: payload too large".into(),
-            Error::AtomicState          => "Atomic transaction: bad state transition".into(),
-            Error::AtomicTimeout        => "Atomic transaction: timed out".into(),
+            Error::AtomicAbort(ref err) => format!("Atomic transaction aborted: {}", err),
+            Error::AtomicPayload        => "Transaction payload too large".into(),
+            Error::AtomicSigned         => "Commit or Abort state needs TufSigned".into(),
+            Error::AtomicState(from, to) => format!("Atomic transition invalid: {:?} -> {:?}", from, to),
+            Error::AtomicTimeout        => "Transaction timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),
             Error::Command(ref err)     => format!("Unknown Command: {}", err),
