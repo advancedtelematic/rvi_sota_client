@@ -11,9 +11,9 @@ use std::net::SocketAddrV4;
 use std::time::Duration;
 
 use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step};
-use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
-               PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
-               TufMeta, TufSigned, Url, Util, canonicalize_json};
+use datatype::{Config, EcuCustom, EcuManifests, Error, InstallCode, InstallOutcome,
+               Key, KeyType, OstreePackage, PrivateKey, RoleData, RoleMeta, RoleName,
+               Signature, SignatureType, TufMeta, TufSigned, Url, Util, canonicalize_json};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -166,101 +166,96 @@ impl Uptane {
         Ok(self.put(client, Service::Director, "manifest", json::to_vec(&manifest)?)?)
     }
 
-    /// Sign the primary's `EcuVersion` for sending to the Director server.
-    pub fn signed_version(&self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
-        let version = OstreePackage::get_latest(&self.primary_ecu)?.into_version(custom);
-        self.private_key.sign_data(json::to_value(version)?, self.sig_type)
-    }
+    /// Start a transaction to install the verified targets to their respective ECUs.
+    pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Vec<TufSigned>, bool), Error> {
+        let bus = || -> Result<Box<Bus>, Error> {
+            Ok(Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?))
+        };
 
-    /// Start a new local `OstreePackage` installation.
-    pub fn local_install(&mut self, package: OstreePackage, creds: Credentials)
-                         -> Result<(Vec<TufSigned>, bool), Error>
-    {
-        let outcome = package.install(&creds)?;
-        let result  = outcome.into_result(package.refName.clone());
-        let success = result.result_code.is_success();
-        let version = self.signed_version(Some(EcuCustom { operation_result: result }))?;
-        Ok((vec![version], success))
-    }
-
-    /// Start a new transaction that will attempt to apply the updates atomically.
-    pub fn distributed_install(&mut self, verified: Verified, treehub: Url, creds: Credentials)
-                               -> Result<(Vec<TufSigned>, bool), Error>
-    {
-        let (timeout, primary) = (self.atomic_timeout, self.primary_ecu.clone());
-        let (wake_addr, msg_addr) = (self.atomic_wake_addr, self.atomic_msg_addr);
-        let bus = || -> Result<Box<Bus>, Error> { Ok(Box::new(Multicast::new(wake_addr, msg_addr)?)) };
-
-        if let Some(targets) = verified.data.targets.as_ref() {
-            let packages = targets.iter()
-                .map(|(refname, meta)| if let Some(ref custom) = meta.custom {
-                    Ok((&custom.ecuIdentifier, refname, meta))
-                } else {
-                    Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
-                })
-                .collect::<Result<Vec<(_, _, _)>, _>>()?;
-            let local_package = packages.iter()
-                .filter(|&&(ecu, _, _)| *ecu == primary)
-                .map(|&(_, refname, meta)| Uptane::into_package(meta.clone(), refname.clone(), "sha256", &treehub))
-                .nth(0);
-
-            if let Some(pkg) = local_package {
-                if packages.len() == 1 {
-                    return self.local_install(pkg?, creds);
-                }
-                let next = Box::new(PrimaryStep {
-                    sig_type:    self.sig_type,
-                    private_key: self.private_key.clone(),
-                    package:     pkg?
-                });
-                let mut secondary = Secondary::new(primary, bus()?, next, timeout, None);
-                thread::spawn(move || secondary.listen());
+        if let Some(ref targets) = verified.data.targets {
+            if let Some(pkg) = primary_target(targets, &self.primary_ecu, &treehub)? {
+                let inst = Box::new(self.new_installer(pkg, creds));
+                let mut ecu = Secondary::new(self.primary_ecu.clone(), bus()?, inst, self.atomic_timeout, None);
+                thread::spawn(move || ecu.listen());
             }
         }
 
-        let mut primary = Primary::new(bus()?, Uptane::into_payloads(verified)?, timeout, None);
+        let mut primary = Primary::new(into_payloads(verified)?, bus()?, None, self.atomic_timeout, None);
         match primary.commit() {
-            Ok(()) => Ok((primary.signed().iter().map(|(_, signed)| signed.clone()).collect(), true)),
+            Ok(()) => Ok((primary.into_signed(), true)),
             Err(Error::AtomicAbort(_)) |
-            Err(Error::AtomicTimeout)  => Ok((primary.signed().iter().map(|(_, signed)| signed.clone()).collect(), false)),
+            Err(Error::AtomicTimeout)  => Ok((primary.into_signed(), false)),
             Err(err) => Err(err)
         }
     }
 
-    fn into_package(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url) -> Result<OstreePackage, Error> {
-        match (meta.hashes.remove(hash_type), meta.custom) {
-            (Some(commit), Some(custom)) => {
-                Ok(OstreePackage::new(custom.ecuIdentifier, refname, commit, treehub))
-            }
-            (None, _) => Err(Error::UptaneTargets(format!("{} missing {} hash", refname, hash_type))),
-            (_, None) => Err(Error::UptaneTargets(format!("{} missing custom field", refname))),
+    fn new_installer(&self, pkg: OstreePackage, creds: Credentials) -> PrimaryInstaller {
+        PrimaryInstaller {
+            pkg: pkg,
+            sig_type: self.sig_type,
+            priv_key: self.private_key.clone(),
+            credentials: creds
         }
     }
+}
 
-    fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
-        let json = verified.json.unwrap_or(Vec::new());
-        let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
-        let payloads = targets.into_iter()
-            .map(|(serial, _)| (serial, hashmap!{State::Verify => json.clone()}))
-            .collect::<Payloads>();
+fn primary_target(targets: &HashMap<String, TufMeta>, primary_ecu: &str, treehub: &Url) -> Result<Option<OstreePackage>, Error> {
+    let primaries = targets.iter()
+        .map(|(refname, meta)| match meta.custom {
+            Some(ref custom) if custom.ecuIdentifier == primary_ecu => {
+                Ok(Some(OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?))
+            }
+            Some(_) => Ok(None),
+            None => Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
+        })
+        .collect::<Result<Vec<Option<_>>, _>>()?
+        .into_iter()
+        .filter_map(|pkg| if pkg.is_some() { pkg } else { None })
+        .collect::<Vec<OstreePackage>>();
+
+    match primaries.len() {
+        0 => Ok(None),
+        1 => Ok(Some(primaries.into_iter().nth(0).expect("primary package"))),
+        _ => Err(Error::UptaneTargets("multiple primary targets".into()))
+    }
+}
+
+fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
+    let json = verified.json.unwrap_or(Vec::new());
+    let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
+    let payloads = targets.into_iter()
+        .map(|(serial, _)| (serial, hashmap!{State::Verify => json.clone()}))
+        .collect::<Payloads>();
+    if payloads.len() == 0 {
+        Err(Error::UptaneTargets("no targets found".into()))
+    } else {
         Ok(payloads)
     }
 }
 
-/// Define the state transitions for a primary ECU.
-pub struct PrimaryStep {
-    sig_type:    SignatureType,
-    private_key: PrivateKey,
-    package:     OstreePackage,
+
+/// Define an installer for an `OstreePackage` as part of a transaction.
+pub struct PrimaryInstaller {
+    pkg: OstreePackage,
+    sig_type: SignatureType,
+    priv_key: PrivateKey,
+    credentials: Credentials,
 }
 
-impl Step for PrimaryStep {
-    fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, String> {
-        if state == State::Commit {
-            unimplemented!()
-            //Ok(Some(self.private_key.sign_data(self.data, self.sig_type).map_err(|err| format!("{}", err))?)
-        } else {
-            Ok(None)
+impl PrimaryInstaller {
+    fn signed(&self, outcome: InstallOutcome) -> Result<Option<TufSigned>, Error> {
+        let custom = EcuCustom { operation_result: outcome.into_result(self.pkg.refName.clone()) };
+        let version = OstreePackage::get_latest(&self.pkg.ecu_serial)?.into_version(Some(custom));
+        Ok(Some(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?))
+    }
+}
+
+impl Step for PrimaryInstaller {
+    fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+        match state {
+            State::Idle | State::Ready | State::Verify | State::Prepare => Ok(None),
+            State::Commit => self.signed(self.pkg.install(&self.credentials)?),
+            State::Abort  => self.signed(InstallOutcome::new(InstallCode::INTERNAL_ERROR, "".into(), "aborted".into()))
         }
     }
 }

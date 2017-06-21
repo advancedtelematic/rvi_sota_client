@@ -71,6 +71,15 @@ impl OstreePackage {
         }
     }
 
+    /// Convert from `TufMeta` into an `OstreePackage`.
+    pub fn from_meta(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url) -> Result<Self, Error> {
+        match (meta.hashes.remove(hash_type), meta.custom) {
+            (Some(commit), Some(custom)) => Ok(OstreePackage::new(custom.ecuIdentifier, refname, commit, treehub)),
+            (None, _) => Err(Error::UptaneTargets(format!("{} missing {} hash", refname, hash_type))),
+            (_, None) => Err(Error::UptaneTargets(format!("{} missing custom field", refname))),
+        }
+    }
+
     /// Convert the current `OstreePackage` into an `EcuVersion`.
     pub fn into_version(self, custom: Option<EcuCustom>) -> EcuVersion {
         let meta = TufMeta::from("sha256".into(), self.commit);
@@ -84,7 +93,7 @@ impl OstreePackage {
         if from.commit == self.commit {
             return Ok(InstallOutcome::new(InstallCode::ALREADY_PROCESSED, "".into(), "".into()));
         }
-        self.get_delta(creds.client, &self.pullUri, &from.commit)
+        self.get_delta(&*creds.client, &self.pullUri, &from.commit)
             .and_then(|dir| Ostree::run(&["static-delta", "apply-offline", &dir]))
             .or_else(|_| self.pull_commit("sota-remote", creds))
             .map(|_| ())?;
@@ -160,7 +169,7 @@ impl OstreePackage {
         }
 
         let mut args = vec!["pull".into(), remote.into()];
-        if let Some(token) = creds.token {
+        if let Some(ref token) = creds.token {
             args.push(format!("--http-header='Authorization=Bearer {}'", token));
         }
         args.push(self.commit.clone());
@@ -175,10 +184,10 @@ impl OstreePackage {
         }
 
         let mut args = vec!["remote".into(), "add".into(), "--no-gpg-verify".into()];
-        if let Some(ca) = creds.ca_file {
+        if let Some(ref ca) = creds.ca_file {
             args.push(format!("--set=tls-ca-path={}", ca));
         }
-        if let Some(pkey) = creds.pkey_file {
+        if let Some(ref pkey) = creds.pkey_file {
             args.push(format!("--set=tls-client-cert-path={}", pkey));
             args.push(format!("--set=tls-client-key-path={}", pkey));
         }

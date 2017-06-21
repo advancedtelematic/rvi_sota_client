@@ -1,11 +1,12 @@
 use chan::{Sender, Receiver};
+use serde_json as json;
 use std::cell::RefCell;
 use std::process::{self, Command as ShellCommand};
 use std::rc::Rc;
 
 use authenticate::oauth2;
 use datatype::{Auth, Command, Config, Error, Event, InstallCode, InstallResult,
-               RoleName, RequestStatus, Url};
+               OstreePackage, RoleName, RequestStatus, Url};
 use http::{AuthClient, Client};
 use pacman::{Credentials, PacMan};
 #[cfg(feature = "rvi")]
@@ -99,11 +100,11 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
             }
 
             Event::UptaneInstallComplete(signed) | Event::UptaneInstallFailed(signed) => {
-                queue(Command::UptaneSendManifest(signed));
+                queue(Command::UptaneSendManifest(Some(signed)));
             }
 
             Event::UptaneManifestNeeded if self.pacman == PacMan::Uptane => {
-                queue(Command::UptaneSendManifest(Vec::new()));
+                queue(Command::UptaneSendManifest(None));
             }
 
             Event::UptaneTargetsUpdated(targets) => {
@@ -266,18 +267,22 @@ impl CommandInterpreter {
 
             (Command::Shutdown, _) => process::exit(0),
 
-            (Command::UptaneSendManifest(mut signed), CommandMode::Uptane(uptane)) => {
+            (Command::UptaneSendManifest(signed), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                if signed.is_empty() {
-                    signed.push(uptane.signed_version(None)?);
-                }
+                let signed = match signed {
+                    Some(signed) => signed,
+                    None => {
+                        let version = OstreePackage::get_latest(&uptane.primary_ecu)?.into_version(None);
+                        vec![uptane.private_key.sign_data(json::to_value(version)?, uptane.sig_type)?]
+                    }
+                };
                 uptane.put_manifest(&*self.http, signed)?;
                 Event::UptaneManifestSent
             }
 
             (Command::UptaneStartInstall(targets), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                let (signed, ok) = uptane.distributed_install(targets, self.treehub()?, self.credentials())?;
+                let (signed, ok) = uptane.install(targets, self.treehub()?, self.credentials())?;
                 if ok {
                     Event::UptaneInstallComplete(signed)
                 } else {
@@ -306,17 +311,14 @@ impl CommandInterpreter {
 
     /// Retrieve the current access token and device certificates for TLS.
     fn credentials(&self) -> Credentials {
-        let token = if let Auth::Token(ref t) = self.auth {
-            Some(t.access_token.as_ref())
-        } else {
-            None
-        };
+        let client = Box::new(AuthClient::from(self.auth.clone()));
+        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.clone()) } else { None };
         let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
-            (Some(tls.ca_file.as_ref()), Some(tls.cert_file.as_ref()), Some(tls.pkey_file.as_ref()))
+            (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
         } else {
             (None, None, None)
         };
-        Credentials { client: &*self.http, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
+        Credentials { client: client, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
     }
 
     /// Return the treehub URL.

@@ -26,7 +26,7 @@ lazy_static! {
 const BUFFER_SIZE: usize = 100*1024;
 
 
-/// Define the interface for communication between nodes.
+/// Define the interface for communication between `Primary` and `Secondary` ECUs.
 pub trait Bus: Send {
     fn read_wake_up(&mut self) -> Result<(String, Uuid), Error>;
     fn read_message(&mut self) -> Result<Message, Error>;
@@ -34,15 +34,11 @@ pub trait Bus: Send {
     fn write_message(&self, msg: &Message) -> Result<(), Error>;
 }
 
-/// Transition a `Secondary` to the next state, which should return a signed
-/// report after a successful commit or on any abort.
+/// Transition a `Secondary` to the next state. A signed installation report
+/// should be returned after transitioning to a `Commit` or `Abort` state.
 pub trait Step: Send {
-    fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, String>;
+    fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, Error>;
 }
-
-
-/// A mapping from serials to the payloads to be delivered at each state.
-pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
 
 /// Send a message to be picked up by either a `Primary` or a `Secondary`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -63,6 +59,11 @@ pub enum State {
 }
 
 
+/// A mapping from serials to the payloads to be delivered at each state.
+pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
+/// A function for returning a failed `ECU` installation report from a serial.
+pub type Abort = Fn(&str) -> Option<TufSigned>;
+
 /// A `Primary` is responsible for coordinating state changes with all
 /// `Secondary` ECUs referenced in the payload data.
 #[derive(Serialize, Deserialize)]
@@ -80,11 +81,17 @@ pub struct Primary {
     started: Option<Instant>,
     #[serde(skip_serializing, skip_deserializing)]
     bus: Option<Box<Bus>>,
+    #[serde(skip_serializing, skip_deserializing)]
+    abort: Option<Box<Abort>>,
 }
 
 impl Primary {
     /// Create a new `Primary` that will wake up the transactional secondaries.
-    pub fn new(bus: Box<Bus>, payloads: Payloads, timeout: Duration, recover: Option<String>) -> Self {
+    pub fn new(payloads: Payloads,
+               bus: Box<Bus>,
+               abort: Option<Box<Abort>>,
+               timeout: Duration,
+               recover: Option<String>) -> Self {
         Primary {
             txid:  Uuid::new_v4(),
             state: State::Idle,
@@ -102,15 +109,17 @@ impl Primary {
             signed:  HashMap::new(),
 
             started: Some(Instant::now()),
-            bus:     Some(bus),
+            bus: Some(bus),
+            abort: abort,
         }
     }
 
-    /// Recover from a crash by requesting an update on all `Secondary` states.
-    pub fn recover<P: AsRef<Path>>(path: P, bus: Box<Bus>) -> Result<Self, Error> {
+    /// Recover from a crash by requesting an update on missing `Secondary` acks.
+    pub fn recover<P: AsRef<Path>>(path: P, bus: Box<Bus>, abort: Option<Box<Abort>>) -> Result<Self, Error> {
         let mut primary: Primary = json::from_reader(BufReader::new(File::open(&path)?))?;
         info!("Primary state recovered from `{}`", path.as_ref().display());
         primary.bus = Some(bus);
+        primary.abort = abort;
         primary.started = Some(Instant::now());
         primary.send_request(primary.state)?;
         Ok(primary)
@@ -144,9 +153,16 @@ impl Primary {
         self.acks.get(&State::Abort).expect("abort acks")
     }
 
-    /// A map of the returned `Secondary` ECU installation reports.
-    pub fn signed(&self) -> &HashMap<String, TufSigned> {
-        &self.signed
+    /// Convert the completed transaction into a list of signed ECU reports.
+    pub fn into_signed(mut self) -> Vec<TufSigned> {
+        let mut signed = Vec::new();
+        for (serial, _) in &self.payloads {
+            self.signed
+                .remove(serial)
+                .or_else(|| self.abort.as_ref().map(|f| f(serial)).unwrap_or(None))
+                .map(|report| signed.push(report));
+        }
+        signed
     }
 
     /// Transition all secondaries to the next state.
@@ -158,8 +174,35 @@ impl Primary {
 
         while self.state == state && self.acks(state).len() < self.payloads.len() {
             self.read_message()
-                .and_then(|msg| self.handle_response(msg))
-                .or_else(|err| self.handle_error(err))?;
+                .and_then(|msg| match msg {
+                    Message::Next { .. } => Ok(()),
+
+                    Message::Ack { txid, serial, state, payload } => {
+                        if txid != self.txid { return Ok(()) }
+                        debug!("ack from {}: {:?}", serial, state);
+                        let _ = self.acks.get_mut(&state).expect("acks").insert(serial.clone());
+                        if let Ok(signed) = parse_signed(&payload) {
+                            let _ = self.signed.insert(serial.clone(), signed);
+                        }
+
+                        if state == State::Abort && ! is_terminal(self.state) {
+                            self.transition(State::Abort)?;
+                            Err(Error::AtomicAbort(serial))
+                        } else {
+                            Ok(())
+                        }
+                    }
+                })
+                .or_else(|err| {
+                    if ! is_waiting(&err) {
+                        let _ = self.transition(State::Abort);
+                        Err(err)
+                    } else if self.is_timeout() {
+                        Err(Error::AtomicTimeout)
+                    } else {
+                        self.send_request(self.state)
+                    }
+                })?;
         }
         Ok(())
     }
@@ -190,38 +233,6 @@ impl Primary {
             }
         }
         Ok(())
-    }
-
-    fn handle_response(&mut self, msg: Message) -> Result<(), Error> {
-        match msg {
-            Message::Next { .. } => Ok(()),
-            Message::Ack { txid, serial, state, payload } => {
-                if txid != self.txid { return Ok(()) }
-                debug!("ack from {}: {:?}", serial, state);
-                let _ = self.acks.get_mut(&state).expect("acks").insert(serial.clone());
-                if let Ok(signed) = parse_signed(&payload) {
-                    let _ = self.signed.insert(serial.clone(), signed);
-                }
-
-                if state == State::Abort && ! is_terminal(self.state) {
-                    self.transition(State::Abort)?;
-                    Err(Error::AtomicAbort(serial))
-                } else {
-                    Ok(())
-                }
-            }
-        }
-    }
-
-    fn handle_error(&mut self, err: Error) -> Result<(), Error> {
-        if ! is_waiting(&err) {
-            let _ = self.transition(State::Abort);
-            Err(err)
-        } else if self.is_timeout() {
-            Err(Error::AtomicTimeout)
-        } else {
-            self.send_request(self.state)
-        }
     }
 
     fn acks(&self, state: State) -> &HashSet<String> {
@@ -311,35 +322,30 @@ impl Secondary {
 
         while ! is_terminal(self.state) {
             self.read_message()
-                .and_then(|msg| self.handle_request(msg))
-                .or_else(|err| self.handle_error(err))?;
+                .and_then(|msg| match msg {
+                    Message::Ack { .. } => Ok(()),
+
+                    Message::Next { txid, serial, state, payload } => {
+                        if txid != self.txid() || serial != self.serial { return Ok(()) }
+                        self.transition(state, if payload.len() > 0 { Some(payload) } else { None })
+                    }
+                })
+                .or_else(|err| {
+                    if ! is_waiting(&err) {
+                        self.transition(State::Abort, None)?;
+                        Err(err)
+                    } else if self.is_timeout() && ! is_terminal(self.state) {
+                        self.transition(State::Abort, None)?;
+                        Err(Error::AtomicTimeout)
+                    } else {
+                        Ok(())
+                    }
+                })?;
         }
 
         if let Some(ref path) = self.recover { fs::remove_file(path)?; }
         if self.state == State::Abort {
             Err(Error::AtomicAbort(format!("{}", self.serial)))
-        } else {
-            Ok(())
-        }
-    }
-
-    fn handle_request(&mut self, msg: Message) -> Result<(), Error> {
-        match msg {
-            Message::Next { txid, serial, state, payload } => {
-                if txid != self.txid() || serial != self.serial { return Ok(()) }
-                self.transition(state, if payload.len() > 0 { Some(payload) } else { None })
-            }
-            Message::Ack { .. } => Ok(()),
-        }
-    }
-
-    fn handle_error(&mut self, err: Error) -> Result<(), Error> {
-        if ! is_waiting(&err) {
-            self.transition(State::Abort, None)?;
-            Err(err)
-        } else if self.is_timeout() && ! is_terminal(self.state) {
-            self.transition(State::Abort, None)?;
-            Err(Error::AtomicTimeout)
         } else {
             Ok(())
         }
@@ -360,11 +366,11 @@ impl Secondary {
                 self.state = self.next;
                 let _ = self.write_ack();
             })
-            .map_err(|reason| {
-                error!("serial {}: {}", self.serial, reason);
+            .map_err(|err| {
+                error!("serial {}: {}", self.serial, err);
                 let _ = self.transition(State::Abort, None);
                 let _ = self.write_ack();
-                Error::AtomicAbort(reason)
+                Error::AtomicAbort(err.to_string())
             })
     }
 
@@ -379,7 +385,7 @@ impl Secondary {
     }
 
     /// Commit or Abort states should return Some(signed) response.
-    fn step(&mut self, state: State, payload: Option<Vec<u8>>) -> Result<Option<TufSigned>, String> {
+    fn step(&mut self, state: State, payload: Option<Vec<u8>>) -> Result<Option<TufSigned>, Error> {
         let default_payload = Vec::new();
         self.step.as_mut().expect("step").step(state, payload.as_ref().unwrap_or(&default_payload))
     }
@@ -515,55 +521,64 @@ mod tests {
     use datatype::{PrivateKey, SignatureType};
 
 
-    lazy_static! {
-        static ref PRIV_KEY: PrivateKey = PrivateKey {
-            keyid:   "keyid".into(),
-            der_key: base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("pri_key")
-        };
-    }
-
     struct Success;
     impl Step for Success {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
             Ok(signed(state))
         }
     }
 
     struct VerifyPayload;
     impl Step for VerifyPayload {
-        fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Verify && payload != b"verify payload" {
-                Err("unexpected payload".into())
-            } else {
-                Ok(signed(state))
-            }
+        fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Verify && payload != b"verify payload" { return Err(Error::AtomicPayload) }
+            Ok(signed(state))
+        }
+    }
+
+    struct PreparePayload;
+    impl Step for PreparePayload {
+        fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Prepare && payload != b"prepare payload" { return Err(Error::AtomicPayload) }
+            Ok(signed(state))
+        }
+    }
+
+    struct CommitPayload;
+    impl Step for CommitPayload {
+        fn step(&mut self, state: State, payload: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Commit && payload != b"commit payload" { return Err(Error::AtomicPayload) }
+            Ok(signed(state))
         }
     }
 
     struct VerifyFail;
     impl Step for VerifyFail {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Verify { Err("verify failed".into()) } else { Ok(signed(state)) }
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Verify { return Err(Error::AtomicAbort("verify failed".into())) }
+            Ok(signed(state))
         }
     }
 
     struct PrepareFail;
     impl Step for PrepareFail {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Prepare { Err("prepare failed".into()) } else { Ok(signed(state)) }
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Prepare { return Err(Error::AtomicAbort("prepare failed".into())) }
+            Ok(signed(state))
         }
     }
 
     struct CommitFail;
     impl Step for CommitFail {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Commit { Err("commit failed".into()) } else { Ok(signed(state)) }
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Commit { return Err(Error::AtomicAbort("commit failed".into())) }
+            Ok(signed(state))
         }
     }
 
     struct VerifyTimeout;
     impl Step for VerifyTimeout {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
             if state == State::Verify { thread::sleep(Duration::from_secs(99)) }
             Ok(signed(state))
         }
@@ -571,7 +586,7 @@ mod tests {
 
     struct PrepareTimeout;
     impl Step for PrepareTimeout {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
             if state == State::Prepare { thread::sleep(Duration::from_secs(99)) }
             Ok(signed(state))
         }
@@ -579,7 +594,7 @@ mod tests {
 
     struct CommitTimeout;
     impl Step for CommitTimeout {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
             if state == State::Commit { thread::sleep(Duration::from_secs(99)) }
             Ok(signed(state))
         }
@@ -587,22 +602,42 @@ mod tests {
 
     struct VerifyCrash;
     impl Step for VerifyCrash {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Verify { panic!("verify crashed"); } else { Ok(signed(state)) }
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Verify { panic!("verify crashed") }
+            Ok(signed(state))
         }
     }
 
     struct PrepareCrash;
     impl Step for PrepareCrash {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Prepare { panic!("prepare crashed"); } else { Ok(signed(state)) }
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Prepare { panic!("prepare crashed") }
+            Ok(signed(state))
         }
     }
 
     struct CommitCrash;
     impl Step for CommitCrash {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, String> {
-            if state == State::Commit { panic!("commit crashed"); } else { Ok(signed(state)) }
+        fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+            if state == State::Commit { panic!("commit crashed") }
+            Ok(signed(state))
+        }
+    }
+
+
+    lazy_static! {
+        static ref PRIVATE_KEY: PrivateKey = PrivateKey {
+            keyid:   "keyid".into(),
+            der_key: base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("pri_key")
+        };
+    }
+
+    fn signed(state: State) -> Option<TufSigned> {
+        if is_terminal(state) {
+            let data = json::from_str("{}").expect("json");
+            Some(PRIVATE_KEY.sign_data(data, SignatureType::Ed25519).expect("signed"))
+        } else {
+            None
         }
     }
 
@@ -626,15 +661,6 @@ mod tests {
         Duration::from_secs(seconds)
     }
 
-    fn signed(state: State) -> Option<TufSigned> {
-        if is_terminal(state) {
-            let data = json::from_str("{}").expect("json");
-            Some(PRIV_KEY.sign_data(data, SignatureType::Ed25519).expect("signed"))
-        } else {
-            None
-        }
-    }
-
 
     #[test]
     fn atomic_ok() {
@@ -646,28 +672,28 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_ok()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(3), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(3), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
     #[test]
-    fn atomic_verify_payload() {
+    fn atomic_payloads() {
         let (a, b, c) = serials("verify_payload");
         let mut sa = Secondary::new(a.clone(), bus(), Box::new(VerifyPayload), timeout(1), None);
-        let mut sb = Secondary::new(b.clone(), bus(), Box::new(VerifyPayload), timeout(1), None);
-        let mut sc = Secondary::new(c.clone(), bus(), Box::new(VerifyPayload), timeout(1), None);
+        let mut sb = Secondary::new(b.clone(), bus(), Box::new(PreparePayload), timeout(1), None);
+        let mut sc = Secondary::new(c.clone(), bus(), Box::new(CommitPayload), timeout(1), None);
         thread::spawn(move || assert!(sa.listen().is_ok()));
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_ok()));
 
         let payloads = hashmap!{
-            a.clone() => hashmap!{State::Verify => "verify payload".as_bytes().into()},
-            b.clone() => hashmap!{State::Verify => "verify payload".as_bytes().into()},
-            c.clone() => hashmap!{State::Verify => "verify payload".as_bytes().into()},
+            a.clone() => hashmap!{State::Verify  => "verify payload".as_bytes().into()},
+            b.clone() => hashmap!{State::Prepare => "prepare payload".as_bytes().into()},
+            c.clone() => hashmap!{State::Commit  => "commit payload".as_bytes().into()},
         };
-        let mut primary = Primary::new(bus(), payloads, timeout(3), None);
+        let mut primary = Primary::new(payloads, bus(), None, timeout(3), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -683,7 +709,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(3), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(3), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
@@ -699,7 +725,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(3), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(3), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
@@ -715,7 +741,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(3), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(3), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{a, b});
         assert_eq!(primary.aborted(), &hashset!{c});
@@ -731,7 +757,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(5), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(5), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b});
@@ -747,7 +773,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(5), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(5), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b});
@@ -763,7 +789,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_ok()));
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(5), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(5), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{a, b});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -773,9 +799,9 @@ mod tests {
     #[test]
     fn atomic_verify_crash() {
         let (a, b, c) = serials("verify_crash");
+        let c2 = c.clone();
         let mut sa = Secondary::new(a.clone(), bus(), Box::new(Success), timeout(9), None);
         let mut sb = Secondary::new(b.clone(), bus(), Box::new(Success), timeout(9), None);
-        let c2 = c.clone();
         thread::spawn(move || assert!(sa.listen().is_ok()));
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || {
@@ -790,7 +816,7 @@ mod tests {
             assert!(sc.listen().is_ok());
         });
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(10), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -800,9 +826,9 @@ mod tests {
     #[test]
     fn atomic_prepare_crash() {
         let (a, b, c) = serials("prepare_crash");
+        let c2 = c.clone();
         let mut sa = Secondary::new(a.clone(), bus(), Box::new(Success), timeout(9), None);
         let mut sb = Secondary::new(b.clone(), bus(), Box::new(Success), timeout(9), None);
-        let c2 = c.clone();
         thread::spawn(move || assert!(sa.listen().is_ok()));
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || {
@@ -817,7 +843,7 @@ mod tests {
             assert!(sc.listen().is_ok());
         });
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(10), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -827,9 +853,9 @@ mod tests {
     #[test]
     fn atomic_commit_crash() {
         let (a, b, c) = serials("commit_crash");
+        let c2 = c.clone();
         let mut sa = Secondary::new(a.clone(), bus(), Box::new(Success), timeout(9), None);
         let mut sb = Secondary::new(b.clone(), bus(), Box::new(Success), timeout(9), None);
-        let c2 = c.clone();
         thread::spawn(move || assert!(sa.listen().is_ok()));
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || {
@@ -844,7 +870,7 @@ mod tests {
             assert!(sc.listen().is_ok());
         });
 
-        let mut primary = Primary::new(bus(), payloads(&a, &b, &c), timeout(10), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), bus(), None, timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});

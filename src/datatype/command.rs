@@ -38,7 +38,7 @@ pub enum Command {
     SendInstallReport(InstallReport),
 
     /// Send the current manifest to the Director server.
-    UptaneSendManifest(Vec<TufSigned>),
+    UptaneSendManifest(Option<Vec<TufSigned>>),
     /// Install the verified targets.json metadata to their respective ECUs.
     UptaneStartInstall(Verified),
 }
