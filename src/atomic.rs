@@ -1,10 +1,11 @@
+use chrono::{DateTime, Utc};
 use serde_json as json;
 use std::fs::{self, File};
 use std::io::{BufReader, ErrorKind};
 use std::collections::{HashMap, HashSet};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use net2::{UdpBuilder, UdpSocketExt};
 use net2::unix::UnixUdpBuilderExt;
 use uuid::Uuid;
@@ -73,12 +74,11 @@ pub struct Primary {
 
     payloads: Payloads,
     acks:     HashMap<State, HashSet<String>>,
+    started:  DateTime<Utc>,
     timeout:  Duration,
     recover:  Option<String>,
     signed:   HashMap<String, TufSigned>,
 
-    #[serde(skip_serializing, skip_deserializing)]
-    started: Option<Instant>,
     #[serde(skip_serializing, skip_deserializing)]
     bus: Option<Box<Bus>>,
     #[serde(skip_serializing, skip_deserializing)]
@@ -104,11 +104,11 @@ impl Primary {
                 State::Commit  => HashSet::new(),
                 State::Abort   => HashSet::new(),
             },
+            started: Utc::now(),
             timeout: timeout,
             recover: recover,
             signed:  HashMap::new(),
 
-            started: Some(Instant::now()),
             bus: Some(bus),
             abort: abort,
         }
@@ -120,7 +120,7 @@ impl Primary {
         info!("Primary state recovered from `{}`", path.as_ref().display());
         primary.bus = Some(bus);
         primary.abort = abort;
-        primary.started = Some(Instant::now());
+        primary.started = Utc::now();
         primary.send_request(primary.state)?;
         Ok(primary)
     }
@@ -208,7 +208,7 @@ impl Primary {
     }
 
     fn checkpoint(&mut self, state: State) -> Result<(), Error> {
-        self.started = Some(Instant::now());
+        self.started = Utc::now();
         self.state = state;
         if let Some(ref path) = self.recover {
             Util::write_file(path, &json::to_vec(self)?)?;
@@ -240,7 +240,7 @@ impl Primary {
     }
 
     fn is_timeout(&self) -> bool {
-        Instant::now().duration_since(self.started.expect("started")) > self.timeout
+        Utc::now().signed_duration_since(self.started).to_std().expect("duration") > self.timeout
     }
 
     fn read_message(&mut self) -> Result<Message, Error> {
@@ -261,6 +261,7 @@ pub struct Secondary {
     state:  State,
     next:   State,
 
+    started: DateTime<Utc>,
     timeout: Duration,
     recover: Option<String>,
     payload: Option<Vec<u8>>,
@@ -270,8 +271,6 @@ pub struct Secondary {
     bus: Option<Box<Bus>>,
     #[serde(skip_serializing, skip_deserializing)]
     step: Option<Box<Step>>,
-    #[serde(skip_serializing, skip_deserializing)]
-    started: Option<Instant>,
 }
 
 impl Secondary {
@@ -285,6 +284,7 @@ impl Secondary {
             state:  State::Idle,
             next:   State::Idle,
 
+            started: Utc::now(),
             timeout: timeout,
             recover: recover,
             payload: None,
@@ -292,7 +292,6 @@ impl Secondary {
 
             bus: Some(bus),
             step: Some(step),
-            started: Some(Instant::now()),
         }
     }
 
@@ -302,7 +301,7 @@ impl Secondary {
         info!("Secondary `{}` state recovered from `{}`", follower.serial, path.as_ref().display());
         follower.bus = Some(bus);
         follower.step = Some(step);
-        follower.started = Some(Instant::now());
+        follower.started = Utc::now();
         Ok(follower)
     }
 
@@ -375,7 +374,7 @@ impl Secondary {
     }
 
     fn checkpoint(&mut self, state: State, payload: Option<Vec<u8>>) -> Result<(), Error> {
-        self.started = Some(Instant::now());
+        self.started = Utc::now();
         self.next = state;
         self.payload = payload;
         if let Some(ref path) = self.recover {
@@ -395,7 +394,7 @@ impl Secondary {
     }
 
     fn is_timeout(&self) -> bool {
-        Instant::now().duration_since(self.started.expect("started")) > self.timeout
+        Utc::now().signed_duration_since(self.started).to_std().expect("duration") > self.timeout
     }
 
     fn read_wake_up(&mut self) -> Result<(String, Uuid), Error> {

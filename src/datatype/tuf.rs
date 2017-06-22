@@ -1,5 +1,5 @@
 use base64;
-use chrono::{DateTime, UTC};
+use chrono::{DateTime, Utc};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use pem;
@@ -94,7 +94,7 @@ impl<'de> Deserialize<'de> for RoleName {
 pub struct RoleData {
     pub _type:   RoleName,
     pub version: u64,
-    pub expires: DateTime<UTC>,
+    pub expires: DateTime<Utc>,
     pub keys:    Option<HashMap<String, Key>>,        // root only
     pub roles:   Option<HashMap<RoleName, RoleMeta>>, // root only
     pub targets: Option<HashMap<String, TufMeta>>,    // targets only
@@ -103,7 +103,7 @@ pub struct RoleData {
 
 impl RoleData {
     pub fn expired(&self) -> bool {
-        self.expires < UTC::now()
+        self.expires < Utc::now()
     }
 }
 
