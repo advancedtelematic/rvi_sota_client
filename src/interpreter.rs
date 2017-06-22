@@ -64,7 +64,7 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
                 queue(Command::SendInstallReport(result.into_report()));
             }
 
-            Event::InstalledPackagesNeeded => {
+            Event::InstalledPackagesNeeded if self.pacman != PacMan::Off => {
                 self.pacman
                     .installed_packages()
                     .map(|packages| queue(Command::SendInstalledPackages(packages)))
