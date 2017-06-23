@@ -203,19 +203,16 @@ fn primary_target(targets: &HashMap<String, TufMeta>, primary_ecu: &str, treehub
     let primaries = targets.iter()
         .map(|(refname, meta)| match meta.custom {
             Some(ref custom) if custom.ecuIdentifier == primary_ecu => {
-                Ok(Some(OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?))
+                Some(OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub))
             }
-            Some(_) => Ok(None),
-            None => Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
+            _ => None
         })
-        .collect::<Result<Vec<Option<_>>, _>>()?
-        .into_iter()
         .filter_map(|pkg| if pkg.is_some() { pkg } else { None })
-        .collect::<Vec<OstreePackage>>();
+        .collect::<Vec<Result<_, _>>>();
 
     match primaries.len() {
         0 => Ok(None),
-        1 => Ok(Some(primaries.into_iter().nth(0).expect("primary package"))),
+        1 => Ok(Some(primaries.into_iter().nth(0).expect("primary package")?)),
         _ => Err(Error::UptaneTargets("multiple primary targets".into()))
     }
 }
@@ -224,8 +221,14 @@ fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
     let json = verified.json.unwrap_or(Vec::new());
     let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
     let payloads = targets.into_iter()
-        .map(|(serial, _)| (serial, hashmap!{State::Verify => json.clone()}))
-        .collect::<Payloads>();
+        .map(|(_, meta)| {
+            if let Some(custom) = meta.custom {
+                Ok((custom.ecuIdentifier, hashmap!{State::Verify => json.clone()}))
+            } else {
+                Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
+            }
+        })
+        .collect::<Result<Payloads, Error>>()?;
     if payloads.len() == 0 {
         Err(Error::UptaneTargets("no targets found".into()))
     } else {
