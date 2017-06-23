@@ -308,6 +308,7 @@ impl Secondary {
     /// Block until a wake-up signal is received then read new transaction
     /// messages until we reach a terminating state or time-out.
     pub fn listen(&mut self) -> Result<(), Error> {
+        info!("Starting a Secondary ECU listener for serial `{}`", self.serial);
         while self.state == State::Idle {
             self.read_wake_up()
                 .and_then(|(serial, txid)| {

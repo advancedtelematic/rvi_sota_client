@@ -78,6 +78,12 @@ pub enum Event {
 
 impl Display for Event {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        write!(f, "{:?}", self)
+        match *self {
+            Event::UptaneTargetsUpdated(ref verified) => {
+                write!(f, "UptaneTargetsUpdated(role: {}, data: {:?}, new_ver: {}, old_ver: {})",
+                       verified.role, verified.data, verified.new_ver, verified.old_ver)
+            }
+            _ => write!(f, "{:?}", self)
+        }
     }
 }

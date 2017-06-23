@@ -3,7 +3,7 @@ use hex::FromHex;
 use serde_json as json;
 use std::fmt::Debug;
 use std::ffi::OsStr;
-use std::fs::{self, File};
+use std::fs::File;
 use std::io::{self, BufReader};
 use std::path::Path;
 use std::process::{Command, Output};
@@ -15,9 +15,9 @@ use http::{Client, Response};
 use pacman::Credentials;
 
 
+const REMOTE_NAME: &'static str = "sota-remote";
 const NEW_PACKAGE: &'static str = "/tmp/sota-package";
 const BOOT_BRANCH: &'static str = "/usr/share/sota/branchname";
-const REMOTE_PATH: &'static str = "/etc/ostree/remotes.d/sota-remote.conf";
 
 
 /// Empty container for static `OSTree` functions.
@@ -32,14 +32,12 @@ impl Ostree {
             .env("OSTREE_BOOT_PARTITION", "/boot")
             .output()
             .map_err(|err| Error::OSTree(err.to_string()))
-            .and_then(|output| {
-                if output.status.success() {
-                    Ok(output)
-                } else {
-                    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-                    let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
-                    Err(Error::OSTree(format!("stdout: {}\nstderr: {}", stdout, stderr)))
-                }
+            .and_then(|output| if output.status.success() {
+                Ok(output)
+            } else {
+                let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+                let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+                Err(Error::OSTree(format!("stdout: {}\nstderr: {}", stdout, stderr)))
             })
     }
 
@@ -95,7 +93,7 @@ impl OstreePackage {
         }
         self.get_delta(&*creds.client, &self.pullUri, &from.commit)
             .and_then(|dir| Ostree::run(&["static-delta", "apply-offline", &dir]))
-            .or_else(|_| self.pull_commit("sota-remote", creds))
+            .or_else(|_| self.pull_commit(REMOTE_NAME, creds))
             .map(|_| ())?;
 
         let output = Ostree::run(&["admin", "deploy", "--karg-proc-cmdline", &self.commit])?;
@@ -157,16 +155,8 @@ impl OstreePackage {
 
     /// Pull a commit from a remote repository with `ostree pull`.
     pub fn pull_commit(&self, remote: &str, creds: &Credentials) -> Result<Output, Error> {
+        let _ = self.add_remote(remote, creds)?;
         debug!("pulling from ostree remote: {}", remote);
-        if ! Path::new(REMOTE_PATH).exists() {
-            let output = Ostree::run(&["remote", "list"])?;
-            let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
-            if stdout.contains(remote) {
-                debug!("`ostree remote list`'s stdout, '{}', contains '{}'", stdout, remote);
-            } else {
-                let _ = self.add_remote(remote, creds)?;
-            }
-        }
 
         let mut args = vec!["pull".into(), remote.into()];
         if let Some(ref token) = creds.token {
@@ -178,10 +168,8 @@ impl OstreePackage {
 
     /// Add a remote repository with `ostree remote add`.
     pub fn add_remote(&self, remote: &str, creds: &Credentials) -> Result<Output, Error> {
+        let _ = Ostree::run(&["remote", "delete", remote]);
         debug!("adding ostree remote: {}", remote);
-        if Path::new(REMOTE_PATH).exists() {
-            fs::remove_file(REMOTE_PATH)?;
-        }
 
         let mut args = vec!["remote".into(), "add".into(), "--no-gpg-verify".into()];
         if let Some(ref ca) = creds.ca_file {

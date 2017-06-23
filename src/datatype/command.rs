@@ -149,6 +149,10 @@ impl Display for Command {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
             Command::SendInstalledPackages(_) => write!(f, "SendInstalledPackages"),
+            Command::UptaneStartInstall(ref verified) => {
+                write!(f, "UptaneStartInstall(role: {}, data: {:?}, new_ver: {}, old_ver: {})",
+                       verified.role, verified.data, verified.new_ver, verified.old_ver)
+            }
             _ => write!(f, "{:?}", self)
         }
     }
