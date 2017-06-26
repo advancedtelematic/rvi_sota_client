@@ -4,11 +4,11 @@ use serde_json as json;
 use std::io::{BufReader, Read, Write};
 use std::net::Shutdown;
 use std::{fs, thread};
+use unix_socket::{UnixListener, UnixStream};
 
 use datatype::{Command, DownloadFailed, Error, Event};
 use gateway::Gateway;
 use interpreter::CommandExec;
-use unix_socket::{UnixListener, UnixStream};
 
 
 /// The `Socket` gateway is used for communication via Unix Domain Sockets.
@@ -75,7 +75,7 @@ fn handle_event(ev_sock: &str, event: Event) {
     };
 
     let _ = UnixStream::connect(ev_sock)
-        .map_err(|err| debug!("couldn't open events socket: {}", err))
+        .map_err(|err| debug!("skipping event socket broadcast: {}", err))
         .map(|mut stream| {
             stream.write_all(&reply).unwrap_or_else(|err| error!("couldn't write to events socket: {}", err));
             stream.shutdown(Shutdown::Write).unwrap_or_else(|err| error!("couldn't close events socket: {}", err));

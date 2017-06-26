@@ -1,11 +1,12 @@
 use chan::{Sender, Receiver};
+use serde_json as json;
 use std::cell::RefCell;
 use std::process::{self, Command as ShellCommand};
 use std::rc::Rc;
 
 use authenticate::oauth2;
-use datatype::{Auth, Command, Config, EcuCustom, Error, Event, InstallCode, InstallResult,
-               RoleName, RequestStatus, Url};
+use datatype::{Auth, Command, Config, Error, Event, InstallCode, InstallResult,
+               OstreePackage, RoleName, RequestStatus, Url};
 use http::{AuthClient, Client};
 use pacman::{Credentials, PacMan};
 #[cfg(feature = "rvi")]
@@ -35,7 +36,6 @@ pub struct EventInterpreter {
     pub pacman:  PacMan,
     pub auto_dl: bool,
     pub sysinfo: Option<String>,
-    pub treehub: Option<Url>,
 }
 
 impl Interpreter<Event, CommandExec> for EventInterpreter {
@@ -64,7 +64,7 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
                 queue(Command::SendInstallReport(result.into_report()));
             }
 
-            Event::InstalledPackagesNeeded => {
+            Event::InstalledPackagesNeeded if self.pacman != PacMan::Off => {
                 self.pacman
                     .installed_packages()
                     .map(|packages| queue(Command::SendInstalledPackages(packages)))
@@ -100,17 +100,15 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
             }
 
             Event::UptaneInstallComplete(signed) | Event::UptaneInstallFailed(signed) => {
-                queue(Command::UptaneSendManifest(vec![signed]));
+                queue(Command::UptaneSendManifest(Some(signed)));
             }
 
             Event::UptaneManifestNeeded if self.pacman == PacMan::Uptane => {
-                queue(Command::UptaneSendManifest(Vec::new()));
+                queue(Command::UptaneSendManifest(None));
             }
 
             Event::UptaneTargetsUpdated(targets) => {
-                for pkg in Uptane::extract_packages(targets, self.treehub.as_ref().expect("treehub url")) {
-                    queue(Command::UptaneStartInstall(pkg));
-                }
+                queue(Command::UptaneStartInstall(targets));
             }
 
             _ => ()
@@ -149,10 +147,7 @@ impl Interpreter<CommandExec, Event> for  CommandInterpreter {
         info!("CommandInterpreter received: {}", &exec.cmd);
         let event = match self.process_command(exec.cmd, etx) {
             Ok(ev) => ev,
-            Err(Error::HttpAuth(resp)) => {
-                error!("{}", resp);
-                Event::NotAuthenticated
-            }
+            Err(Error::HttpAuth(resp)) => { error!("{}", resp); Event::NotAuthenticated }
             Err(err) => Event::Error(err.to_string())
         };
         exec.etx.map(|etx| etx.send(event.clone()));
@@ -187,7 +182,7 @@ impl CommandInterpreter {
                 let _ = uptane.get_director(&*self.http, RoleName::Root)?;
                 if uptane.get_director(&*self.http, RoleName::Timestamp)?.is_new() {
                     let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
-                    Event::UptaneTargetsUpdated(targets.data.targets.unwrap_or_default())
+                    Event::UptaneTargetsUpdated(targets)
                 } else {
                     Event::UptaneTimestampUpdated
                 }
@@ -209,8 +204,7 @@ impl CommandInterpreter {
             }
 
             (Command::ListSystemInfo, _) => {
-                let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                Event::FoundSystemInfo(system_info(cmd)?)
+                Event::FoundSystemInfo(self.system_info()?)
             }
 
             (Command::SendInstalledPackages(packages), _) => {
@@ -228,8 +222,7 @@ impl CommandInterpreter {
 
             (Command::SendSystemInfo, _) => {
                 let mut sota = Sota::new(&self.config, &*self.http);
-                let cmd = self.config.device.system_info.as_ref().expect("system_info command not set");
-                sota.send_system_info(system_info(cmd)?.into_bytes())?;
+                sota.send_system_info(self.system_info()?.into_bytes())?;
                 Event::SystemInfoSent
             }
 
@@ -264,7 +257,7 @@ impl CommandInterpreter {
             (Command::StartInstall(id), CommandMode::Sota) => {
                 let mut sota = Sota::new(&self.config, &*self.http);
                 etx.send(Event::InstallingUpdate(id));
-                let result = sota.install_update(&id, &self.get_credentials())?;
+                let result = sota.install_update(&id, &self.credentials())?;
                 if result.result_code.is_success() {
                     Event::InstallComplete(result)
                 } else {
@@ -274,35 +267,31 @@ impl CommandInterpreter {
 
             (Command::Shutdown, _) => process::exit(0),
 
-            (Command::UptaneSendManifest(mut signed), CommandMode::Uptane(uptane)) => {
+            (Command::UptaneSendManifest(signed), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                if signed.is_empty() {
-                    signed.push(uptane.signed_version(None)?);
-                }
+                let signed = match signed {
+                    Some(signed) => signed,
+                    None => {
+                        let version = OstreePackage::get_latest(&uptane.primary_ecu)?.into_version(None);
+                        vec![uptane.private_key.sign_data(json::to_value(version)?, uptane.sig_type)?]
+                    }
+                };
                 uptane.put_manifest(&*self.http, signed)?;
                 Event::UptaneManifestSent
             }
 
-            (Command::UptaneStartInstall(package), CommandMode::Uptane(uptane)) => {
-                let uptane = uptane.borrow_mut();
-                if package.ecu_serial == self.config.uptane.primary_ecu_serial {
-                    let outcome = package.install(&self.get_credentials())?;
-                    let result  = outcome.into_result(package.refName.clone());
-                    let success = result.result_code.is_success();
-                    let version = uptane.signed_version(Some(EcuCustom { operation_result: result }))?;
-                    if success {
-                        Event::UptaneInstallComplete(version)
-                    } else {
-                        Event::UptaneInstallFailed(version)
-                    }
+            (Command::UptaneStartInstall(targets), CommandMode::Uptane(uptane)) => {
+                let mut uptane = uptane.borrow_mut();
+                let (signed, ok) = uptane.install(targets, self.treehub()?, self.credentials())?;
+                if ok {
+                    Event::UptaneInstallComplete(signed)
                 } else {
-                    Event::UptaneInstallNeeded(package)
+                    Event::UptaneInstallFailed(signed)
                 }
             }
 
             (Command::SendInstalledSoftware(_), _) => unreachable!("Command::SendInstalledSoftware expects CommandMode::Rvi"),
             (Command::StartInstall(_), _)          => unreachable!("Command::StartInstall expects CommandMode::Sota"),
-            (Command::UptaneInstallOutcome(_), _)  => unreachable!("Command::UptaneInstallOutcome expects CommandMode::Uptane"),
             (Command::UptaneSendManifest(_), _)    => unreachable!("Command::UptaneSendManifest expects CommandMode::Uptane"),
             (Command::UptaneStartInstall(_), _)    => unreachable!("Command::UptaneStartInstall expects CommandMode::Uptane"),
         };
@@ -310,24 +299,34 @@ impl CommandInterpreter {
         Ok(event)
     }
 
-    fn get_credentials(&self) -> Credentials {
-        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.as_ref()) } else { None };
+    /// Generate a new system information report.
+    fn system_info(&self) -> Result<String, Error> {
+        let cmd = self.config.device.system_info.as_ref()
+            .ok_or_else(|| Error::Config("device.system_info not set".into()))?;
+        ShellCommand::new(cmd)
+            .output()
+            .map_err(|err| Error::SystemInfo(err.to_string()))
+            .and_then(|info| Ok(String::from_utf8(info.stdout)?))
+    }
+
+    /// Retrieve the current access token and device certificates for TLS.
+    fn credentials(&self) -> Credentials {
+        let client = Box::new(AuthClient::from(self.auth.clone()));
+        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.clone()) } else { None };
         let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
-            (Some(tls.ca_file.as_ref()), Some(tls.cert_file.as_ref()), Some(tls.pkey_file.as_ref()))
+            (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
         } else {
             (None, None, None)
         };
-        Credentials { client: &*self.http, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
+        Credentials { client: client, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
     }
-}
 
-
-/// Generate a new system information report.
-pub fn system_info(cmd: &str) -> Result<String, Error> {
-    ShellCommand::new(cmd)
-        .output()
-        .map_err(|err| Error::SystemInfo(err.to_string()))
-        .and_then(|info| Ok(String::from_utf8(info.stdout)?))
+    /// Return the treehub URL.
+    fn treehub(&self) -> Result<Url, Error> {
+        self.config.tls.as_ref()
+            .map(|ref tls| tls.server.join("/treehub"))
+            .ok_or_else(|| Error::Config("tls.server required".into()))
+    }
 }
 
 

@@ -45,7 +45,7 @@ generate: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
-	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET) --features=all
+	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET) --features=docker
 
 doc: ## Generate documentation for the sota crate.
 	$(CARGO) doc --lib --no-deps --release --features=$(FEATURES)

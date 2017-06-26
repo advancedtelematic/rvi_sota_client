@@ -73,11 +73,11 @@ pub struct ResponseData {
 impl Display for ResponseData {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match self.body.len() {
-            0 => write!(f, "Response Code: {}", self.code),
-            n => match str::from_utf8(&self.body) {
-                Ok(text) => write!(f, "Response Code: {}, Body:\n{}", self.code, text),
-                Err(_)   => write!(f, "Response Code: {}, Body: {} bytes", self.code, n),
-            }
+            len if len < 100*1024 => match str::from_utf8(&self.body) {
+                Ok(text) => write!(f, "Response Code: {}, Body: {} bytes...\n{}", self.code, len, text),
+                Err(_)   => write!(f, "Response Code: {}, Body: {} bytes", self.code, len)
+            },
+            len => write!(f, "Response Code: {}, Body: {} bytes", self.code, len)
         }
     }
 }

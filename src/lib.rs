@@ -11,6 +11,9 @@ extern crate hyper;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate maplit;
+extern crate net2;
 extern crate openssl;
 extern crate pem;
 extern crate ring;
@@ -29,6 +32,7 @@ extern crate untrusted;
 extern crate url;
 extern crate uuid;
 
+pub mod atomic;
 pub mod authenticate;
 pub mod broadcast;
 pub mod datatype;

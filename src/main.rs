@@ -13,7 +13,7 @@ use chan::{Sender, Receiver};
 use chan_signal::Signal;
 use env_logger::LogBuilder;
 use getopts::Options;
-use log::{LogLevelFilter, LogRecord};
+use log::LogLevelFilter;
 use std::{env, process, thread};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -38,6 +38,7 @@ use sota::uptane::Uptane;
 
 
 macro_rules! exit {
+    ($code:expr, $fmt:expr) => { exit!($code, "{}", $fmt) };
     ($code:expr, $fmt:expr, $($arg:tt)*) => {{
         println!($fmt, $($arg)*);
         process::exit($code);
@@ -49,7 +50,7 @@ fn main() {
     let version = start_logging();
     let config = build_config(&version);
     TlsClient::init(config.tls_data());
-    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, "{}", err));
+    let auth = config.initial_auth().unwrap_or_else(|err| exit!(2, err));
 
     let (ctx, crx) = chan::async::<CommandExec>();
     let (etx, erx) = chan::async::<Event>();
@@ -74,7 +75,7 @@ fn main() {
 
         if config.gateway.dbus {
             #[cfg(not(feature = "rvi"))]
-            exit!(2, "{}", "dbus gateway requires 'rvi' binary feature");
+            exit!(2, "dbus gateway requires 'rvi' binary feature");
             #[cfg(feature = "rvi")] {
                 let dbus_ctx = ctx.clone();
                 let dbus_erx = broadcast.subscribe();
@@ -92,7 +93,7 @@ fn main() {
 
         if config.gateway.rvi {
             #[cfg(not(feature = "rvi"))]
-            exit!(2, "{}", "rvi gateway requires 'rvi' binary feature");
+            exit!(2, "rvi gateway requires 'rvi' binary feature");
             #[cfg(feature = "rvi")] {
                 let services = Services::new(config.rvi.clone(), format!("{}", config.device.uuid), etx.clone());
                 let mut edge = Edge::new(services, config.network.rvi_edge_server.clone(), config.rvi.client.clone());
@@ -102,7 +103,7 @@ fn main() {
 
         if config.gateway.socket {
             #[cfg(not(feature = "socket"))]
-            exit!(2, "{}", "socket gateway requires 'socket' binary feature");
+            exit!(2, "socket gateway requires 'socket' binary feature");
             #[cfg(feature = "socket")] {
                 let socket_ctx = ctx.clone();
                 let socket_erx = broadcast.subscribe();
@@ -116,7 +117,7 @@ fn main() {
 
         if config.gateway.websocket {
             #[cfg(not(feature = "websocket"))]
-            exit!(2, "{}", "websocket gateway requires 'websocket' binary feature");
+            exit!(2, "websocket gateway requires 'websocket' binary feature");
             #[cfg(feature = "websocket")] {
                 let ws_ctx = ctx.clone();
                 let ws_erx = broadcast.subscribe();
@@ -132,7 +133,6 @@ fn main() {
             pacman:  config.device.package_manager.clone(),
             auto_dl: config.device.auto_download,
             sysinfo: config.device.system_info.clone(),
-            treehub: config.tls.as_ref().map_or(None, |tls| Some(tls.server.join("/treehub"))),
         };
         let ei_erx = broadcast.subscribe();
         let ei_ctx = ctx.clone();
@@ -167,16 +167,11 @@ fn main() {
 
 fn start_logging() -> String {
     let version = option_env!("SOTA_VERSION").unwrap_or("unknown");
-
     let mut builder = LogBuilder::new();
-    builder.format(move |record: &LogRecord| {
-        let timestamp = format!("{}", time::now_utc().rfc3339());
-        format!("{} ({}): {} - {}", timestamp, version, record.level(), record.args())
-    });
+    builder.format(move |log| format!("{} ({}): {} - {}", time::now_utc().rfc3339(), version, log.level(), log.args()));
     builder.filter(Some("hyper"), LogLevelFilter::Info);
     builder.parse(&env::var("RUST_LOG").unwrap_or_else(|_| "INFO".to_string()));
     builder.init().expect("builder already initialized");
-
     version.to_string()
 }
 
@@ -200,8 +195,8 @@ fn start_update_poller(interval: u64, ctx: &Sender<CommandExec>) {
 }
 
 fn build_config(version: &str) -> Config {
-    let args     = env::args().collect::<Vec<String>>();
-    let program  = args[0].clone();
+    let args = env::args().collect::<Vec<_>>();
+    let program = &args[0];
     let mut opts = Options::new();
 
     opts.optflag("h", "help", "print this help menu then quit");
@@ -260,12 +255,15 @@ fn build_config(version: &str) -> Config {
     opts.optopt("", "uptane-metadata-path", "change the directory used to save Uptane metadata.", "PATH");
     opts.optopt("", "uptane-private-key-path", "change the path to the private key for the primary ECU", "PATH");
     opts.optopt("", "uptane-public-key-path", "change the path to the public key for the primary ECU", "PATH");
+    opts.optopt("", "uptane-atomic-wake-up", "change the atomic transaction UDP multicast wake-up address", "IP:PORT");
+    opts.optopt("", "uptane-atomic-message", "change the atomic transaction UDP multicast message address", "IP:PORT");
+    opts.optopt("", "uptane-atomic-timeout-sec", "change the atomic update timeout duration", "SEC");
 
     let cli = opts.parse(&args[1..]).expect("couldn't parse args");
     if cli.opt_present("help") {
-        exit!(0, "{}", opts.usage(&format!("Usage: {} [options]", program)));
+        exit!(0, opts.usage(&format!("{} [options]", program)));
     } else if cli.opt_present("version") {
-        exit!(0, "{}", version);
+        exit!(0, version);
     }
     let file = cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()).expect("No config provided");
     let mut config = Config::load(&file).expect("Error loading config");
@@ -323,6 +321,9 @@ fn build_config(version: &str) -> Config {
     cli.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
     cli.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
     cli.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
+    cli.opt_str("uptane-atomic-wake-up").map(|addr| config.uptane.atomic_wake_up = addr.parse().expect("Invalid uptane-atomic-wake-up"));
+    cli.opt_str("uptane-atomic-message").map(|addr| config.uptane.atomic_message = addr.parse().expect("Invalid uptane-atomic-message"));
+    cli.opt_str("uptane-atomic-timeout-sec").map(|sec| config.uptane.atomic_timeout_sec = sec.parse().expect("Invalid uptane-atomic-timeout-sec"));
 
     if cli.opt_present("print") {
         exit!(0, "{:#?}", config);

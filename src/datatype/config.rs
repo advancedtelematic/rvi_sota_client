@@ -4,7 +4,7 @@ use std::ops::Deref;
 use toml;
 use uuid::Uuid;
 
-use datatype::{Auth, ClientCredentials, Error, SocketAddr, Url};
+use datatype::{Auth, ClientCredentials, Error, SocketAddrV4, Url};
 use http::TlsData;
 use pacman::PacMan;
 
@@ -345,8 +345,8 @@ impl Defaultify<GatewayConfig> for ParsedGatewayConfig {
 /// The [network] configuration section.
 #[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
 pub struct NetworkConfig {
-    pub http_server:          SocketAddr,
-    pub rvi_edge_server:      SocketAddr,
+    pub http_server:          SocketAddrV4,
+    pub rvi_edge_server:      SocketAddrV4,
     pub socket_commands_path: String,
     pub socket_events_path:   String,
     pub websocket_server:     String
@@ -366,8 +366,8 @@ impl Default for NetworkConfig {
 
 #[derive(Deserialize, Default)]
 struct ParsedNetworkConfig {
-    http_server:          Option<SocketAddr>,
-    rvi_edge_server:      Option<SocketAddr>,
+    http_server:          Option<SocketAddrV4>,
+    rvi_edge_server:      Option<SocketAddrV4>,
     socket_commands_path: Option<String>,
     socket_events_path:   Option<String>,
     websocket_server:     Option<String>
@@ -474,6 +474,9 @@ pub struct UptaneConfig {
     pub metadata_path:      String,
     pub private_key_path:   String,
     pub public_key_path:    String,
+    pub atomic_wake_up:     SocketAddrV4,
+    pub atomic_message:     SocketAddrV4,
+    pub atomic_timeout_sec: u64,
 }
 
 impl Default for UptaneConfig {
@@ -485,6 +488,9 @@ impl Default for UptaneConfig {
             metadata_path:      "/usr/local/etc/sota/metadata".to_string(),
             private_key_path:   "/usr/local/etc/sota/ecuprimary.pem".to_string(),
             public_key_path:    "/usr/local/etc/sota/ecuprimary.pub".to_string(),
+            atomic_wake_up:     "232.0.0.011:23211".parse().unwrap(),
+            atomic_message:     "232.0.0.012:23212".parse().unwrap(),
+            atomic_timeout_sec: 60,
         }
     }
 }
@@ -497,6 +503,9 @@ struct ParsedUptaneConfig {
     metadata_path:      Option<String>,
     private_key_path:   Option<String>,
     public_key_path:    Option<String>,
+    atomic_wake_up:     Option<SocketAddrV4>,
+    atomic_message:     Option<SocketAddrV4>,
+    atomic_timeout_sec: Option<u64>,
 }
 
 impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
@@ -509,6 +518,9 @@ impl Defaultify<UptaneConfig> for ParsedUptaneConfig {
             metadata_path:      self.metadata_path.unwrap_or(default.metadata_path),
             private_key_path:   self.private_key_path.unwrap_or(default.private_key_path),
             public_key_path:    self.public_key_path.unwrap_or(default.public_key_path),
+            atomic_wake_up:     self.atomic_wake_up.unwrap_or(default.atomic_wake_up),
+            atomic_message:     self.atomic_message.unwrap_or(default.atomic_message),
+            atomic_timeout_sec: self.atomic_timeout_sec.unwrap_or(default.atomic_timeout_sec),
         }
     }
 }
@@ -600,6 +612,9 @@ mod tests {
         metadata_path = "/usr/local/etc/sota/metadata"
         private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
         public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
+        atomic_wake_up = "232.0.0.011:23211"
+        atomic_message = "232.0.0.012:23212"
+        atomic_timeout_sec = 60
         "#;
 
 

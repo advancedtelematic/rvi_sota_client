@@ -9,6 +9,8 @@ use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
+use std::net::AddrParseError;
+use std::num::ParseIntError;
 use std::str::Utf8Error;
 use std::string::FromUtf8Error;
 use std::sync::PoisonError;
@@ -18,6 +20,7 @@ use toml::de::Error as TomlError;
 use tungstenite::Error as WebsocketError;
 use url::ParseError as UrlParseError;
 
+use atomic::State;
 use datatype::Event;
 use http::ResponseData;
 use interpreter::CommandExec;
@@ -26,6 +29,12 @@ use interpreter::CommandExec;
 /// System-wide errors that are returned from `Result` type failures.
 #[derive(Debug)]
 pub enum Error {
+    Addr(AddrParseError),
+    AtomicAbort(String),
+    AtomicPayload,
+    AtomicSigned,
+    AtomicState(State, State),
+    AtomicTimeout,
     Base64(Base64Error),
     Client(String),
     Command(String),
@@ -37,6 +46,7 @@ pub enum Error {
     HttpAuth(ResponseData),
     Hyper(HyperError),
     Io(IoError),
+    Int(ParseIntError),
     Json(SerdeJsonError),
     KeyNotFound(String),
     KeySign(String),
@@ -62,6 +72,7 @@ pub enum Error {
     UptaneMissingKeys,
     UptaneMissingRoles,
     UptaneRole(String),
+    UptaneTargets(String),
     UptaneThreshold(String),
     UptaneVersion,
     UrlParse(UrlParseError),
@@ -73,6 +84,12 @@ pub enum Error {
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
+            Error::Addr(ref err)        => format!("Address parse error: {}", err),
+            Error::AtomicAbort(ref err) => format!("Atomic transaction aborted: {}", err),
+            Error::AtomicPayload        => "Transaction payload too large".into(),
+            Error::AtomicSigned         => "Commit or Abort state needs TufSigned".into(),
+            Error::AtomicState(from, to) => format!("Atomic transition invalid: {:?} -> {:?}", from, to),
+            Error::AtomicTimeout        => "Transaction timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),
             Error::Command(ref err)     => format!("Unknown Command: {}", err),
@@ -84,6 +101,7 @@ impl Display for Error {
             Error::HttpAuth(ref err)    => format!("HTTP authorization error: {}", err),
             Error::Hyper(ref err)       => format!("Hyper error: {}", err),
             Error::Io(ref err)          => format!("IO error: {}", err),
+            Error::Int(ref err)         => format!("Integer parse error: {}", err),
             Error::Json(ref err)        => format!("JSON parse error: {}", err),
             Error::KeyNotFound(ref err) => format!("Key not found: {}", err),
             Error::KeySign(ref err)     => format!("Key signing error: {}", err),
@@ -109,7 +127,8 @@ impl Display for Error {
             Error::UptaneMissingKeys    => "Uptane: missing `keys` field".into(),
             Error::UptaneMissingRoles   => "Uptane: missing `roles` field".into(),
             Error::UptaneRole(ref err)  => format!("Uptane role: {}", err),
-            Error::UptaneThreshold(ref err) => format!("Uptane role threshold not met: {}", err),
+            Error::UptaneTargets(ref err) => format!("Uptane targets: {}", err),
+            Error::UptaneThreshold(ref err) => format!("Uptane metadata: {}", err),
             Error::UptaneVersion        => "Uptane: metadata version older than current".into(),
             Error::UrlParse(ref err)    => format!("Url parse error: {}", err),
             Error::Utf8(ref err)        => format!("Utf8 error: {}", err),
@@ -146,6 +165,7 @@ macro_rules! derive_from {
 }
 
 derive_from!([
+    AddrParseError   => Addr,
     Base64Error      => Base64,
     ChronoParseError => DateTime,
     FromHexError     => Hex,
@@ -153,6 +173,7 @@ derive_from!([
     HyperError       => Hyper,
     IoError          => Io,
     OpensslErrors    => Openssl,
+    ParseIntError    => Int,
     PemError         => Pem,
     RecvError        => Recv,
     RingError        => Ring,

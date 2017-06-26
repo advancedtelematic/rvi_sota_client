@@ -4,7 +4,7 @@ use hyper::mime::{Mime, SubLevel, TopLevel};
 use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
 use serde_json as json;
-use std::net::SocketAddr;
+use std::net::SocketAddrV4;
 use std::thread;
 
 use datatype::Event;
@@ -14,7 +14,7 @@ use interpreter::CommandExec;
 
 /// The `Http` gateway parses `Command`s from the body of incoming requests.
 pub struct Http {
-    pub server: SocketAddr
+    pub server: SocketAddrV4
 }
 
 impl Gateway for Http {

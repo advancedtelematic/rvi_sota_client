@@ -4,13 +4,18 @@ use crypto::sha2::Sha256;
 use hex::FromHex;
 use pem;
 use serde_json as json;
+use std::{mem, thread};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
+use std::net::SocketAddrV4;
+use std::time::Duration;
 
-use datatype::{Config, EcuCustom, EcuManifests, Error, Key, KeyType, OstreePackage,
-               PrivateKey, RoleData, RoleMeta, RoleName, Signature, SignatureType,
-               TufMeta, TufRole, TufSigned, Url, Util, canonicalize_json};
+use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step};
+use datatype::{Config, EcuCustom, EcuManifests, Error, InstallCode, InstallOutcome,
+               Key, KeyType, OstreePackage, PrivateKey, RoleData, RoleMeta, RoleName,
+               Signature, SignatureType, TufMeta, TufSigned, Url, Util, canonicalize_json};
 use http::{Client, Response};
+use pacman::Credentials;
 
 
 /// Uptane service to communicate with.
@@ -42,6 +47,10 @@ pub struct Uptane {
 
     pub director_verifier: Verifier,
     pub repo_verifier:     Verifier,
+
+    pub atomic_wake_addr: SocketAddrV4,
+    pub atomic_msg_addr:  SocketAddrV4,
+    pub atomic_timeout:   Duration,
 }
 
 impl Uptane {
@@ -63,6 +72,10 @@ impl Uptane {
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
+
+            atomic_wake_addr: *config.uptane.atomic_wake_up,
+            atomic_msg_addr:  *config.uptane.atomic_message,
+            atomic_timeout: Duration::from_secs(config.uptane.atomic_timeout_sec),
         };
 
         uptane.add_root_keys(Service::Director)?;
@@ -135,22 +148,15 @@ impl Uptane {
     pub fn get_metadata(&mut self, client: &Client, service: Service, role: RoleName) -> Result<Verified, Error> {
         trace!("getting {} role from {} service", role, service);
         let json = self.get(client, service, &format!("{}.json", role))?;
-        let verified = self.verify_metadata(service, role, json::from_slice::<TufSigned>(&json)?)?;
-        if self.persist_metadata && verified.is_new() {
+        let signed = json::from_slice::<TufSigned>(&json)?;
+        let mut verified = self.verifier(service).verify_signed(role, signed)?;
+        if verified.is_new() && self.persist_metadata {
             let dir = format!("{}/{}", self.metadata_path, service);
             Util::write_file(&format!("{}/{}.json", dir, role), &json)?;
             Util::write_file(&format!("{}/{}.{}.json", dir, verified.new_ver, role), &json)?;
+            verified.json = Some(json);
         }
         Ok(verified)
-    }
-
-    /// Verify the signed TUF metadata for a given service and role.
-    fn verify_metadata(&mut self, service: Service, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
-        trace!("verifying {} metadata for {} service", role, service);
-        let data = json::from_value::<RoleData>(signed.signed.clone())?;
-        let new_ver = self.verifier(service).verify_signed(role, signed)?;
-        let old_ver = self.verifier(service).set_version(role, new_ver)?;
-        Ok(Verified { role: role, data: data, new_ver: new_ver, old_ver: old_ver })
     }
 
     /// Send a signed manifest with a list of signed objects to the Director server.
@@ -160,24 +166,100 @@ impl Uptane {
         Ok(self.put(client, Service::Director, "manifest", json::to_vec(&manifest)?)?)
     }
 
-    /// Sign the primary's `EcuVersion` for sending to the Director server.
-    pub fn signed_version(&self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
-        let version = OstreePackage::get_latest(&self.primary_ecu)?.into_version(custom);
-        self.private_key.sign_data(json::to_value(version)?, self.sig_type)
+    /// Start a transaction to install the verified targets to their respective ECUs.
+    pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Vec<TufSigned>, bool), Error> {
+        let bus = || -> Result<Box<Bus>, Error> {
+            Ok(Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?))
+        };
+
+        if let Some(ref targets) = verified.data.targets {
+            if let Some(pkg) = primary_target(targets, &self.primary_ecu, &treehub)? {
+                let inst = Box::new(self.new_installer(pkg, creds));
+                let mut ecu = Secondary::new(self.primary_ecu.clone(), bus()?, inst, self.atomic_timeout, None);
+                thread::spawn(move || ecu.listen());
+            }
+        }
+
+        let mut primary = Primary::new(into_payloads(verified)?, bus()?, None, self.atomic_timeout, None);
+        match primary.commit() {
+            Ok(()) => Ok((primary.into_signed(), true)),
+            Err(Error::AtomicAbort(_)) |
+            Err(Error::AtomicTimeout)  => Ok((primary.into_signed(), false)),
+            Err(err) => Err(err)
+        }
     }
 
-    /// Extract a list of `OstreePackage`s from the targets.json metadata.
-    pub fn extract_packages(targets: HashMap<String, TufMeta>, treehub: &Url) -> Vec<OstreePackage> {
-        targets.into_iter()
-            .filter_map(|(refname, mut meta)| {
-                if let Some(commit) = meta.hashes.remove("sha256") {
-                    let ecu = meta.custom.expect("custom field").ecuIdentifier;
-                    Some(OstreePackage::new(ecu, refname, commit, "".into(), treehub))
-                } else {
-                    error!("couldn't get sha256 for {}", refname);
-                    None
-                }
-            }).collect::<Vec<_>>()
+    fn new_installer(&self, pkg: OstreePackage, creds: Credentials) -> PrimaryInstaller {
+        PrimaryInstaller {
+            pkg: pkg,
+            sig_type: self.sig_type,
+            priv_key: self.private_key.clone(),
+            credentials: creds
+        }
+    }
+}
+
+fn primary_target(targets: &HashMap<String, TufMeta>, primary_ecu: &str, treehub: &Url) -> Result<Option<OstreePackage>, Error> {
+    let primaries = targets.iter()
+        .map(|(refname, meta)| match meta.custom {
+            Some(ref custom) if custom.ecuIdentifier == primary_ecu => {
+                Some(OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub))
+            }
+            _ => None
+        })
+        .filter_map(|pkg| if pkg.is_some() { pkg } else { None })
+        .collect::<Vec<Result<_, _>>>();
+
+    match primaries.len() {
+        0 => Ok(None),
+        1 => Ok(Some(primaries.into_iter().nth(0).expect("primary package")?)),
+        _ => Err(Error::UptaneTargets("multiple primary targets".into()))
+    }
+}
+
+fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
+    let json = verified.json.unwrap_or(Vec::new());
+    let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
+    let payloads = targets.into_iter()
+        .map(|(_, meta)| {
+            if let Some(custom) = meta.custom {
+                Ok((custom.ecuIdentifier, hashmap!{State::Verify => json.clone()}))
+            } else {
+                Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
+            }
+        })
+        .collect::<Result<Payloads, Error>>()?;
+    if payloads.len() == 0 {
+        Err(Error::UptaneTargets("no targets found".into()))
+    } else {
+        Ok(payloads)
+    }
+}
+
+
+/// Define an installer for an `OstreePackage` as part of a transaction.
+pub struct PrimaryInstaller {
+    pkg: OstreePackage,
+    sig_type: SignatureType,
+    priv_key: PrivateKey,
+    credentials: Credentials,
+}
+
+impl PrimaryInstaller {
+    fn signed(&self, outcome: InstallOutcome) -> Result<Option<TufSigned>, Error> {
+        let custom = EcuCustom { operation_result: outcome.into_result(self.pkg.refName.clone()) };
+        let version = OstreePackage::get_latest(&self.pkg.ecu_serial)?.into_version(Some(custom));
+        Ok(Some(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?))
+    }
+}
+
+impl Step for PrimaryInstaller {
+    fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+        match state {
+            State::Idle | State::Ready | State::Verify | State::Prepare => Ok(None),
+            State::Commit => self.signed(self.pkg.install(&self.credentials)?),
+            State::Abort  => self.signed(InstallOutcome::new(InstallCode::INTERNAL_ERROR, "".into(), "aborted".into()))
+        }
     }
 }
 
@@ -214,43 +296,39 @@ impl Verifier {
         }
     }
 
-    pub fn get_version(&self, role: RoleName) -> Result<u64, Error> {
-        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
-        Ok(meta.version)
-    }
+    /// Verify that the signed data is valid.
+    pub fn verify_signed(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
+        let current = {
+            let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("{} not found", role)))?;
+            self.verify_signatures(&meta, &signed)?;
+            meta.version
+        };
 
-    pub fn set_version(&mut self, role: RoleName, version: u64) -> Result<u64, Error> {
-        let meta = self.roles.get_mut(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
-        let old = meta.version;
-        trace!("updating {} version from {} to {}", role, old, version);
-        meta.version = version;
-        Ok(old)
-    }
-
-    /// Verify the signed data then return the version.
-    pub fn verify_signed(&self, role: RoleName, signed: TufSigned) -> Result<u64, Error> {
-        self.verify_signatures(role, &signed)?;
-        let tuf_role = json::from_value::<TufRole>(signed.signed)?;
-        if role != tuf_role._type {
-            Err(Error::UptaneRole(format!("expected `{}`, got `{}`", role, tuf_role._type)))
-        } else if tuf_role.expired() {
+        let data = json::from_value::<RoleData>(signed.signed)?;
+        if data._type != role {
+            Err(Error::UptaneRole(format!("expected `{}`, got `{}`", role, data._type)))
+        } else if data.expired() {
             Err(Error::UptaneExpired)
-        } else if tuf_role.version < self.get_version(role)? {
+        } else if data.version < current {
             Err(Error::UptaneVersion)
+        } else if data.version > current {
+            let meta = self.roles.get_mut(&role).expect("get_mut role");
+            let old = mem::replace(&mut meta.version, data.version);
+            debug!("{} version updated from {} to {}", role, old, data.version);
+            Ok(Verified { role: role, data: data, json: None, new_ver: meta.version, old_ver: old })
         } else {
-            Ok(tuf_role.version)
+            Ok(Verified { role: role, data: data, json: None, new_ver: current, old_ver: current })
         }
     }
 
     /// Verify that a role-defined threshold of signatures successfully validate.
-    pub fn verify_signatures(&self, role: RoleName, signed: &TufSigned) -> Result<(), Error> {
-        let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("no such role: {}", role)))?;
+    pub fn verify_signatures(&self, meta: &RoleMeta, signed: &TufSigned) -> Result<(), Error> {
         let cjson = canonicalize_json(&json::to_vec(&signed.signed)?)?;
         let valid = signed.signatures
             .iter()
             .filter(|sig| meta.keyids.contains(&sig.keyid))
             .filter(|sig| self.verify_data(&cjson, sig))
-            .map(|sig| &sig.keyid)
+            .map(|sig| &sig.sig)
             .collect::<HashSet<_>>();
 
         if (valid.len() as u64) < meta.threshold {
@@ -288,9 +366,11 @@ impl Verifier {
 }
 
 /// Encapsulate successfully verified data with additional metadata.
+#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct Verified {
     pub role: RoleName,
     pub data: RoleData,
+    pub json: Option<Vec<u8>>,
     pub new_ver: u64,
     pub old_ver: u64,
 }
@@ -305,9 +385,9 @@ impl Verified {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use pem;
     use std::collections::HashMap;
+    use std::net::Ipv4Addr;
 
     use datatype::{EcuManifests, EcuVersion, TufCustom, TufMeta, TufSigned};
     use http::TestClient;
@@ -317,7 +397,7 @@ mod tests {
         let mut uptane = Uptane {
             director_server:  "http://localhost:8001".parse().unwrap(),
             repo_server:      "http://localhost:8002".parse().unwrap(),
-            metadata_path:    "tests/uptane".into(),
+            metadata_path:    "tests/uptane_basic".into(),
             persist_metadata: false,
 
             primary_ecu: "test-primary-serial".into(),
@@ -329,6 +409,10 @@ mod tests {
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
+
+            atomic_wake_addr: SocketAddrV4::new(Ipv4Addr::new(232,0,0,101), 23211),
+            atomic_msg_addr:  SocketAddrV4::new(Ipv4Addr::new(232,0,0,102), 23212),
+            atomic_timeout:   Duration::from_secs(60),
         };
         uptane.add_root_keys(Service::Director).expect("add director root keys");
         uptane
@@ -345,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_read_manifest() {
-        let bytes = Util::read_file("tests/uptane/director/manifest.json").expect("couldn't read manifest.json");
+        let bytes = Util::read_file("tests/uptane_basic/director/manifest.json").expect("couldn't read manifest.json");
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
         let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
         assert_eq!(ecus.primary_ecu_serial, "<primary_ecu_serial>");
@@ -358,7 +442,7 @@ mod tests {
     #[test]
     fn test_get_targets() {
         let mut uptane = new_uptane();
-        let client = TestClient::from_paths(&["tests/uptane/director/targets.json"]);
+        let client = TestClient::from_paths(&["tests/uptane_basic/director/targets.json"]);
         let verified = uptane.get_director(&client, RoleName::Targets).expect("get targets");
         assert!(verified.is_new());
         let targets = verified.data.targets.expect("missing targets");
@@ -375,7 +459,7 @@ mod tests {
     #[test]
     fn test_get_snapshot() {
         let mut uptane = new_uptane();
-        let client = TestClient::from_paths(&["tests/uptane/director/snapshot.json"]);
+        let client = TestClient::from_paths(&["tests/uptane_basic/director/snapshot.json"]);
         let verified = uptane.get_director(&client, RoleName::Snapshot).expect("couldn't get snapshot");
         let metadata = verified.data.meta.as_ref().expect("missing meta");
         assert!(verified.is_new());
@@ -388,7 +472,7 @@ mod tests {
     #[test]
     fn test_get_timestamp() {
         let mut uptane = new_uptane();
-        let client = TestClient::from_paths(&["tests/uptane/director/timestamp.json"]);
+        let client = TestClient::from_paths(&["tests/uptane_basic/director/timestamp.json"]);
         let verified = uptane.get_director(&client, RoleName::Timestamp).expect("couldn't get timestamp");
         let metadata = verified.data.meta.as_ref().expect("missing meta");
         assert!(verified.is_new());

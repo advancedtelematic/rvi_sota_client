@@ -1,5 +1,5 @@
 use base64;
-use chrono::{DateTime, UTC};
+use chrono::{DateTime, Utc};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use pem;
@@ -19,19 +19,6 @@ pub struct TufSigned {
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
-pub struct TufRole {
-    pub _type:   RoleName,
-    pub expires: DateTime<UTC>,
-    pub version: u64,
-}
-
-impl TufRole {
-    pub fn expired(&self) -> bool {
-        self.expires < UTC::now()
-    }
-}
-
-#[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TufImage {
     pub filepath: String,
     pub fileinfo: TufMeta
@@ -43,6 +30,12 @@ pub struct TufMeta {
     pub hashes: HashMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<TufCustom>,
+}
+
+impl TufMeta {
+    pub fn from(hash_type: String, commit: String) -> Self {
+        TufMeta { length: 0, hashes: hashmap!{ hash_type => commit }, custom: None }
+    }
 }
 
 #[allow(non_snake_case)]
@@ -101,11 +94,17 @@ impl<'de> Deserialize<'de> for RoleName {
 pub struct RoleData {
     pub _type:   RoleName,
     pub version: u64,
-    pub expires: DateTime<UTC>,
+    pub expires: DateTime<Utc>,
     pub keys:    Option<HashMap<String, Key>>,        // root only
     pub roles:   Option<HashMap<RoleName, RoleMeta>>, // root only
     pub targets: Option<HashMap<String, TufMeta>>,    // targets only
     pub meta:    Option<HashMap<String, TufMeta>>,    // timestamp/snapshot only
+}
+
+impl RoleData {
+    pub fn expired(&self) -> bool {
+        self.expires < Utc::now()
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
@@ -139,6 +138,7 @@ pub struct KeyValue {
     pub public: String,
 }
 
+#[derive(Clone)]
 pub struct PrivateKey {
     pub keyid:   String,
     pub der_key: Vec<u8>,
@@ -203,6 +203,22 @@ pub struct EcuVersion {
     pub timeserver_time:          String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub custom: Option<EcuCustom>,
+}
+
+impl EcuVersion {
+    pub fn from(ecu_serial: String, refname: String, meta: TufMeta, custom: Option<EcuCustom>) -> Self {
+        EcuVersion {
+            attacks_detected: "".into(),
+            custom: custom,
+            ecu_serial: ecu_serial,
+            installed_image: TufImage {
+                filepath: refname,
+                fileinfo: meta
+            },
+            previous_timeserver_time: "1970-01-01T00:00:00Z".into(),
+            timeserver_time: "1970-01-01T00:00:00Z".into(),
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
