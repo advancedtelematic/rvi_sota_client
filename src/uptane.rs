@@ -10,7 +10,8 @@ use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step};
+use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step, StepData};
+use images::ImageReader;
 use datatype::{Config, EcuCustom, EcuManifests, Error, InstallCode, InstallOutcome,
                Key, KeyType, OstreePackage, PrivateKey, RoleData, RoleMeta, RoleName,
                Signature, SignatureType, TufMeta, TufSigned, Url, Util, canonicalize_json};
@@ -180,7 +181,8 @@ impl Uptane {
             }
         }
 
-        let mut primary = Primary::new(into_payloads(verified)?, bus()?, None, self.atomic_timeout, None);
+        let (images, payloads) = into_images(verified)?;
+        let mut primary = Primary::new(payloads, images, bus()?, None, self.atomic_timeout, None);
         match primary.commit() {
             Ok(()) => Ok((primary.into_signed(), true)),
             Err(Error::AtomicAbort(_)) |
@@ -217,7 +219,9 @@ fn primary_target(targets: &HashMap<String, TufMeta>, primary_ecu: &str, treehub
     }
 }
 
-fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
+fn into_images(verified: Verified) -> Result<(HashMap<String, ImageReader>, Payloads), Error> {
+    let images = HashMap::new(); // FIXME: download images
+
     let json = verified.json.unwrap_or(Vec::new());
     let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
     let payloads = targets.into_iter()
@@ -229,10 +233,11 @@ fn into_payloads(verified: Verified) -> Result<Payloads, Error> {
             }
         })
         .collect::<Result<Payloads, Error>>()?;
+
     if payloads.len() == 0 {
         Err(Error::UptaneTargets("no targets found".into()))
     } else {
-        Ok(payloads)
+        Ok((images, payloads))
     }
 }
 
@@ -246,17 +251,20 @@ pub struct PrimaryInstaller {
 }
 
 impl PrimaryInstaller {
-    fn signed(&self, outcome: InstallOutcome) -> Result<Option<TufSigned>, Error> {
+    fn signed(&self, outcome: InstallOutcome) -> Result<StepData, Error> {
         let custom = EcuCustom { operation_result: outcome.into_result(self.pkg.refName.clone()) };
         let version = OstreePackage::get_latest(&self.pkg.ecu_serial)?.into_version(Some(custom));
-        Ok(Some(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?))
+        Ok(StepData {
+            report: Some(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?),
+            writer: None,
+        })
     }
 }
 
 impl Step for PrimaryInstaller {
-    fn step(&mut self, state: State, _: &[u8]) -> Result<Option<TufSigned>, Error> {
+    fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
         match state {
-            State::Idle | State::Ready | State::Verify | State::Prepare => Ok(None),
+            State::Idle | State::Ready | State::Verify | State::Fetch => Ok(StepData { report: None, writer: None }),
             State::Commit => self.signed(self.pkg.install(&self.credentials)?),
             State::Abort  => self.signed(InstallOutcome::new(InstallCode::INTERNAL_ERROR, "".into(), "aborted".into()))
         }

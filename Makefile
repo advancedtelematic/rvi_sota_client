@@ -62,7 +62,7 @@ image-uptane: image ## Build a Docker image for running the client with uptane.
 
 clean: ## Remove all compiled libraries, builds and temporary files.
 	$(CARGO) clean
-	@rm -f run/sota_client {,run/}*.{deb,rpm} /tmp/sota-tpm*
+	@rm -rf run/sota_client {,run/}*.{deb,rpm} /tmp/sota-*
 
 deb: client ## Create a new DEB package of the client.
 	$(DOCKER_RUN) $(IMAGE_FPM) run/make_package.sh deb

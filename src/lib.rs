@@ -38,6 +38,7 @@ pub mod broadcast;
 pub mod datatype;
 pub mod gateway;
 pub mod http;
+pub mod images;
 pub mod interpreter;
 pub mod pacman;
 #[cfg(feature = "rvi")]
