@@ -2,7 +2,7 @@
 
 ## State machine
 
-![State machine](3pc.svg)
+![State machine](3pc.png)
 
 ### Basic flow
 
