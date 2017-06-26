@@ -1,8 +1,6 @@
 #!/bin/bash
 
 
-: "${SOTA_GATEWAY_URI:?}"
-
 if [[ -z "$SOTA_NTP_SKIP" ]]; then
   while [[ "$(timedatectl status | grep NTP)" != "NTP synchronized: yes" ]]; do
     echo "Waiting for NTP sync..."
@@ -11,7 +9,7 @@ if [[ -z "$SOTA_NTP_SKIP" ]]; then
 fi
 
 
-set -xeo pipefail
+set -xeuo pipefail
 
 device_id="${SOTA_DEVICE_ID-$(ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
 hardware_id="${SOTA_HARDWARE_ID-$(cat /etc/hostname)}"

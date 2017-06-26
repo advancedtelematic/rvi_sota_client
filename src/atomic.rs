@@ -457,6 +457,7 @@ pub struct Multicast {
     message: UdpSocket,
     wake_addr: SocketAddrV4,
     msg_addr:  SocketAddrV4,
+    msg_buf: [u8; BUFFER_SIZE],
 }
 
 impl Multicast {
@@ -465,7 +466,8 @@ impl Multicast {
             wake_up: Multicast::new_socket(wake_addr)?,
             message: Multicast::new_socket(msg_addr)?,
             wake_addr: wake_addr,
-            msg_addr:  msg_addr,
+            msg_addr: msg_addr,
+            msg_buf: [0; BUFFER_SIZE],
         })
     }
 
@@ -484,11 +486,11 @@ impl Multicast {
     }
 }
 
+
 impl Bus for Multicast {
     fn read_wake_up(&mut self) -> Result<(String, Uuid), Error> {
-        let mut buf = Box::new(vec![0; BUFFER_SIZE]);
-        let (len, _) = self.wake_up.recv_from(&mut buf).map_err(Error::Io)?;
-        Ok(json::from_slice(&buf[..len])?)
+        let (len, _) = self.wake_up.recv_from(&mut self.msg_buf).map_err(Error::Io)?;
+        Ok(json::from_slice(&self.msg_buf[..len])?)
     }
 
     fn write_wake_up(&self, serial: String, txid: Uuid) -> Result<(), Error> {
@@ -498,9 +500,8 @@ impl Bus for Multicast {
     }
 
     fn read_message(&mut self) -> Result<Message, Error> {
-        let mut buf = Box::new(vec![0; BUFFER_SIZE]);
-        let (len, _) = self.message.recv_from(&mut buf).map_err(Error::Io)?;
-        Ok(json::from_slice(&buf[..len])?)
+        let (len, _) = self.message.recv_from(&mut self.msg_buf).map_err(Error::Io)?;
+        Ok(json::from_slice(&self.msg_buf[..len])?)
     }
 
     fn write_message(&self, msg: &Message) -> Result<(), Error> {
