@@ -747,6 +747,7 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{c});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_verify_timeout() {
         let (a, b, c) = serials("verify_timeout");
@@ -763,6 +764,7 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_prepare_timeout() {
         let (a, b, c) = serials("prepare_timeout");
@@ -779,6 +781,7 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_commit_timeout() {
         let (a, b, c) = serials("commit_timeout");
