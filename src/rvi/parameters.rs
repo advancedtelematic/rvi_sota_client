@@ -21,8 +21,10 @@ pub struct Notify {
 }
 
 impl Parameter for Notify {
-    fn handle(&self, remote: &Mutex<RemoteServices>, _: &Mutex<Transfers>) -> Result<Option<Event>, String> {
+    fn handle(&self, remote: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
         remote.lock().unwrap().backend = Some(self.services.clone());
+        let mut transfers = transfers.lock().unwrap();
+        let _ = transfers.image_sizes.insert(format!("{}", self.update_available.update_id), self.update_available.size);
         Ok(Some(Event::UpdateAvailable(self.update_available.clone())))
     }
 }
@@ -41,9 +43,14 @@ impl Parameter for Start {
         let remote = remote.lock().unwrap();
         let mut transfers = transfers.lock().unwrap();
         let image_name = format!("{}", self.update_id);
-        let meta = ImageMeta::new(image_name.clone(), self.checksum.clone(), self.chunkscount);
-        let images_dir = transfers.images_dir.clone();
-        transfers.push(image_name, ImageWriter::new(meta, images_dir));
+        let (dir, size) = {
+            let dir = transfers.images_dir.clone();
+            let size = transfers.image_sizes.get(&image_name).ok_or_else(|| format!("image size not found: {}", image_name))?;
+            (dir, *size)
+        };
+        let meta = ImageMeta::new(image_name.clone(), size, self.chunkscount, self.checksum.clone());
+        let writer = ImageWriter::new(meta, dir).map_err(|err| format!("couldn't create image writer: {}", err))?;
+        transfers.active.insert(image_name, writer);
 
         let chunk = ChunkReceived {
             device:    remote.device_id.clone(),
@@ -69,7 +76,7 @@ impl Parameter for Chunk {
         let remote = remote.lock().unwrap();
         let mut transfers = transfers.lock().unwrap();
 
-        let writer = transfers.get_mut(&format!("{}", self.update_id))
+        let writer = transfers.active.get_mut(&format!("{}", self.update_id))
             .ok_or_else(|| format!("couldn't find transfer for update_id {}", self.update_id))?;
         let chunk = base64::decode(&self.bytes)
             .map_err(|err| format!("couldn't decode chunk for index {}: {}", self.index, err))?;
@@ -102,17 +109,18 @@ pub struct Finish {
 impl Parameter for Finish {
     fn handle(&self, _: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
         let mut transfers = transfers.lock().unwrap();
-        let image_path = {
-            let chunks = transfers.get(&format!("{}", self.update_id))
-                .ok_or_else(|| format!("unknown package: {}", self.update_id))?;
-            chunks.assemble().map_err(|err| format!("couldn't assemble package: {}", err))?
-        };
-        transfers.remove(&format!("{}", self.update_id));
+        let image_name = transfers.active.get(&format!("{}", self.update_id))
+            .ok_or_else(|| format!("unknown package: {}", self.update_id))
+            .and_then(|writer| {
+                writer.verify().map_err(|err| format!("couldn't assemble package: {}", err))?;
+                Ok(writer.meta.image_name.clone())
+            })?;
+        transfers.active.remove(&format!("{}", self.update_id));
         info!("Finished transfer of {}", self.update_id);
 
         let complete = DownloadComplete {
             update_id:    self.update_id,
-            update_image: image_path,
+            update_image: format!("{}/{}", transfers.images_dir, image_name),
             signature:    self.signature.clone()
         };
         Ok(Some(Event::DownloadComplete(complete)))
@@ -135,7 +143,7 @@ pub struct Abort;
 
 impl Parameter for Abort {
     fn handle(&self, _: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
-        transfers.lock().unwrap().clear();
+        transfers.lock().unwrap().active.clear();
         Ok(None)
     }
 }

@@ -205,18 +205,19 @@ impl Primary {
                             Ok(())
                         }
                     }
+
                     Message::Req { txid, serial, image, index } => {
                         if txid != self.txid { return Ok(()) }
                         debug!("request from {} for {} chunk {}", serial, image, index);
-                        let chunk = self.images.get(&image)
+                        let chunk = self.images.get_mut(&image)
                             .ok_or_else(|| Error::Image(format!("not found: {}", image)))
-                            .and_then(|reader| reader.read_chunk(index))?;
+                            .and_then(|reader| reader.read_chunk(index))?.into();
                         self.write_message(&Message::Resp {
                             txid: txid,
                             serial: serial,
                             image: image,
                             index: index,
-                            chunk: chunk
+                            chunk: chunk,
                         })
                     }
                     _ => Ok(())
@@ -357,25 +358,24 @@ impl Secondary {
                         if txid != self.txid() || serial != self.serial { return Ok(()) }
                         self.transition(state, if payload.len() > 0 { Some(payload) } else { None })
                     }
+
                     Message::Resp { txid, serial, image, index, chunk } => {
                         if txid != self.txid() || serial != self.serial { return Ok(()) }
-                        let next_index = {
-                            let writer = self.writers.get_mut(&image)
-                                .ok_or_else(|| Error::Image(format!("writer not found: {}", image)))?;
-                            writer.write_chunk(&chunk, index)?;
-                            if writer.is_complete() {
-                                let _ = writer.assemble()?;
-                                None
-                            } else {
-                                Some(index+1)
-                            }
-                        };
-                        match next_index {
-                            Some(index) => self.request_chunk(image, index),
-                            None => {
-                                self.state = self.next;
-                                self.write_ack()
-                            }
+                        let next_index = self.writers.get_mut(&image)
+                            .ok_or_else(|| Error::Image(format!("writer not found: {}", image)))
+                            .and_then(|writer| {
+                                writer.write_chunk(&chunk, index)?;
+                                if writer.is_complete() {
+                                    Ok(writer.verify().map(|_| None)?)
+                                } else {
+                                    Ok(Some(index+1))
+                                }
+                            })?;
+                        if let Some(index) = next_index {
+                            self.request_chunk(image, index)
+                        } else {
+                            self.state = self.next;
+                            self.write_ack()
                         }
                     }
                     _ => Ok(())
@@ -521,7 +521,6 @@ fn is_waiting(err: &Error) -> bool {
         _ => false
     }
 }
-
 
 
 /// Listens for and sends UDP multicast messages.
@@ -708,10 +707,8 @@ mod tests {
         fn step(&mut self, state: State, payload: &[u8]) -> Result<StepData, Error> {
             if state == State::Fetch {
                 let meta = json::from_reader(payload).expect("read image metadata");
-                Ok(StepData {
-                    report: None,
-                    writer: Some(ImageWriter::new(meta, "/tmp/sota-test-images".into())),
-                })
+                let writer = ImageWriter::new(meta, "/tmp/sota-test-images".into()).expect("writer");
+                Ok(StepData { report: None, writer: Some(writer) })
             } else {
                 Ok(step_data(state))
             }
@@ -990,7 +987,7 @@ mod tests {
         let image_dir = format!("/tmp/sota-test-image-{}", Utc::now().timestamp());
         fs::create_dir_all(&image_dir).expect("create dir");
         Util::write_file(&format!("{}/{}", image_dir, image_name), &buf).expect("write buf");
-        let reader = ImageReader::new(image_name.into(), image_dir, 10).expect("reader");
+        let mut reader = ImageReader::new(image_name.into(), image_dir).expect("reader");
         let meta = reader.image_meta().expect("meta");
 
         let payloads = hashmap!{
