@@ -1,17 +1,16 @@
+use base64;
 use std::sync::Mutex;
 use uuid::Uuid;
 
 use datatype::{Event, DownloadComplete, UpdateAvailable};
+use images::{ImageMeta, ImageWriter, Transfers};
 use rvi::json_rpc::ChunkReceived;
 use rvi::services::{BackendServices, RemoteServices};
-use rvi::transfers::Transfers;
 
 
-/// Each `Parameter` implementation handles a specific kind of RVI client request,
-/// optionally responding with an `Event` on completion.
+/// Each `Parameter` implementation handles a specific kind of RVI client request.
 pub trait Parameter {
-    fn handle(&self, remote: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>)
-              -> Result<Option<Event>, String>;
+    fn handle(&self, remote: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String>;
 }
 
 
@@ -22,8 +21,10 @@ pub struct Notify {
 }
 
 impl Parameter for Notify {
-    fn handle(&self, remote: &Mutex<RemoteServices>, _: &Mutex<Transfers>) -> Result<Option<Event>, String> {
+    fn handle(&self, remote: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
         remote.lock().unwrap().backend = Some(self.services.clone());
+        let mut transfers = transfers.lock().unwrap();
+        let _ = transfers.image_sizes.insert(format!("{}", self.update_available.update_id), self.update_available.size);
         Ok(Some(Event::UpdateAvailable(self.update_available.clone())))
     }
 }
@@ -40,8 +41,16 @@ impl Parameter for Start {
     fn handle(&self, remote: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
         info!("Starting transfer for update_id {}", self.update_id);
         let remote = remote.lock().unwrap();
-        let mut ts = transfers.lock().unwrap();
-        ts.push(self.update_id, self.checksum.clone());
+        let mut transfers = transfers.lock().unwrap();
+        let image_name = format!("{}", self.update_id);
+        let (dir, size) = {
+            let dir = transfers.images_dir.clone();
+            let size = transfers.image_sizes.get(&image_name).ok_or_else(|| format!("image size not found: {}", image_name))?;
+            (dir, *size)
+        };
+        let meta = ImageMeta::new(image_name.clone(), size, self.chunkscount, self.checksum.clone());
+        let writer = ImageWriter::new(meta, dir).map_err(|err| format!("couldn't create image writer: {}", err))?;
+        transfers.active.insert(image_name, writer);
 
         let chunk = ChunkReceived {
             device:    remote.device_id.clone(),
@@ -65,18 +74,23 @@ pub struct Chunk {
 impl Parameter for Chunk {
     fn handle(&self, remote: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
         let remote = remote.lock().unwrap();
-        let mut ts = transfers.lock().unwrap();
+        let mut transfers = transfers.lock().unwrap();
 
-        let transfer = ts.get_mut(self.update_id)
+        let writer = transfers.active.get_mut(&format!("{}", self.update_id))
             .ok_or_else(|| format!("couldn't find transfer for update_id {}", self.update_id))?;
-        transfer.write_chunk(&self.bytes, self.index)
+        let chunk = base64::decode(&self.bytes)
+            .map_err(|err| format!("couldn't decode chunk for index {}: {}", self.index, err))?;
+        writer.write_chunk(&chunk, self.index)
             .map_err(|err| format!("couldn't write chunk: {}", err))
             .and_then(|_| {
                 trace!("wrote chunk {} for package {}", self.index, self.update_id);
+                let mut chunks = writer.chunks_written.iter().map(|n| *n).collect::<Vec<_>>();
+                chunks.sort();
+                chunks.dedup();
                 let chunk = ChunkReceived {
-                    device:    remote.device_id.clone(),
+                    device: remote.device_id.clone(),
                     update_id: self.update_id,
-                    chunks:    transfer.transferred_chunks.clone(),
+                    chunks: chunks,
                 };
                 remote.send_chunk_received(chunk)
                     .map(|_| None)
@@ -94,18 +108,19 @@ pub struct Finish {
 
 impl Parameter for Finish {
     fn handle(&self, _: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
-        let mut ts = transfers.lock().unwrap();
-        let image = {
-            let tfer = ts.get(self.update_id).ok_or_else(|| format!("unknown package: {}", self.update_id))?;
-            let pack = tfer.assemble_package().map_err(|err| format!("couldn't assemble package: {}", err))?;
-            pack.into_os_string().into_string().map_err(|err| format!("couldn't get image: {:?}", err))?
-        };
-        ts.remove(&self.update_id);
+        let mut transfers = transfers.lock().unwrap();
+        let image_name = transfers.active.get(&format!("{}", self.update_id))
+            .ok_or_else(|| format!("unknown package: {}", self.update_id))
+            .and_then(|writer| {
+                writer.verify().map_err(|err| format!("couldn't assemble package: {}", err))?;
+                Ok(writer.meta.image_name.clone())
+            })?;
+        transfers.active.remove(&format!("{}", self.update_id));
         info!("Finished transfer of {}", self.update_id);
 
         let complete = DownloadComplete {
             update_id:    self.update_id,
-            update_image: image,
+            update_image: format!("{}/{}", transfers.images_dir, image_name),
             signature:    self.signature.clone()
         };
         Ok(Some(Event::DownloadComplete(complete)))
@@ -128,7 +143,7 @@ pub struct Abort;
 
 impl Parameter for Abort {
     fn handle(&self, _: &Mutex<RemoteServices>, transfers: &Mutex<Transfers>) -> Result<Option<Event>, String> {
-        transfers.lock().unwrap().clear();
+        transfers.lock().unwrap().active.clear();
         Ok(None)
     }
 }

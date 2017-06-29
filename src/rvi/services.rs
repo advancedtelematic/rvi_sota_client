@@ -9,40 +9,38 @@ use time;
 use uuid::Uuid;
 
 use datatype::{Event, InstallReport, InstalledSoftware, RviConfig, Url};
+use images::Transfers;
 use rvi::json_rpc::{ChunkReceived, DownloadStarted, RpcErr, RpcOk, RpcRequest};
 use rvi::parameters::{Abort, Chunk, Finish, Notify, Parameter, Report, Start};
-use rvi::transfers::Transfers;
 
 
-/// Hold references to RVI service endpoints, currently active `Transfers`, and
-/// where to broadcast outcome `Event`s to.
+/// Hold references to RVI service endpoints, currently active image transfers,
+/// and where to broadcast outcome `Event`s to.
 #[derive(Clone)]
 pub struct Services {
-    pub remote:    Arc<Mutex<RemoteServices>>,
-    pub sender:    Arc<Mutex<Sender<Event>>>,
+    pub remote: Arc<Mutex<RemoteServices>>,
+    pub sender: Arc<Mutex<Sender<Event>>>,
     pub transfers: Arc<Mutex<Transfers>>,
 }
 
 impl Services {
-    /// Set up a new RVI service handler, pruning any inactive `Transfer`s each second.
+    /// Set up a new RVI service handler.
     pub fn new(rvi_cfg: RviConfig, device_id: String, sender: Sender<Event>) -> Self {
-        let transfers = Arc::new(Mutex::new(Transfers::new(rvi_cfg.storage_dir)));
-        rvi_cfg.timeout.map_or_else(|| info!("Transfers will never time out."), |timeout| {
-            info!("Transfers timeout after {} seconds.", timeout);
-            let transfers = transfers.clone();
-            thread::spawn(move || {
-                let tick = chan::tick(Duration::from_secs(1));
-                loop {
-                    let _ = tick.recv();
-                    let mut transfers = transfers.lock().unwrap();
-                    transfers.prune(time::get_time().sec, timeout);
-                }
-            });
+        let timeout = Duration::from_secs(rvi_cfg.timeout.unwrap_or(300));
+        let transfers = Arc::new(Mutex::new(Transfers::new(rvi_cfg.storage_dir, timeout)));
+        let prune = transfers.clone();
+        thread::spawn(move || {
+            let tick = chan::tick(Duration::from_secs(10));
+            loop {
+                let _ = tick.recv();
+                let mut transfers = prune.lock().unwrap();
+                transfers.prune();
+            }
         });
 
         Services {
-            remote:    Arc::new(Mutex::new(RemoteServices::new(device_id, rvi_cfg.client))),
-            sender:    Arc::new(Mutex::new(sender)),
+            remote: Arc::new(Mutex::new(RemoteServices::new(device_id, rvi_cfg.client))),
+            sender: Arc::new(Mutex::new(sender)),
             transfers: transfers,
         }
     }
@@ -95,7 +93,7 @@ pub struct RemoteServices {
     pub device_id:  String,
     pub rvi_client: Url,
     pub local:      Option<LocalServices>,
-    pub backend:    Option<BackendServices>
+    pub backend:    Option<BackendServices>,
 }
 
 impl RemoteServices {

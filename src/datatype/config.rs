@@ -392,7 +392,7 @@ impl Defaultify<NetworkConfig> for ParsedNetworkConfig {
 pub struct RviConfig {
     pub client:      Url,
     pub storage_dir: String,
-    pub timeout:     Option<i64>,
+    pub timeout:     Option<u64>,
 }
 
 impl Default for RviConfig {
@@ -409,7 +409,7 @@ impl Default for RviConfig {
 struct ParsedRviConfig {
     client:      Option<Url>,
     storage_dir: Option<String>,
-    timeout:     Option<i64>,
+    timeout:     Option<u64>,
 }
 
 impl Defaultify<RviConfig> for ParsedRviConfig {

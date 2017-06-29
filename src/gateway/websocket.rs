@@ -73,6 +73,7 @@ mod tests {
     use interpreter::CommandExec;
 
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn websocket_connections() {
         let (ctx, crx) = chan::sync::<CommandExec>(0);
