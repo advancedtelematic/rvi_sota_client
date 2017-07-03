@@ -160,6 +160,12 @@ impl Uptane {
         Ok(verified)
     }
 
+    /// Generate a new signed TUF installation report.
+    pub fn signed_report(&mut self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
+        let version = OstreePackage::get_latest(&self.primary_ecu)?.into_version(custom);
+        self.private_key.sign_data(json::to_value(version)?, self.sig_type)
+    }
+
     /// Send a signed manifest with a list of signed objects to the Director server.
     pub fn put_manifest(&mut self, client: &Client, signed: Vec<TufSigned>) -> Result<(), Error> {
         let ecus = EcuManifests { primary_ecu_serial: self.primary_ecu.clone(), ecu_version_manifest: signed };
@@ -175,8 +181,9 @@ impl Uptane {
 
         if let Some(ref targets) = verified.data.targets {
             if let Some(pkg) = primary_target(targets, &self.primary_ecu, &treehub)? {
-                let inst = Box::new(self.new_installer(pkg, creds));
-                let mut ecu = Secondary::new(self.primary_ecu.clone(), bus()?, inst, self.atomic_timeout, None);
+                let serial = self.primary_ecu.clone();
+                let inst = Box::new(self.new_installer(serial.clone(), pkg, creds));
+                let mut ecu = Secondary::new(serial, bus()?, inst, self.atomic_timeout, None);
                 thread::spawn(move || ecu.listen());
             }
         }
@@ -191,8 +198,9 @@ impl Uptane {
         }
     }
 
-    fn new_installer(&self, pkg: OstreePackage, creds: Credentials) -> PrimaryInstaller {
+    fn new_installer(&self, serial: String, pkg: OstreePackage, creds: Credentials) -> PrimaryInstaller {
         PrimaryInstaller {
+            serial: serial,
             pkg: pkg,
             sig_type: self.sig_type,
             priv_key: self.private_key.clone(),
@@ -244,6 +252,7 @@ fn into_images(verified: Verified) -> Result<(HashMap<String, ImageReader>, Payl
 
 /// Define an installer for an `OstreePackage` as part of a transaction.
 pub struct PrimaryInstaller {
+    serial: String,
     pkg: OstreePackage,
     sig_type: SignatureType,
     priv_key: PrivateKey,
@@ -252,7 +261,7 @@ pub struct PrimaryInstaller {
 
 impl PrimaryInstaller {
     fn signed(&self, outcome: InstallOutcome) -> Result<StepData, Error> {
-        let custom = EcuCustom { operation_result: outcome.into_result(self.pkg.refName.clone()) };
+        let custom = EcuCustom::from_result(outcome.into_result(self.serial.clone()));
         let version = OstreePackage::get_latest(&self.pkg.ecu_serial)?.into_version(Some(custom));
         Ok(StepData {
             report: Some(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?),

@@ -791,6 +791,7 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_verify_fail() {
         let (a, b, c) = serials("verify_fail");
@@ -807,6 +808,7 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_fetch_fail() {
         let (a, b, c) = serials("fetch_fail");
@@ -823,6 +825,7 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
     }
 
+    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_commit_fail() {
         let (a, b, c) = serials("commit_fail");
