@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod canonical;
 pub mod command;
 pub mod config;
 pub mod download;
@@ -12,6 +13,7 @@ pub mod tuf;
 pub mod util;
 
 pub use self::auth::{AccessToken, Auth, ClientCredentials};
+pub use self::canonical::CanonicalJson;
 pub use self::command::Command;
 pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
                        GatewayConfig, RviConfig, TlsConfig, UptaneConfig};
@@ -28,34 +30,3 @@ pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyType, KeyValue,
                     PrivateKey, RoleData, RoleName, RoleMeta, TufCustom, TufImage,
                     TufMeta, TufSigned};
 pub use self::util::Util;
-
-
-// TODO remove this ugly hack ASAP
-use std::process::{Command as ShellCommand, Stdio};
-use std::io::Write;
-/// Shell exec out to Python to get canonical json bytes
-pub fn canonicalize_json(bytes: &[u8]) -> Result<Vec<u8>, Error> {
-    let mut child = ShellCommand::new("canonical_json.py")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|err| Error::Command(format!("couldn't run canonical_json.py: {}", err)))?;
-
-    match child.stdin.as_mut() {
-        Some(mut stdin) => {
-            stdin.write_all(bytes)?;
-            stdin.flush()?;
-        }
-        None => return Err(Error::Command(String::from("unable to write to stdin"))),
-    }
-
-    let output = child.wait_with_output()?;
-    if !output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        Err(Error::Command(format!("canonical_json.py exit {}: stdout: {}, stderr: {}", output.status, stdout, stderr)))
-    } else {
-        Ok(output.stdout)
-    }
-}

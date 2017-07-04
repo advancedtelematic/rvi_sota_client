@@ -1,6 +1,6 @@
 use base64;
 use hex::FromHex;
-use serde_json as json;
+use json;
 use std::fmt::Debug;
 use std::ffi::OsStr;
 use std::fs::File;

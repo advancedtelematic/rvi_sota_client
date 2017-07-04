@@ -1,7 +1,7 @@
 use chan;
 use chan::Sender;
+use json;
 use serde::{Deserialize, Serialize};
-use serde_json as json;
 use std::thread;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;

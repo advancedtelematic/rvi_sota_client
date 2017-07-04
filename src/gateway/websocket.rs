@@ -1,5 +1,5 @@
 use chan::{self, Sender, Receiver};
-use serde_json as json;
+use json;
 use std::net::{TcpListener, TcpStream, ToSocketAddrs};
 use std::thread;
 use tungstenite::{self, Message, WebSocket};
@@ -59,18 +59,9 @@ fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use chan;
     use crossbeam;
-    use serde_json as json;
-    use std::thread;
     use std::time::Duration;
-    use tungstenite;
     use uuid::Uuid;
-
-    use datatype::{Command, Event};
-    use gateway::Gateway;
-    use interpreter::CommandExec;
 
 
     #[cfg(not(feature = "docker"))]

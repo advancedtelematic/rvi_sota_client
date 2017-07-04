@@ -1,4 +1,4 @@
-use serde_json as json;
+use json;
 use std::fs::File;
 use std::io::{BufReader, Read};
 

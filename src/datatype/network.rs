@@ -1,7 +1,7 @@
 use hyper::method::Method as HyperMethod;
+use json;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, Serializer};
-use serde_json as json;
 use std::fmt::{self, Display, Formatter};
 use std::net::{SocketAddrV4 as NetSocketAddrV4};
 use std::ops::Deref;

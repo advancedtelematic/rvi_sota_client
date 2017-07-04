@@ -1,5 +1,5 @@
+use json;
 use serde::{Deserialize, Serialize};
-use serde_json as json;
 use time;
 use uuid::Uuid;
 

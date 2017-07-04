@@ -6,7 +6,6 @@ PACKAGE_VERSION := $(shell git describe --tags | cut -c2-)
 IMAGE_RUST := advancedtelematic/rust:x86-1.15.1
 IMAGE_SOTA := advancedtelematic/sota-client:latest
 IMAGE_FPM  := advancedtelematic/fpm:latest
-IMAGE_TEST := advancedtelematic/sota-client-test:latest
 
 # client binary target triple
 TARGET := x86_64-unknown-linux-gnu
@@ -45,7 +44,7 @@ generate: image ## Generate a new config then run the client.
 	$(DOCKER_RUN) --net=host $(IMAGE_SOTA)
 
 test: ## Run all unit tests.
-	$(DOCKER_RUN) $(IMAGE_TEST) test --target=$(TARGET) --features=docker
+	$(CARGO) test --target=$(TARGET) --features=docker
 
 doc: ## Generate documentation for the sota crate.
 	$(CARGO) doc --lib --no-deps --release --features=$(FEATURES)

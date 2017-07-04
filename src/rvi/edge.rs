@@ -1,7 +1,6 @@
 use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
-use serde_json as json;
-use serde_json::Value;
+use json;
 use std::str;
 use std::io::Read;
 
@@ -70,7 +69,7 @@ impl Handler for EdgeHandler {
         req.read_to_string(&mut text).expect("edge request");
 
         let outcome = || -> Result<RpcOk<i32>, RpcErr> {
-            let body: Value = json::to_value(&text)
+            let body: json::Value = json::to_value(&text)
                 .map_err(|err| RpcErr::parse_error(format!("invalid json: {}", err)))?;
             let id = body.get("id").and_then(|x| x.as_u64())
                 .ok_or_else(|| RpcErr::parse_error("missing id".into()))?;
