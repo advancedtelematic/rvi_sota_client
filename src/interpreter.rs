@@ -1,12 +1,11 @@
 use chan::{Sender, Receiver};
-use serde_json as json;
 use std::cell::RefCell;
 use std::process::{self, Command as ShellCommand};
 use std::rc::Rc;
 
 use authenticate::oauth2;
-use datatype::{Auth, Command, Config, Error, Event, InstallCode, InstallResult,
-               OstreePackage, RoleName, RequestStatus, Url};
+use datatype::{Auth, Command, Config, EcuCustom, Error, Event, InstallCode,
+               InstallOutcome, InstallResult, RoleName, RequestStatus, Url};
 use http::{AuthClient, Client};
 use pacman::{Credentials, PacMan};
 #[cfg(feature = "rvi")]
@@ -269,24 +268,26 @@ impl CommandInterpreter {
 
             (Command::UptaneSendManifest(signed), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                let signed = match signed {
-                    Some(signed) => signed,
-                    None => {
-                        let version = OstreePackage::get_latest(&uptane.primary_ecu)?.into_version(None);
-                        vec![uptane.private_key.sign_data(json::to_value(version)?, uptane.sig_type)?]
-                    }
-                };
-                uptane.put_manifest(&*self.http, signed)?;
+                if let Some(signed) = signed {
+                    uptane.put_manifest(&*self.http, signed)?;
+                } else {
+                    let report = uptane.signed_report(None)?;
+                    uptane.put_manifest(&*self.http, vec![report])?;
+                }
                 Event::UptaneManifestSent
             }
 
             (Command::UptaneStartInstall(targets), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                let (signed, ok) = uptane.install(targets, self.treehub()?, self.credentials())?;
-                if ok {
-                    Event::UptaneInstallComplete(signed)
-                } else {
-                    Event::UptaneInstallFailed(signed)
+                match uptane.install(targets, self.treehub()?, self.credentials()) {
+                    Ok((signed, true))  => Event::UptaneInstallComplete(signed),
+                    Ok((signed, false)) => Event::UptaneInstallFailed(signed),
+                    Err(err) => {
+                        error!("Uptane installation error: {}", err);
+                        let outcome = InstallOutcome::new(InstallCode::GENERAL_ERROR, "".into(), err.to_string());
+                        let custom = EcuCustom::from_result(outcome.into_result(uptane.primary_ecu.clone()));
+                        Event::UptaneInstallFailed(vec![uptane.signed_report(Some(custom))?])
+                    }
                 }
             }
 

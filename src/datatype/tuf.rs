@@ -225,3 +225,9 @@ impl EcuVersion {
 pub struct EcuCustom {
     pub operation_result: InstallResult
 }
+
+impl EcuCustom {
+    pub fn from_result(result: InstallResult) -> Self {
+        EcuCustom { operation_result: result }
+    }
+}
