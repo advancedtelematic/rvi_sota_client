@@ -17,13 +17,14 @@ use url::Url;
 
 /// The `AuthClient` will attach an `Authentication` header to each outgoing request.
 pub struct AuthClient {
-    auth:   Auth,
+    auth: Auth,
     client: HyperClient,
+    version: Option<String>,
 }
 
 impl Default for AuthClient {
     fn default() -> Self {
-        Self::from(Auth::None)
+        Self::from(Auth::None, None)
     }
 }
 
@@ -35,7 +36,7 @@ impl Client for AuthClient {
 
 impl AuthClient {
     /// Create a new HTTP client for the given `Auth` type.
-    pub fn from(auth: Auth) -> Self {
+    pub fn from(auth: Auth, version: Option<String>) -> Self {
         let mut client = env::var("HTTP_PROXY").map(|ref proxy| {
             let tls = TlsClient::default();
             let url = Url::parse(proxy).expect("couldn't parse HTTP_PROXY");
@@ -46,19 +47,19 @@ impl AuthClient {
         }).unwrap_or_else(|_| HyperClient::with_connector(HttpsConnector::new(TlsClient::default())));
 
         client.set_redirect_policy(RedirectPolicy::FollowNone);
-
-        AuthClient {
-            auth:   auth,
-            client: client,
-        }
+        AuthClient { auth: auth, client: client, version: version }
     }
 
     fn send(&self, req: AuthRequest) -> Response {
         let started = time::precise_time_ns();
+        let mut headers = req.headers.clone();
+        if let Some(ref version) = self.version {
+            headers.append_raw("x-sota-client-version", version.as_bytes().to_vec());
+        }
+
         let mut request = self.client
             .request(req.request.method.clone().into(), (*req.request.url).clone())
-            .headers(req.headers.clone());
-
+            .headers(headers);
         if let Some(ref body) = req.request.body {
             request = request.body(Body::BufBody(body, body.len()));
             debug!("request length: {} bytes", body.len());
@@ -76,7 +77,7 @@ impl AuthClient {
 
                 let mut body = Vec::new();
                 let data = match resp.read_to_end(&mut body) {
-                    Ok(_)    => ResponseData { code: resp.status, body: body },
+                    Ok(_) => ResponseData { code: resp.status, body: body },
                     Err(err) => return Response::Error(Error::Client(format!("couldn't read response body: {}", err)))
                 };
                 debug!("response body size: {}", data.body.len());

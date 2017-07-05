@@ -135,10 +135,11 @@ pub enum CommandMode {
 /// The `CommandInterpreter` executes the incoming `Command`, broadcasting all
 /// `Event`s and (optionally) forwarding the final event to a `Receiver`.
 pub struct CommandInterpreter {
-    pub mode:   CommandMode,
-    pub auth:   Auth,
+    pub mode: CommandMode,
     pub config: Config,
-    pub http:   Box<Client>,
+    pub auth: Auth,
+    pub http: Box<Client>,
+    pub version: Option<String>,
 }
 
 impl Interpreter<CommandExec, Event> for  CommandInterpreter {
@@ -162,8 +163,8 @@ impl CommandInterpreter {
                 if self.http.is_testing() {
                     self.auth = Auth::Token(oauth2(server, &*self.http)?);
                 } else {
-                    self.auth = Auth::Token(oauth2(server, &AuthClient::from(creds))?);
-                    self.http = Box::new(AuthClient::from(self.auth.clone()));
+                    self.auth = Auth::Token(oauth2(server, &AuthClient::from(creds, self.version.clone()))?);
+                    self.http = Box::new(AuthClient::from(self.auth.clone(), self.version.clone()));
                 }
                 Event::Authenticated
             }
@@ -171,7 +172,7 @@ impl CommandInterpreter {
             (Command::Authenticate(auth), _) => {
                 self.auth = auth;
                 if ! self.http.is_testing() {
-                    self.http = Box::new(AuthClient::from(self.auth.clone()));
+                    self.http = Box::new(AuthClient::from(self.auth.clone(), self.version.clone()));
                 }
                 Event::Authenticated
             }
@@ -312,7 +313,7 @@ impl CommandInterpreter {
 
     /// Retrieve the current access token and device certificates for TLS.
     fn credentials(&self) -> Credentials {
-        let client = Box::new(AuthClient::from(self.auth.clone()));
+        let client = Box::new(AuthClient::from(self.auth.clone(), self.version.clone()));
         let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.clone()) } else { None };
         let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
             (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
@@ -353,10 +354,11 @@ mod tests {
             let mut config = Config::default();
             config.device.package_manager = PacMan::new_tpm(succeeds);
             let mut ci = CommandInterpreter {
-                mode:   CommandMode::Sota,
+                mode: CommandMode::Sota,
                 config: config,
-                auth:   Auth::None,
-                http:   Box::new(TestClient::from(replies)),
+                auth: Auth::None,
+                http: Box::new(TestClient::from(replies)),
+                version: None,
             };
             while let Some(cmd) = crx.recv() {
                 ci.interpret(CommandExec { cmd: cmd, etx: None }, &etx);

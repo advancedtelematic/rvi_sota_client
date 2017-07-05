@@ -151,12 +151,13 @@ fn main() {
                 }
             }
 
-            let http = Box::new(AuthClient::from(auth.clone()));
+            let http = Box::new(AuthClient::from(auth.clone(), version.clone()));
             let mut cmd_int = CommandInterpreter {
-                mode:   mode,
+                mode: mode,
                 config: config,
-                auth:   auth,
-                http:   http,
+                auth: auth,
+                http: http,
+                version: version
             };
             cmd_int.run(crx, etx)
         });
@@ -165,14 +166,18 @@ fn main() {
     });
 }
 
-fn start_logging() -> String {
-    let version = option_env!("SOTA_VERSION").unwrap_or("unknown");
+fn start_logging() -> Option<String> {
+    let version = option_env!("SOTA_VERSION");
+
     let mut builder = LogBuilder::new();
-    builder.format(move |log| format!("{} ({}): {} - {}", time::now_utc().rfc3339(), version, log.level(), log.args()));
+    builder.format(move |log| {
+        format!("{} ({}): {} - {}", time::now_utc().rfc3339(), version.unwrap_or("unknown"), log.level(), log.args())
+    });
     builder.filter(Some("hyper"), LogLevelFilter::Info);
     builder.parse(&env::var("RUST_LOG").unwrap_or_else(|_| "INFO".to_string()));
     builder.init().expect("builder already initialized");
-    version.to_string()
+
+    version.map(|v| v.into())
 }
 
 fn start_signal_handler(signals: &Receiver<Signal>) {
@@ -194,7 +199,7 @@ fn start_update_poller(interval: u64, ctx: &Sender<CommandExec>) {
     }
 }
 
-fn build_config(version: &str) -> Config {
+fn build_config(version: &Option<String>) -> Config {
     let args = env::args().collect::<Vec<_>>();
     let program = &args[0];
     let mut opts = Options::new();
@@ -263,7 +268,7 @@ fn build_config(version: &str) -> Config {
     if cli.opt_present("help") {
         exit!(0, opts.usage(&format!("{} [options]", program)));
     } else if cli.opt_present("version") {
-        exit!(0, version);
+        exit!(0, if let Some(ref v) = *version { v } else { "unknown" });
     }
     let file = cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()).expect("No config provided");
     let mut config = Config::load(&file).expect("Error loading config");
