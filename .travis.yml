@@ -1,4 +1,5 @@
 services:
   - docker
 script:
+  - cd sota-client
   - make test

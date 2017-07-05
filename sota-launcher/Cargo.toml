@@ -1,0 +1,7 @@
+[package]
+name = "sota-launcher"
+version = "0.1.0"
+authors = ["Shaun Taheri <shaun@advancedtelematic.com>"]
+
+[dependencies]
+sota_client = { version = "0.1.0", path = "../sota-client" }

@@ -1,2 +1,3 @@
 target
-run/sota_client
+sota-client/run/sota_client
+sota-client/run/*.{deb,rpm}
