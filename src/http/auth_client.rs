@@ -2,7 +2,7 @@ use chan::Sender;
 use hyper::client::{Body, Client as HyperClient, ProxyConfig, RedirectPolicy,
                     Response as HyperResponse};
 use hyper::header::{Authorization, Basic, Bearer, Connection, ContentLength,
-                    ContentType, Headers, Location};
+                    ContentType, Headers, Location, UserAgent};
 use hyper::mime::{Attr, Mime, TopLevel, SubLevel, Value};
 use hyper::net::{HttpConnector, HttpsConnector};
 use hyper::status::StatusCode;
@@ -54,7 +54,7 @@ impl AuthClient {
         let started = time::precise_time_ns();
         let mut headers = req.headers.clone();
         if let Some(ref version) = self.version {
-            headers.append_raw("x-sota-client-version", version.as_bytes().to_vec());
+            headers.set(UserAgent(format!("sota-client/{}", version)));
         }
 
         let mut request = self.client
