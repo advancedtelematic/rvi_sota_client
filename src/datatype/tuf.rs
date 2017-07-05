@@ -2,14 +2,14 @@ use base64;
 use chrono::{DateTime, Utc};
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
+use json;
 use pem;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
-use serde_json as json;
 use std::fmt::{self, Display, Formatter};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-use datatype::{Error, InstallResult, Signature, SignatureType, canonicalize_json};
+use datatype::{CanonicalJson, Error, InstallResult, Signature, SignatureType};
 
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Default)]
@@ -146,7 +146,7 @@ pub struct PrivateKey {
 
 impl PrivateKey {
     pub fn sign_data(&self, data: json::Value, sig_type: SignatureType) -> Result<TufSigned, Error> {
-        let cjson = canonicalize_json(&json::to_vec(&data)?)?;
+        let cjson = CanonicalJson::into_bytes(json::to_value(&data)?)?;
         let signed = TufSigned {
             signatures: vec![Signature {
                 keyid:  self.keyid.clone(),

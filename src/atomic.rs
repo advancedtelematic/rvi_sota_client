@@ -1,5 +1,5 @@
 use chrono::{DateTime, Utc};
-use serde_json as json;
+use json;
 use std::fs::{self, File};
 use std::io::{BufReader, ErrorKind};
 use std::collections::{HashMap, HashSet};

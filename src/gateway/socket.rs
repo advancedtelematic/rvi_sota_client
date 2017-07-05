@@ -1,6 +1,6 @@
 use chan::{self, Sender, Receiver};
+use json;
 use serde::ser::Serialize;
-use serde_json as json;
 use std::io::{BufReader, Read, Write};
 use std::net::Shutdown;
 use std::{fs, thread};
@@ -105,19 +105,10 @@ impl<S: Serialize> EventWrapper<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use chan;
     use crossbeam;
-    use serde_json as json;
-    use std::{fs, thread};
-    use std::io::Write;
-    use std::net::Shutdown;
     use uuid::Uuid;
 
     use datatype::{Command, DownloadComplete, Event};
-    use gateway::Gateway;
-    use interpreter::CommandExec;
-    use unix_socket::{UnixListener, UnixStream};
 
 
     const CMD_SOCK: &'static str = "/tmp/sota-commands.socket";

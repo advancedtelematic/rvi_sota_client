@@ -3,7 +3,7 @@ use hyper::header::ContentType;
 use hyper::mime::{Mime, SubLevel, TopLevel};
 use hyper::server::{Handler, Server, Request as HyperRequest, Response as HyperResponse};
 use hyper::status::StatusCode;
-use serde_json as json;
+use json;
 use std::net::SocketAddrV4;
 use std::thread;
 
@@ -53,16 +53,11 @@ impl Handler for HttpHandler {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use chan;
     use crossbeam;
-    use serde_json as json;
-    use std::thread;
     use std::time::Duration;
     use uuid::Uuid;
 
-    use datatype::{Command, Event};
-    use gateway::Gateway;
+    use datatype::Command;
     use http::{AuthClient, Client, Response, TlsClient, TlsData};
 
 

@@ -2,10 +2,10 @@ use base64::DecodeError as Base64Error;
 use chrono::ParseError as ChronoParseError;
 use hex::FromHexError;
 use hyper::error::Error as HyperError;
+use json::Error as SerdeJsonError;
 use openssl::error::ErrorStack as OpensslErrors;
 use pem::Error as PemError;
 use ring::error::Unspecified as RingError;
-use serde_json::Error as SerdeJsonError;
 use std::convert::From;
 use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
@@ -36,6 +36,7 @@ pub enum Error {
     AtomicState(State, State),
     AtomicTimeout,
     Base64(Base64Error),
+    Canonical(String),
     Client(String),
     Command(String),
     Config(String),
@@ -92,6 +93,7 @@ impl Display for Error {
             Error::AtomicState(from, to) => format!("Atomic transition invalid: {:?} -> {:?}", from, to),
             Error::AtomicTimeout        => "Transaction timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
+            Error::Canonical(ref err)   => format!("Canonical JSON error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),
             Error::Command(ref err)     => format!("Unknown Command: {}", err),
             Error::Config(ref err)      => format!("Bad Config: {}", err),

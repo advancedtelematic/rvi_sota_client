@@ -5,8 +5,8 @@ pub mod test;
 pub mod uptane;
 
 
+use json;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
-use serde_json as json;
 use std::str::FromStr;
 
 use datatype::{Error, Package, InstallOutcome};
@@ -114,7 +114,6 @@ pub fn parse_packages(stdout: &str) -> Result<Vec<Package>, Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use datatype::Package;
 
 
     #[test]

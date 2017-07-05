@@ -7,6 +7,7 @@ extern crate crypto;
 extern crate dbus;
 extern crate hex;
 extern crate hyper;
+extern crate itoa;
 #[macro_use]
 extern crate lazy_static;
 #[macro_use]
@@ -20,7 +21,7 @@ extern crate ring;
 extern crate serde;
 #[macro_use]
 extern crate serde_derive;
-extern crate serde_json;
+extern crate serde_json as json;
 extern crate tar;
 extern crate time;
 extern crate toml;

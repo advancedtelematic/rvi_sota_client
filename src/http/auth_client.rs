@@ -162,10 +162,9 @@ impl AuthRequest {
 
 #[cfg(test)]
 mod tests {
-    use serde_json as json;
-    use serde_json::Value;
-
     use super::*;
+    use json;
+
     use http::{Client, Response, TlsClient, TlsData};
 
 
@@ -192,7 +191,7 @@ mod tests {
         let url = "https://eu.httpbin.org/post".parse().unwrap();
         match get_client().post(url, Some(br#"foo"#.to_vec())).recv().unwrap() {
             Response::Success(data) => {
-                let body: Value = json::from_slice(&data.body).unwrap();
+                let body: json::Value = json::from_slice(&data.body).unwrap();
                 assert_eq!(body.get("data").unwrap(), &json::Value::String("foo".into()));
             }
             Response::Failed(data) => panic!("failed response: {}", data),

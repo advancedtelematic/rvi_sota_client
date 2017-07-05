@@ -1,4 +1,4 @@
-use serde_json as json;
+use json;
 use std::fs::{self, File};
 use std::io;
 use uuid::Uuid;
@@ -105,7 +105,7 @@ impl<'c, 'h> Sota<'c, 'h> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json as json;
+    use json;
 
     use datatype::{Config, Package, UpdateRequest, RequestStatus};
     use http::TestClient;

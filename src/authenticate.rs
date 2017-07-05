@@ -1,4 +1,4 @@
-use serde_json as json;
+use json;
 
 use datatype::{AccessToken, Error, Url};
 use http::{Client, Response};

@@ -2,8 +2,8 @@ use base64;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use hex::FromHex;
+use json;
 use pem;
-use serde_json as json;
 use std::{mem, thread};
 use std::collections::{HashMap, HashSet};
 use std::fmt::{self, Display, Formatter};
@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step, StepData};
 use images::ImageReader;
-use datatype::{Config, EcuCustom, EcuManifests, Error, InstallCode, InstallOutcome,
-               Key, KeyType, OstreePackage, PrivateKey, RoleData, RoleMeta, RoleName,
-               Signature, SignatureType, TufMeta, TufSigned, Url, Util, canonicalize_json};
+use datatype::{CanonicalJson, Config, EcuCustom, EcuManifests, Error, InstallCode,
+               InstallOutcome, Key, KeyType, OstreePackage, PrivateKey, RoleData,
+               RoleMeta, RoleName, Signature, SignatureType, TufMeta, TufSigned, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -273,7 +273,9 @@ impl PrimaryInstaller {
 impl Step for PrimaryInstaller {
     fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
         match state {
-            State::Idle | State::Ready | State::Verify | State::Fetch => Ok(StepData { report: None, writer: None }),
+            State::Idle | State::Ready | State::Verify | State::Fetch => {
+                Ok(StepData { report: None, writer: None })
+            }
             State::Commit => self.signed(self.pkg.install(&self.credentials)?),
             State::Abort  => self.signed(InstallOutcome::new(InstallCode::INTERNAL_ERROR, "".into(), "aborted".into()))
         }
@@ -340,7 +342,7 @@ impl Verifier {
 
     /// Verify that a role-defined threshold of signatures successfully validate.
     pub fn verify_signatures(&self, meta: &RoleMeta, signed: &TufSigned) -> Result<(), Error> {
-        let cjson = canonicalize_json(&json::to_vec(&signed.signed)?)?;
+        let cjson = CanonicalJson::into_bytes(json::to_value(&signed.signed)?)?;
         let valid = signed.signatures
             .iter()
             .filter(|sig| meta.keyids.contains(&sig.keyid))

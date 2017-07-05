@@ -1,4 +1,5 @@
 use crypto::ed25519;
+use json;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
 use openssl::rsa::{Rsa, Padding};
@@ -7,7 +8,6 @@ use ring::rand::SystemRandom;
 use ring::signature::{RSAKeyPair, RSASigningState, RSA_PSS_SHA256};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use serde::de::Error as SerdeError;
-use serde_json as json;
 use std::os::raw::c_int;
 use std::str::FromStr;
 use std::sync::Arc;
