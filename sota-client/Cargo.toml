@@ -29,7 +29,7 @@ maplit = "0.1.4"
 net2 = "0.2.29"
 openssl = "0.9.11"
 pem = "0.4.0"
-ring = { version = "0.7.1", features = [ "rsa_signing" ] }
+ring = { git = "https://github.com/briansmith/ring", rev = "e48cdbc5fab0c5a78a9dff5c25444d474e2dca83", features = [ "rsa_signing" ] }
 rust-crypto = "0.2.36"
 serde_derive = "1.0.2"
 serde = "1.0.2"

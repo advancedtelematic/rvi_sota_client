@@ -12,7 +12,7 @@ TARGET := x86_64-unknown-linux-gnu
 # client binary features
 FEATURES := default
 
-DOCKER_DIR := $(CURDIR)/sota-client/run
+DOCKER_DIR := $(CURDIR)/sota-client/docker
 DOCKER_RUN := \
 	@docker run --rm \
 		--env RUST_LOG=$(RUST_LOG) \
