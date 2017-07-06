@@ -1,40 +1,73 @@
+use reqwest;
+use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
+use std::io;
 use std::str::FromStr;
+use uuid;
 
 
-#[derive(Debug)]
-pub enum Error {
-    Cookie(String)
-}
-
-impl Display for Error {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        let text = match *self {
-            Error::Cookie(ref s) => format!("reading cookie: {}", s)
-        };
-        write!(f, "{}", text)
+error_chain!{
+    foreign_links {
+        Http(reqwest::Error);
+        Io(io::Error);
+        Uuid(uuid::ParseError);
     }
 }
 
 
-#[derive(Serialize, Deserialize)]
+pub enum Environment {
+    CI,
+    QA,
+    Production,
+}
+
+impl FromStr for Environment {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self> {
+        match s.to_lowercase().as_ref() {
+            "ci" => Ok(Environment::CI),
+            "qa" => Ok(Environment::QA),
+            "production" => Ok(Environment::Production),
+            _ => Err(format!("unknown environment: {}", s).into())
+        }
+    }
+}
+
+impl Display for Environment {
+    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
+        let url = match *self {
+            Environment::CI => "https://ci-app.atsgarage.com/api/v1",
+            Environment::QA => "https://qa-app.atsgarage.com/api/v1",
+            Environment::Production => "https://app.atsgarage.com/api/v1",
+        };
+        write!(f, "{}", url)
+    }
+}
+
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct Targets {
+    pub targets: HashMap<String, Update>,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Update {
-    hardware_id: String,
-    to: Target
+    pub to: Target
 }
 
 #[allow(non_snake_case)]
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Target {
-    target: String,
-    checksum: Checksum,
-    targetLength: u64,
+    pub target: String,
+    pub targetLength: u64,
+    pub checksum: Checksum,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Debug)]
 pub struct Checksum {
-    method: String,
-    hash: String,
+    pub method: String,
+    pub hash: String,
 }
 
 
@@ -43,18 +76,17 @@ pub struct PlayCookie {
     session: String,
     access_token: String,
     auth_plus_token: String,
-    csrf_token: String,
+    pub csrf_token: String,
     namespace: String,
 }
 
 impl FromStr for PlayCookie {
     type Err = Error;
 
-    fn from_str(session: &str) -> Result<PlayCookie, Error> {
-        info!("Parsing PLAY_SESSION cookie...");
-        let cookie = session.trim().splitn(2, '=').collect::<Vec<_>>();
+    fn from_str(s: &str) -> Result<Self> {
+        let cookie = s.trim().splitn(2, '=').collect::<Vec<_>>();
         if cookie[0] != "PLAY_SESSION" {
-            return Err(Error::Cookie(format!("expected cookie 'PLAY_SESSION', got '{}'", cookie[0])))
+            return Err((format!("expected cookie 'PLAY_SESSION', got '{}'", cookie[0])).into())
         }
 
         let parts = cookie[1].split('&').collect::<Vec<_>>();
@@ -65,13 +97,13 @@ impl FromStr for PlayCookie {
         let namespace = parts[4].split('=').collect::<Vec<_>>();
 
         if access_token[0] != "access_token" {
-            return Err(Error::Cookie(format!("expected key 'access_token', got '{}'", access_token[0])))
+            return Err(format!("expected key 'access_token', got '{}'", access_token[0]).into())
         } else if auth_plus_token[0] != "auth_plus_access_token" {
-            return Err(Error::Cookie(format!("expected key 'auth_plus_access_token', got '{}'", auth_plus_token[0])))
+            return Err(format!("expected key 'auth_plus_access_token', got '{}'", auth_plus_token[0]).into())
         } else if csrf_token[0] != "csrfToken" {
-            return Err(Error::Cookie(format!("expected key 'csrfToken', got '{}'", csrf_token[0])))
+            return Err(format!("expected key 'csrfToken', got '{}'", csrf_token[0]).into())
         } else if namespace[0] != "namespace" {
-            return Err(Error::Cookie(format!("expected key 'namespace', got '{}'", namespace[0])))
+            return Err(format!("expected key 'namespace', got '{}'", namespace[0]).into())
         }
 
         Ok(PlayCookie {
@@ -88,6 +120,12 @@ impl Display for PlayCookie {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         write!(f, "PLAY_SESSION={}&access_token={}&auth_plus_access_token={}&csrfToken={}&namespace={}",
                self.session, self.access_token, self.auth_plus_token, self.csrf_token, self.namespace)
+    }
+}
+
+impl PlayCookie {
+    pub fn into_bytes(&self) -> Vec<u8> {
+        format!("{}", self).as_bytes().to_vec()
     }
 }
 
