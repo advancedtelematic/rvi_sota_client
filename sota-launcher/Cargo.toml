@@ -4,4 +4,11 @@ version = "0.1.0"
 authors = ["Shaun Taheri <shaun@advancedtelematic.com>"]
 
 [dependencies]
+env_logger = "0.4.3"
+hyper = "0.10.12"
+log = "0.3.8"
+reqwest = "0.6.2"
+serde = "1.0.9"
+serde_derive = "1.0.9"
+serde_json = "1.0.2"
 sota_client = { version = "0.1.0", path = "../sota-client" }
