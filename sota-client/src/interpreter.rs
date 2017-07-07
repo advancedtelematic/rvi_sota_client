@@ -285,9 +285,8 @@ impl CommandInterpreter {
                     Ok((signed, false)) => Event::UptaneInstallFailed(signed),
                     Err(err) => {
                         error!("Uptane installation error: {}", err);
-                        let outcome = InstallOutcome::new(InstallCode::GENERAL_ERROR, "".into(), err.to_string());
-                        let custom = EcuCustom::from_result(outcome.into_result(uptane.primary_ecu.clone()));
-                        Event::UptaneInstallFailed(vec![uptane.signed_report(Some(custom))?])
+                        let result = InstallOutcome::error(err.to_string()).into_result(uptane.primary_ecu.clone());
+                        Event::UptaneInstallFailed(vec![uptane.signed_report(Some(EcuCustom::from_result(result)))?])
                     }
                 }
             }

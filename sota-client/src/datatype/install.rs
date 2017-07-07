@@ -17,6 +17,11 @@ impl InstallOutcome {
         InstallOutcome { code: code, stdout: stdout, stderr: stderr }
     }
 
+    /// Create a new installation outcome with a code of `GENERAL_ERROR`.
+    pub fn error(stderr: String) -> InstallOutcome {
+        InstallOutcome { code: InstallCode::GENERAL_ERROR, stdout: "".into(), stderr: stderr }
+    }
+
     /// Convert an `InstallOutcome` into a `InstallResult
     pub fn into_result(self, id: String) -> InstallResult {
         InstallResult::new(id, self.code, format!("stdout: {}\nstderr: {}\n", self.stdout, self.stderr))

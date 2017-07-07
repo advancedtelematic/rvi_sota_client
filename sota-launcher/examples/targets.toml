@@ -1,0 +1,16 @@
+[device]
+device_id = "00000000-0000-0000-0000-000000000000"
+
+[[targets]]
+serial = "123"
+target = "abc"
+length = 100
+method = "sha256"
+hash = "012345678901234567890123456789012345678901234567890123456789abcd"
+
+[[targets]]
+serial = "234"
+target = "def"
+length = 0
+method = "sha256"
+hash = "abcd012345678901234567890123456789012345678901234567890123456789"

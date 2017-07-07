@@ -12,9 +12,9 @@ use std::time::Duration;
 
 use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step, StepData};
 use images::ImageReader;
-use datatype::{CanonicalJson, Config, EcuCustom, EcuManifests, Error, InstallCode,
-               InstallOutcome, Key, KeyType, OstreePackage, PrivateKey, RoleData,
-               RoleMeta, RoleName, Signature, SignatureType, TufMeta, TufSigned, Url, Util};
+use datatype::{CanonicalJson, Config, EcuCustom, EcuManifests, Error, InstallOutcome,
+               Key, KeyType, OstreePackage, PrivateKey, RoleData, RoleMeta, RoleName,
+               Signature, SignatureType, TufMeta, TufSigned, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -277,7 +277,7 @@ impl Step for PrimaryInstaller {
                 Ok(StepData { report: None, writer: None })
             }
             State::Commit => self.signed(self.pkg.install(&self.credentials)?),
-            State::Abort  => self.signed(InstallOutcome::new(InstallCode::INTERNAL_ERROR, "".into(), "aborted".into()))
+            State::Abort  => self.signed(InstallOutcome::error("aborted".into()))
         }
     }
 }

@@ -12,6 +12,7 @@ TARGET := x86_64-unknown-linux-gnu
 # client binary features
 FEATURES := default
 
+DOCKER_DIR := $(CURDIR)/sota-client/docker
 DOCKER_RUN := \
 	@docker run --rm \
 		--env RUST_LOG=$(RUST_LOG) \
@@ -25,9 +26,8 @@ DOCKER_RUN := \
 		--env DEVICE_UUID=$(DEVICE_UUID) \
 		--volume ~/.cargo/git:/root/.cargo/git \
 		--volume ~/.cargo/registry:/root/.cargo/registry \
-		--volume $(CURDIR):/src \
+		--volume $(CURDIR)/sota-client:/src \
 		--workdir /src
-
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
 
@@ -54,20 +54,20 @@ client: src/ ## Compile a new release build of the client.
 	@cp target/$(TARGET)/release/sota_client run/
 
 image: client ## Build a Docker image for running the client.
-	@docker build --tag advancedtelematic/sota-client run
+	@docker build --tag advancedtelematic/sota-client $(DOCKER_DIR)
 
 image-uptane: image ## Build a Docker image for running the client with uptane.
-	@docker build --tag advancedtelematic/sota-client-uptane -f run/DockerfileUptane .
+	@docker build --tag advancedtelematic/sota-client-uptane -f $(DOCKER_DIR)/DockerfileUptane .
 
 clean: ## Remove all compiled libraries, builds and temporary files.
 	$(CARGO) clean
-	@rm -rf run/sota_client {,run/}*.{deb,rpm} /tmp/sota-*
+	@rm -rf $(DOCKER_DIR)/sota_client $(DOCKER_DIR)/*.{deb,rpm} /tmp/sota-*
 
 deb: client ## Create a new DEB package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) run/make_package.sh deb
+	$(DOCKER_RUN) $(IMAGE_FPM) $(DOCKER_DIR)/make_package.sh deb
 
 rpm: client ## Create a new RPM package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) run/make_package.sh rpm
+	$(DOCKER_RUN) $(IMAGE_FPM) $(DOCKER_DIR)/make_package.sh rpm
 
 sota-version: ## Print the version displayed inside the sota client logs.
 	@echo $(SOTA_VERSION)
