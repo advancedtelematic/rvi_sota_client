@@ -9,14 +9,13 @@ extern crate toml;
 extern crate uuid;
 
 mod config;
-mod datatypes;
+mod installer;
 
 use env_logger::LogBuilder;
 use log::LogLevelFilter;
 use std::process;
 
-use config::Secondary;
-use datatypes::Text;
+use config::{Config, Text};
 use sota::datatype::Error;
 
 
@@ -29,25 +28,26 @@ fn main() {
 
 fn start() -> Result<(), Error> {
     let config = parse_args()?;
-    Ok(())
+    let mut secondary = config.to_secondary()?;
+    secondary.listen()
 }
 
-fn parse_args() -> Result<Secondary, Error> {
+fn parse_args() -> Result<Config, Error> {
     let matches = clap_app!(
         launcher =>
             (@arg config: -c --config +required +takes_value "Path to the secondary config file")
             (@arg level: -l --level +takes_value "Sets the logging level")
     ).get_matches();
 
-    let secondary = match matches.value_of("config") {
-        Some(file) => Text::read(file).and_then(|text| text.parse::<Secondary>()),
-        None => Err(Error::Config("no config file given".to_string()).into())
-    }?;
-
     let level = matches.value_of("level").unwrap_or("INFO");
     start_logging(level);
 
-    Ok(secondary)
+    let config = match matches.value_of("config") {
+        Some(file) => Text::read(file).and_then(|text| text.parse::<Config>()),
+        None => Err(Error::Config("no config file given".to_string()))
+    }?;
+
+    Ok(config)
 }
 
 fn start_logging(level: &str) {
