@@ -1,30 +1,25 @@
-use reqwest::header::{ContentType, Headers};
-use reqwest::mime::{Mime, SubLevel, TopLevel};
+use reqwest::header::Headers;
 use reqwest::Client;
 use std::io::Read;
 use uuid::Uuid;
 
+use config::Config;
 use datatypes::*;
 
 
-pub struct MultiTargetUpdate {
+pub struct MultiTargetUpdate<'c> {
     client: Client,
-    env: Environment,
-    play: PlayCookie,
+    config: &'c Config,
 }
 
-impl MultiTargetUpdate {
-    pub fn new(env: Environment, play: PlayCookie) -> Result<Self> {
-        Ok(MultiTargetUpdate {
-            client: Client::new()?,
-            env: env,
-            play: play,
-        })
+impl<'c> MultiTargetUpdate<'c> {
+    pub fn new(config: &'c Config) -> Result<Self> {
+        Ok(MultiTargetUpdate { client: Client::new()?, config: config })
     }
 
-    pub fn create(&self, targets: &Targets) -> Result<Uuid> {
+    pub fn create(&self, targets: &UpdateTargets) -> Result<Uuid> {
         let mut resp = self.client
-            .post(&format!("{}/multi_target_updates", self.env))
+            .post(&format!("{}/multi_target_updates", self.config.environment))
             .json(targets)
             .headers(self.headers())
             .send()?;
@@ -38,7 +33,8 @@ impl MultiTargetUpdate {
 
     pub fn launch(&self, device_id: Uuid, update_id: Uuid) -> Result<()> {
         let mut resp = self.client
-            .put(&format!("{}/admin/devices/{}/multi_target_update/{}", self.env, device_id, update_id))
+            .put(&format!("{}/admin/devices/{}/multi_target_update/{}",
+                          self.config.environment, device_id, update_id))
             .headers(self.headers())
             .send()?;
 
@@ -50,9 +46,8 @@ impl MultiTargetUpdate {
 
     fn headers(&self) -> Headers {
         let mut headers = Headers::new();
-        headers.set_raw("Cookie", vec![self.play.into_bytes()]);
-        headers.set_raw("Csrf-Token", vec![self.play.csrf_token.as_bytes().to_vec()]);
-        headers.set(ContentType(Mime(TopLevel::Application, SubLevel::Json, vec![])));
+        headers.set_raw("Cookie", vec![self.config.play_session.into_bytes()]);
+        headers.set_raw("Csrf-Token", vec![self.config.play_session.csrf_token.as_bytes().to_vec()]);
         headers
     }
 }

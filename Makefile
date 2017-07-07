@@ -26,7 +26,7 @@ DOCKER_RUN := \
 		--env DEVICE_UUID=$(DEVICE_UUID) \
 		--volume ~/.cargo/git:/root/.cargo/git \
 		--volume ~/.cargo/registry:/root/.cargo/registry \
-		--volume $(DOCKER_DIR):/src \
+		--volume $(CURDIR)/sota-client:/src \
 		--workdir /src
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
