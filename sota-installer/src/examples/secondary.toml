@@ -1,0 +1,7 @@
+[ecu]
+serial = "my-ecu"
+bus_type = "udp"
+
+[udp]
+wake_up = "232.0.0.011:23211"
+message = "232.0.0.011:23211"

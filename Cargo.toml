@@ -1,5 +1,5 @@
 [workspace]
-members = ["sota-client", "sota-launcher"]
+members = ["sota-client", "sota-installer", "sota-launcher"]
 
 [profile.release]
 lto = true
