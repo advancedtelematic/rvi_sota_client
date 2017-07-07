@@ -1,4 +1,3 @@
-use json;
 use reqwest;
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::HashMap;
@@ -60,11 +59,8 @@ impl Display for Environment {
 
 impl<'de> Deserialize<'de> for Environment {
     fn deserialize<D: Deserializer<'de>>(de: D) -> result::Result<Self, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
-        } else {
-            Err(serde::de::Error::custom("expected string type for environment"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
     }
 }
 
@@ -80,11 +76,11 @@ pub struct Update {
     pub to: UpdateTarget
 }
 
-#[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UpdateTarget {
     pub target: String,
-    pub targetLength: u64,
+    #[serde(rename = "targetLength")]
+    pub length: u64,
     pub checksum: Checksum,
 }
 
@@ -123,11 +119,8 @@ impl Serialize for ChecksumMethod {
 
 impl<'de> Deserialize<'de> for ChecksumMethod {
     fn deserialize<D: Deserializer<'de>>(de: D) -> result::Result<Self, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
-        } else {
-            Err(serde::de::Error::custom("expected string type for checksum method"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
     }
 }
 
@@ -186,11 +179,8 @@ impl Display for PlaySession {
 
 impl<'de> Deserialize<'de> for PlaySession {
     fn deserialize<D: Deserializer<'de>>(de: D) -> result::Result<Self, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
-        } else {
-            Err(serde::de::Error::custom("expected string type for play_session"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
     }
 }
 

@@ -44,11 +44,8 @@ impl Targets {
                     from: None,
                     to: UpdateTarget {
                         target: target.target.clone(),
-                        targetLength: target.length,
-                        checksum: Checksum {
-                            method: target.method,
-                            hash: target.hash.clone(),
-                        }
+                        length: target.length,
+                        checksum: Checksum { method: target.method, hash: target.hash.clone() }
                     }
                 };
                 (target.serial.clone(), update)
