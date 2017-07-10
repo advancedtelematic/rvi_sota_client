@@ -10,11 +10,11 @@ use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Bus, Multicast, Payloads, Primary, Secondary, State, Step, StepData};
+use atomic::{Fallbacks, Multicast, Payloads, Primary, Secondary, State, Step, StepData};
 use images::ImageReader;
-use datatype::{CanonicalJson, Config, EcuCustom, EcuManifests, Error, InstallOutcome,
-               Key, KeyType, OstreePackage, PrivateKey, RoleData, RoleMeta, RoleName,
-               Signature, SignatureType, TufMeta, TufSigned, Url, Util};
+use datatype::{CanonicalJson, Config, EcuConfig, EcuCustom, EcuManifests, Error,
+               InstallOutcome, Key, KeyType, OstreePackage, PrivateKey, RoleData,
+               RoleMeta, RoleName, Signature, SignatureType, TufSigned, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -45,6 +45,8 @@ pub struct Uptane {
     pub primary_ecu: String,
     pub private_key: PrivateKey,
     pub sig_type:    SignatureType,
+    pub secondaries: Vec<EcuConfig>,
+    pub fallbacks:   Fallbacks,
 
     pub director_verifier: Verifier,
     pub repo_verifier:     Verifier,
@@ -61,6 +63,11 @@ impl Uptane {
         let mut hasher = Sha256::new();
         hasher.input(&pub_key);
 
+        let fallbacks = config.ecus.iter()
+            .map(|ecu| Util::read_text(&ecu.manifest_path).and_then(|text| Ok(json::from_str(&text)?)))
+            .collect::<Result<Fallbacks, _>>()
+            .map_err(|err| Error::Config(format!("couldn't read secondary metadata: {}", err)))?;
+
         let mut uptane = Uptane {
             director_server:  config.uptane.director_server.clone(),
             repo_server:      config.uptane.repo_server.clone(),
@@ -70,6 +77,8 @@ impl Uptane {
             primary_ecu: config.uptane.primary_ecu_serial.clone(),
             private_key: PrivateKey { keyid: hasher.result_str(), der_key: der_key },
             sig_type:    SignatureType::RsaSsaPss,
+            secondaries: config.ecus.clone(),
+            fallbacks:   fallbacks,
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
@@ -160,6 +169,23 @@ impl Uptane {
         Ok(verified)
     }
 
+    /// Download an image from a repository, returning an `ImageReader` on success.
+    pub fn fetch_image(&mut self, client: &Client, service: Service, refname: &str) -> Result<ImageReader, Error> {
+        let data = self.get(client, service, refname)?;
+        Util::write_file(&format!("/tmp/sota-images/{}", refname), &data)?;
+        ImageReader::new(refname.into(), "/tmp/sota-images".into())
+    }
+
+    /// Download an image from the `Director` repository.
+    pub fn fetch_director(&mut self, client: &Client, refname: &str) -> Result<ImageReader, Error> {
+        self.fetch_image(client, Service::Director, refname)
+    }
+
+    /// Download an image from the `Repo` repository.
+    pub fn fetch_repo(&mut self, client: &Client, refname: &str) -> Result<ImageReader, Error> {
+        self.fetch_image(client, Service::Repo, refname)
+    }
+
     /// Generate a new signed TUF installation report.
     pub fn signed_report(&mut self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
         let version = OstreePackage::get_latest(&self.primary_ecu)?.into_version(custom);
@@ -175,21 +201,10 @@ impl Uptane {
 
     /// Start a transaction to install the verified targets to their respective ECUs.
     pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Vec<TufSigned>, bool), Error> {
-        let bus = || -> Result<Box<Bus>, Error> {
-            Ok(Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?))
-        };
+        let (images, payloads) = self.fetch_targets(&verified, &treehub, creds)?;
+        let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
+        let mut primary = Primary::new(payloads, images, self.fallbacks.clone(), bus, self.atomic_timeout, None);
 
-        if let Some(ref targets) = verified.data.targets {
-            if let Some(pkg) = primary_target(targets, &self.primary_ecu, &treehub)? {
-                let serial = self.primary_ecu.clone();
-                let inst = Box::new(self.new_installer(serial.clone(), pkg, creds));
-                let mut ecu = Secondary::new(serial, bus()?, inst, self.atomic_timeout, None);
-                thread::spawn(move || ecu.listen());
-            }
-        }
-
-        let (images, payloads) = into_images(verified)?;
-        let mut primary = Primary::new(payloads, images, bus()?, None, self.atomic_timeout, None);
         match primary.commit() {
             Ok(()) => Ok((primary.into_signed(), true)),
             Err(Error::AtomicAbort(_)) |
@@ -198,53 +213,56 @@ impl Uptane {
         }
     }
 
-    fn new_installer(&self, serial: String, pkg: OstreePackage, creds: Credentials) -> PrimaryInstaller {
-        PrimaryInstaller {
-            serial: serial,
-            pkg: pkg,
-            sig_type: self.sig_type,
-            priv_key: self.private_key.clone(),
-            credentials: creds
-        }
-    }
-}
+    fn fetch_targets(&mut self, verified: &Verified, treehub: &Url, creds: Credentials)
+                     -> Result<(HashMap<String, ImageReader>, Payloads), Error> {
+        let mut primary_pkg = None;
+        let mut images = HashMap::new();
+        let targets = verified.data.targets.as_ref()
+            .ok_or_else(|| Error::UptaneTargets("no targets found".into()))?;
 
-fn primary_target(targets: &HashMap<String, TufMeta>, primary_ecu: &str, treehub: &Url) -> Result<Option<OstreePackage>, Error> {
-    let primaries = targets.iter()
-        .map(|(refname, meta)| match meta.custom {
-            Some(ref custom) if custom.ecuIdentifier == primary_ecu => {
-                Some(OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub))
-            }
-            _ => None
-        })
-        .filter_map(|pkg| if pkg.is_some() { pkg } else { None })
-        .collect::<Vec<Result<_, _>>>();
+        let mut payloads = targets.iter()
+            .map(|(refname, meta)| if let Some(ref custom) = meta.custom {
+                let ecu_serial = custom.ecuIdentifier.clone();
 
-    match primaries.len() {
-        0 => Ok(None),
-        1 => Ok(Some(primaries.into_iter().nth(0).expect("primary package")?)),
-        _ => Err(Error::UptaneTargets("multiple primary targets".into()))
-    }
-}
-
-fn into_images(verified: Verified) -> Result<(HashMap<String, ImageReader>, Payloads), Error> {
-    let images = HashMap::new(); // FIXME: download images
-
-    let json = verified.json.unwrap_or(Vec::new());
-    let targets = verified.data.targets.ok_or_else(|| Error::UptaneTargets("missing".into()))?;
-    let payloads = targets.into_iter()
-        .map(|(_, meta)| {
-            if let Some(custom) = meta.custom {
-                Ok((custom.ecuIdentifier, hashmap!{State::Verify => json.clone()}))
+                if let Ok(mut reader) = self.fetch_director(&*creds.client, refname) {
+                    let meta = reader.image_meta()?;
+                    images.insert(ecu_serial.clone(), reader);
+                    Ok((ecu_serial, hashmap!{ State::Fetch => json::to_vec(&meta)? }))
+                } else if let Ok(mut reader) = self.fetch_repo(&*creds.client, refname) {
+                    let meta = reader.image_meta()?;
+                    images.insert(ecu_serial.clone(), reader);
+                    Ok((ecu_serial, hashmap!{ State::Fetch => json::to_vec(&meta)? }))
+                } else {
+                    let pkg = OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?;
+                    if ecu_serial == self.primary_ecu {
+                        primary_pkg = Some(pkg.clone());
+                    }
+                    Ok((ecu_serial, hashmap!{ State::Fetch => json::to_vec(&pkg)? }))
+                }
             } else {
-                Err(Error::UptaneTargets("missing custom field with ecuIdentifier".into()))
-            }
-        })
-        .collect::<Result<Payloads, Error>>()?;
+                Err(Error::UptaneTargets(format!("refname {} has no custom field", refname)))
+            })
+            .collect::<Result<HashMap<_, _>, _>>()?;
 
-    if payloads.len() == 0 {
-        Err(Error::UptaneTargets("no targets found".into()))
-    } else {
+        if let Some(pkg) = primary_pkg {
+            let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
+            let inst = Box::new(PrimaryInstaller {
+                serial: self.primary_ecu.clone(),
+                pkg: pkg,
+                sig_type: self.sig_type,
+                priv_key: self.private_key.clone(),
+                credentials: creds
+            });
+            let mut ecu = Secondary::new(self.primary_ecu.clone(), bus, inst, self.atomic_timeout, None);
+            thread::spawn(move || ecu.listen());
+        }
+
+        if let Some(ref json) = verified.json {
+            for (_, mut states) in payloads.iter_mut() {
+                states.insert(State::Verify, json.clone());
+            }
+        }
+
         Ok((images, payloads))
     }
 }
@@ -398,6 +416,10 @@ impl Verified {
     pub fn is_new(&self) -> bool {
         self.new_ver > self.old_ver
     }
+
+    pub fn target_readers(&self) -> Result<HashMap<String, ImageReader>, Error> {
+        unimplemented!()
+    }
 }
 
 
@@ -425,6 +447,8 @@ mod tests {
                 der_key: pem::parse("-----BEGIN PRIVATE KEY-----\nMIIEvQIBADANBgkqhkiG9w0BAQEFAASCBKcwggSjAgEAAoIBAQDdC9QttkMbF5qB\n2plVU2hhG2sieXS2CVc3E8rm/oYGc9EHnlPMcAuaBtn9jaBo37PVYO+VFInzMu9f\nVMLm7d/hQxv4PjTBpkXvw1Ad0Tqhg/R8Lc4SXPxWxlVhg0ahLn3kDFQeEkrTNW7k\nxpAxWiE8V09ETcPwyNhPfcWeiBePwh8ySJ10IzqHt2kXwVbmL4F/mMX07KBYWIcA\n52TQLs2VhZLIaUBv9ZBxymAvogGz28clx7tHOJ8LZ/daiMzmtv5UbXPdt+q55rLJ\nZ1TuG0CuRqhTOllXnIvAYRQr6WBaLkGGbezQO86MDHBsV5TsG6JHPorrr6ogo+Lf\npuH6dcnHAgMBAAECggEBAMC/fs45fzyRkXYn4srHh14d5YbTN9VAQd/SD3zrdn0L\n4rrs8Y90KHmv/cgeBkFMx+iJtYBev4fk41xScf2icTVhKnOF8sTls1hGDIdjmeeb\nQ8ZAvs++a39TRMJaEW2dN8NyiKsMMlkH3+H3z2ZpfE+8pm8eDHza9dwjBP6fF0SP\nV1XPd2OSrJlvrgBrAU/8WWXYSYK+5F28QtJKsTuiwQylIHyJkd8cgZhgYXlUVvTj\nnHFJblpAT0qphji7p8G4Ejg+LNxu/ZD+D3wQ6iIPgKFVdC4uXmPwlf1LeYqXW0+g\ngTmHY7a/y66yn1H4A5gyfx2EffFMQu0Sl1RqzDVYYjECgYEA9Hy2QsP3pxW27yLs\nCu5e8pp3vZpdkNA71+7v2BVvaoaATnsSBOzo3elgRYsN0On4ObtfQXB3eC9poNuK\nzWxj8bkPbVOCpSpq//sUSqkh/XCmAhDl78BkgmWDb4EFEgcAT2xPBTHkb70jVAXB\nE1HBwsBcXhdxzRt8IYiBG+68d/8CgYEA53SJYpJ809lfpAG0CU986FFD7Fi/SvcX\n21TVMn1LpHuH7MZ2QuehS0SWevvspkIUm5uT3PrhTxdohAInNEzsdeHhTU11utIO\nrKnrtgZXKsBG4idsHu5ZQzp4n3CBEpfPFbOtP/UEKI/IGaJWGXVgG4J6LWmQ9LK9\nilNTaOUQ7jkCgYB+YP0B9DTPLN1cLgwf9mokNA7TdrkJA2r7yuo2I5ZtVUt7xghh\nfWk+VMXMDP4+UMNcbGvn8s/+01thqDrOx0m+iO/djn6JDC01Vz98/IKydImLpdqG\nHUiXUwwnFmVdlTrm01DhmZHA5N8fLr5IU0m6dx8IEExmPt/ioaJDoxvPVwKBgC+8\n1H01M3PKWLSN+WEWOO/9muHLaCEBF7WQKKzSNODG7cEDKe8gsR7CFbtl7GhaJr/1\ndajVQdU7Qb5AZ2+dEgQ6Q2rbOBYBLy+jmE8hvaa+o6APe3hhtp1sGObhoG2CTB7w\nwSH42hO3nBDVb6auk9T4s1Rcep5No1Q9XW28GSLZAoGATFlXg1hqNKLO8xXq1Uzi\nkDrN6Ep/wq80hLltYPu3AXQn714DVwNa3qLP04dAYXbs9IaQotAYVVGf6N1IepLM\nfQU6Q9fp9FtQJdU+Mjj2WMJVWbL0ihcU8VZV5TviNvtvR1rkToxSLia7eh39AY5G\nvkgeMZm7SwqZ9c/ZFnjJDqc=\n-----END PRIVATE KEY-----").unwrap().contents
             },
             sig_type: SignatureType::RsaSsaPss,
+            secondaries: Vec::new(),
+            fallbacks: hashmap!{},
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),

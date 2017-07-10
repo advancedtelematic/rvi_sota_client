@@ -13,6 +13,7 @@ use sota::datatype::{Error, PrivateKey, SignatureType, SocketAddrV4, Util};
 #[derive(Deserialize)]
 pub struct Config {
     pub ecu: Ecu,
+    pub transaction: Option<Transaction>,
     pub udp: Option<Udp>,
 }
 
@@ -49,8 +50,9 @@ impl Config {
             tuf_image: None,
         };
 
-        let timeout = Duration::from_secs(30);
-        Ok(Secondary::new(self.ecu.serial.clone(), Box::new(bus), Box::new(step), timeout, None))
+        let timeout = Duration::from_secs(self.transaction.as_ref().and_then(|t| t.timeout).unwrap_or(60));
+        let recover = self.transaction.as_ref().and_then(|t| t.recover.clone());
+        Ok(Secondary::new(self.ecu.serial.clone(), Box::new(bus), Box::new(step), timeout, recover))
     }
 }
 
@@ -64,6 +66,7 @@ pub struct Ecu {
     pub private_key_path: String,
     pub signature_type: SignatureType,
 }
+
 
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum BusType {
@@ -90,19 +93,14 @@ impl<'de> Deserialize<'de> for BusType {
 
 
 #[derive(Deserialize)]
-pub struct Udp {
-    pub wake_up: SocketAddrV4,
-    pub message: SocketAddrV4,
+pub struct Transaction {
+    pub timeout: Option<u64>,
+    pub recover: Option<String>,
 }
 
 
-pub struct Text;
-
-impl Text {
-    pub fn read(path: &str) -> Result<String, Error> {
-        let mut file = File::open(path)?;
-        let mut text = String::new();
-        file.read_to_string(&mut text)?;
-        Ok(text)
-    }
+#[derive(Deserialize)]
+pub struct Udp {
+    pub wake_up: SocketAddrV4,
+    pub message: SocketAddrV4,
 }

@@ -19,7 +19,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
-use sota::datatype::{Command, Config, Event};
+use sota::datatype::{Command, Config, EcuConfig, Event};
 use sota::gateway::{Console, Gateway, Http};
 #[cfg(feature = "rvi")]
 use sota::gateway::DBus;
@@ -232,6 +232,10 @@ fn build_config(version: &Option<String>) -> Config {
     opts.optopt("", "device-p12-password", "change the PKCS12 file password", "PASSWORD");
     opts.optopt("", "device-system-info", "change the system information command", "PATH");
 
+    opts.optmulti("", "ecu-serial", "add a secondary ECU serial", "SERIAL");
+    opts.optmulti("", "ecu-public-key-path", "add a secondary ECU public key path", "PATH");
+    opts.optmulti("", "ecu-manifest-path", "add a secondary ECU manifest path", "PATH");
+
     opts.optopt("", "gateway-console", "toggle the console gateway", "BOOL");
     opts.optopt("", "gateway-dbus", "toggle the dbus gateway", "BOOL");
     opts.optopt("", "gateway-http", "toggle the http gateway", "BOOL");
@@ -270,8 +274,11 @@ fn build_config(version: &Option<String>) -> Config {
     } else if cli.opt_present("version") {
         exit!(0, if let Some(ref v) = *version { v } else { "unknown" });
     }
-    let file = cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()).expect("No config provided");
-    let mut config = Config::load(&file).expect("Error loading config");
+
+    let mut config = match cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()) {
+        Some(file) => Config::load(&file).expect("Error loading config"),
+        None => exit!(1, "Config flag or SOTA_CONFIG environment variable required")
+    };
 
     config.auth.as_mut().map(|auth_cfg| {
         cli.opt_str("auth-server").map(|text| auth_cfg.server = text.parse().expect("Invalid auth-server URL"));
@@ -295,6 +302,21 @@ fn build_config(version: &Option<String>) -> Config {
     cli.opt_str("device-packages-dir").map(|path| config.device.packages_dir = path);
     cli.opt_str("device-package-manager").map(|text| config.device.package_manager = text.parse().expect("Invalid device-package-manager"));
     cli.opt_str("device-system-info").map(|cmd| config.device.system_info = Some(cmd));
+
+    let ecu_serials = cli.opt_strs("ecu-serial");
+    let ecu_keys = cli.opt_strs("ecu-public-key-path");
+    let ecu_manifests = cli.opt_strs("ecu-manifest-path");
+    match (ecu_serials.len(), ecu_keys.len(), ecu_manifests.len()) {
+        (0, 0, 0) => (),
+        (a, b, c) if a == b && a == c => {
+            config.ecus = ecu_serials.into_iter()
+                .zip(ecu_keys)
+                .zip(ecu_manifests)
+                .map(|((s, p), m)| EcuConfig { ecu_serial: s, public_key_path: p, manifest_path: m })
+                .collect::<Vec<EcuConfig>>();
+        }
+        _ => exit!(1, "equal number of 'ecu-' flags expected")
+    }
 
     cli.opt_str("gateway-console").map(|console| config.gateway.console = console.parse().expect("Invalid gateway-console boolean"));
     cli.opt_str("gateway-dbus").map(|dbus| config.gateway.dbus = dbus.parse().expect("Invalid gateway-dbus boolean"));

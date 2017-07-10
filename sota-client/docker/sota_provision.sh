@@ -2,10 +2,11 @@
 
 set -xeuo pipefail
 
-device_id="${SOTA_DEVICE_ID-$(petname || ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
-hardware_id="${SOTA_HARDWARE_ID-$(cat /etc/hostname)}"
-primary_serial=$(python -c "import random; print(random.randint(10**12, 10**13-1))")
-cert_dir="${SOTA_CERT_DIR-/usr/local/etc/sota}"
+device_id="${SOTA_DEVICE_ID:-$(petname || ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
+hardware_id="${SOTA_HARDWARE_ID:-$(cat /etc/hostname)}"
+primary_serial="${SOTA_PRIMARY_SERIAL:-$(echo $(tr -dc '[:alnum:]' < /dev/urandom | dd bs=1 count=10 2>/dev/null))}"
+cert_dir="${SOTA_CERT_DIR:-/usr/local/etc/sota}"
+
 mkdir -p "$cert_dir" && cd "$cert_dir"
 
 in_reg="${1-credentials}" # input registration credentials file prefix
@@ -23,7 +24,7 @@ main() {
   generate_toml
 }
 
-function wait_for_ntp() {
+wait_for_ntp() {
   while [[ "$(timedatectl status | grep NTP)" != "NTP synchronized: yes" ]]; do
     sleep 5
     echo "Waiting for NTP sync..."
@@ -56,18 +57,19 @@ register_device() {
 }
 
 register_ecus() {
-  echo "Generating RSA keypair for Primary ECU"
+  echo "Registering ECUs with Director..."
   openssl genpkey -algorithm RSA -out "$out_pri.der" -outform DER -pkeyopt rsa_keygen_bits:2048
   openssl rsa -pubout -in "$out_pri.der" -inform DER -out "$out_pri.pub"
   pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_pri.pub")
   ecus='{"ecu_serial":"'"$primary_serial"'","hardware_identifier":"'"$hardware_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
 
-  echo "Reading secondary ECUs from $cert_dir/$in_ecus"
-  while read -r secondary; do
-    [[ "$secondary" =~ [^\{.*\}$] ]] && ecus+=",$secondary"
+  while read -r serial hw_id; do
+    openssl genpkey -algorithm RSA -out "$serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+    openssl rsa -pubout -in "$serial.der" -inform DER -out "$serial.pub"
+    pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$serial.pub")
+    ecus+=',{"ecu_serial":"'"$serial"'","hardware_identifier":"'"$hw_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
   done < "$in_ecus"
 
-  echo "Registering ECUs with Director service"
   curl -vvf --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     "$SOTA_GATEWAY_URI/director/ecus" \
     -H 'Content-Type: application/json' \
@@ -107,6 +109,16 @@ metadata_path = "$cert_dir/metadata"
 private_key_path = "$cert_dir/$out_pri.der"
 public_key_path = "$cert_dir/$out_pri.pub"
 EOF
+
+  while read -r serial hw_id; do
+    cat >> sota.toml <<EOF
+
+[[ecus]]
+ecu_serial = "$serial"
+public_key_path = "$cert_dir/$serial.pub"
+manifest_path = "$cert_dir/$serial.manifest"
+EOF
+  done < "$in_ecus"
 }
 
 

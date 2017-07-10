@@ -74,8 +74,8 @@ pub struct StepData {
 
 /// A mapping from serials to the payloads to be delivered at each state.
 pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
-/// A function for returning a failed `ECU` installation report from a serial.
-pub type Abort = Fn(&str) -> Option<TufSigned>;
+/// A fallback manifest per ECU to use in case of timeouts.
+pub type Fallbacks = HashMap<String, TufSigned>;
 
 
 /// A `Primary` is responsible for coordinating state changes with all
@@ -85,34 +85,36 @@ pub struct Primary {
     txid:  Uuid,
     state: State,
 
-    payloads: Payloads,
-    images:   HashMap<String, ImageReader>,
-    acks:     HashMap<State, HashSet<String>>,
-    started:  DateTime<Utc>,
-    timeout:  Duration,
-    recover:  Option<String>,
-    signed:   HashMap<String, TufSigned>,
+    payloads:  Payloads,
+    images:    HashMap<String, ImageReader>,
+    fallbacks: Fallbacks,
+
+    acks:    HashMap<State, HashSet<String>>,
+    started: DateTime<Utc>,
+    timeout: Duration,
+    recover: Option<String>,
+    signed:  HashMap<String, TufSigned>,
 
     #[serde(skip_serializing, skip_deserializing)]
     bus: Option<Box<Bus>>,
-    #[serde(skip_serializing, skip_deserializing)]
-    abort: Option<Box<Abort>>,
 }
 
 impl Primary {
     /// Create a new `Primary` that will wake up the transactional secondaries.
-    pub fn new(payloads: Payloads,
-               images:   HashMap<String, ImageReader>,
-               bus:      Box<Bus>,
-               abort:    Option<Box<Abort>>,
-               timeout:  Duration,
-               recover:  Option<String>) -> Self {
+    pub fn new(payloads:  Payloads,
+               images:    HashMap<String, ImageReader>,
+               fallbacks: HashMap<String, TufSigned>,
+               bus:       Box<Bus>,
+               timeout:   Duration,
+               recover:   Option<String>) -> Self {
         Primary {
             txid:  Uuid::new_v4(),
             state: State::Idle,
 
-            payloads: payloads,
-            images: images,
+            payloads:  payloads,
+            images:    images,
+            fallbacks: fallbacks,
+
             acks: hashmap! {
                 State::Ready  => HashSet::new(),
                 State::Verify => HashSet::new(),
@@ -126,16 +128,14 @@ impl Primary {
             signed:  HashMap::new(),
 
             bus: Some(bus),
-            abort: abort,
         }
     }
 
     /// Recover from a crash by requesting an update on missing `Secondary` acks.
-    pub fn recover<P: AsRef<Path>>(path: P, bus: Box<Bus>, abort: Option<Box<Abort>>) -> Result<Self, Error> {
+    pub fn recover<P: AsRef<Path>>(path: P, bus: Box<Bus>) -> Result<Self, Error> {
         let mut primary: Primary = json::from_reader(BufReader::new(File::open(&path)?))?;
         info!("Primary state recovered from `{}`", path.as_ref().display());
         primary.bus = Some(bus);
-        primary.abort = abort;
         primary.started = Utc::now();
         primary.send_request(primary.state)?;
         Ok(primary)
@@ -175,7 +175,7 @@ impl Primary {
         for (serial, _) in &self.payloads {
             self.signed
                 .remove(serial)
-                .or_else(|| self.abort.as_ref().map(|f| f(serial)).unwrap_or(None))
+                .or_else(|| self.fallbacks.get(serial).cloned())
                 .map(|report| signed.push(report));
         }
         signed
@@ -764,7 +764,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_ok()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(3), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(3), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -785,7 +785,7 @@ mod tests {
             b.clone() => hashmap!{State::Fetch => "fetch payload".as_bytes().into()},
             c.clone() => hashmap!{State::Commit  => "commit payload".as_bytes().into()},
         };
-        let mut primary = Primary::new(payloads, hashmap!{}, bus(), None, timeout(3), None);
+        let mut primary = Primary::new(payloads, hashmap!{}, hashmap!{}, bus(), timeout(3), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -802,7 +802,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(6), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(6), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
@@ -819,7 +819,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(6), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(6), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
@@ -836,7 +836,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(6), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(6), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{a, b});
         assert_eq!(primary.aborted(), &hashset!{c});
@@ -853,7 +853,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(5), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(5), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b});
@@ -870,7 +870,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_err()));
         thread::spawn(move || assert!(sc.listen().is_err()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(5), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(5), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{});
         assert_eq!(primary.aborted(), &hashset!{a, b});
@@ -887,7 +887,7 @@ mod tests {
         thread::spawn(move || assert!(sb.listen().is_ok()));
         thread::spawn(move || assert!(sc.listen().is_ok()));
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(5), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(5), None);
         assert!(primary.commit().is_err());
         assert_eq!(primary.committed(), &hashset!{a, b});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -914,7 +914,7 @@ mod tests {
             assert!(sc.listen().is_ok());
         });
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(10), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -941,7 +941,7 @@ mod tests {
             assert!(sc.listen().is_ok());
         });
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(10), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -968,7 +968,7 @@ mod tests {
             assert!(sc.listen().is_ok());
         });
 
-        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, bus(), None, timeout(10), None);
+        let mut primary = Primary::new(payloads(&a, &b, &c), hashmap!{}, hashmap!{}, bus(), timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});
@@ -999,7 +999,7 @@ mod tests {
             c.clone() => hashmap!{State::Fetch => json::to_vec(&meta).expect("json")}
         };
         let images = hashmap!{image_name.into() => reader};
-        let mut primary = Primary::new(payloads, images, bus(), None, timeout(10), None);
+        let mut primary = Primary::new(payloads, images, hashmap!{}, bus(), timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});

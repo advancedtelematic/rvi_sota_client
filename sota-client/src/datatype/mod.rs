@@ -16,7 +16,7 @@ pub use self::auth::{AccessToken, Auth, ClientCredentials};
 pub use self::canonical::CanonicalJson;
 pub use self::command::Command;
 pub use self::config::{AuthConfig, CoreConfig, Config, DBusConfig, DeviceConfig,
-                       GatewayConfig, RviConfig, TlsConfig, UptaneConfig};
+                       EcuConfig, GatewayConfig, RviConfig, TlsConfig, UptaneConfig};
 pub use self::download::{DownloadComplete, DownloadFailed, Package, RequestStatus,
                          UpdateAvailable, UpdateRequest};
 pub use self::error::Error;

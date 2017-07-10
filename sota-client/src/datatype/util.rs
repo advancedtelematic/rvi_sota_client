@@ -16,6 +16,15 @@ impl Util {
         Ok(buf)
     }
 
+    pub fn read_text(path: &str) -> Result<String, Error> {
+        let mut file = BufReader::new(File::open(path)
+            .map_err(|err| Error::Client(format!("couldn't open {}: {}", path, err)))?);
+        let mut text = String::new();
+        file.read_to_string(&mut text)
+            .map_err(|err| Error::Client(format!("couldn't read {}: {}", path, err)))?;
+        Ok(text)
+    }
+
     pub fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
         let mut file = OpenOptions::new()
             .create(true)
