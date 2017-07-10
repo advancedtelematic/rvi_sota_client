@@ -1,14 +1,5 @@
 #!/bin/bash
 
-
-if [[ -z "$SOTA_NTP_SKIP" ]]; then
-  while [[ "$(timedatectl status | grep NTP)" != "NTP synchronized: yes" ]]; do
-    echo "Waiting for NTP sync..."
-    sleep 5
-  done
-fi
-
-
 set -xeuo pipefail
 
 device_id="${SOTA_DEVICE_ID-$(ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
@@ -25,11 +16,18 @@ in_ecus="${5-ecus}"       # input secondary ecus file
 
 
 main() {
-  register_device
+  register_device || { wait_for_ntp && register_device; }
   register_ecus
   fetch_metadata root director
   fetch_metadata root repo
   generate_toml
+}
+
+function wait_for_ntp() {
+  while [[ "$(timedatectl status | grep NTP)" != "NTP synchronized: yes" ]]; do
+    sleep 5
+    echo "Waiting for NTP sync..."
+  done
 }
 
 register_device() {
@@ -43,7 +41,8 @@ register_device() {
   curl -vvf --cacert "$out_ca.crt" --cert "$in_reg.pem" "$SOTA_GATEWAY_URI/devices" \
     -H 'Content-Type: application/json' \
     -d '{"deviceId":"'"$device_id"'","ttl":365}' \
-    -o "$out_dev.p12"
+    -o "$out_dev.p12" \
+    || return 1
   echo "Wrote device bundle to $cert_dir/$out_dev.p12"
 
   openssl pkcs12 -in "$out_dev.p12" -out "$out_dev.pem" -nodes -passin pass:""
