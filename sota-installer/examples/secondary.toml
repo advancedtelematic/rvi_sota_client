@@ -2,7 +2,7 @@
 serial = "my-ecu"
 install_type = "FetchImage"
 bus_type = "udp"
-private_key_id = "my-private-key"
+private_key_id = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 private_key_path = "/tmp/super-secret"
 signature_type = "rsassa-pss"
 
@@ -12,4 +12,4 @@ recover = "/tmp/recover"
 
 [udp]
 wake_up = "232.0.0.011:23211"
-message = "232.0.0.011:23211"
+message = "232.0.0.011:23212"

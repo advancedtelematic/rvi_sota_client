@@ -42,11 +42,10 @@ fn start() -> Result<()> {
 
         App::MultiTargetUpdate { env, session, targets } => {
             info!("Starting multi-target update...");
-            let updates = UpdateTargets::from(&targets.targets);
             let mtu = MultiTargetUpdate::new(env, session)?;
-            let update_id = mtu.create(&updates)?;
-            info!("update_id: {}", update_id);
-            mtu.launch(targets.device.device_id, update_id)
+            let id = mtu.create(&UpdateTargets::from(&targets.targets))?;
+            debug!("update_id: {}", id);
+            mtu.launch(targets.device.device_id, id)
         }
     }
 }

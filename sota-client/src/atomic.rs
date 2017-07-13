@@ -27,17 +27,6 @@ lazy_static! {
     };
 }
 
-/// An enumeration of all possible states for a `Primary` or `Secondary`.
-#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum State {
-    Idle,
-    Ready,
-    Verify,
-    Fetch,
-    Commit,
-    Abort,
-}
-
 
 /// Define the interface for communication between `Primary` and `Secondary` ECUs.
 pub trait Bus: Send {
@@ -48,34 +37,64 @@ pub trait Bus: Send {
     fn write_message(&self, msg: &Message) -> Result<(), Error>;
 }
 
+/// Define the interface for transitioning a `Secondary` to the next state.
+pub trait Step: Send {
+    fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error>;
+}
+
+
+/// All possible states for a `Primary` or `Secondary`.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum State {
+    Idle,
+    Ready,
+    Verify,
+    Fetch,
+    Commit,
+    Abort,
+}
+
 /// A `Bus` message to be picked up by either a `Primary` or a `Secondary`.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub enum Message {
-    Next { txid: Uuid, serial: String, state: State, payload: Vec<u8> },
-    Ack  { txid: Uuid, serial: String, state: State, report: Vec<u8> },
+    Next { txid: Uuid, serial: String, state: State, payload: Option<Payload> },
+    Ack  { txid: Uuid, serial: String, state: State, report: Option<TufSigned> },
 
     Req  { txid: Uuid, serial: String, image: String, index: u64 },
     Resp { txid: Uuid, serial: String, image: String, index: u64, chunk: Vec<u8> },
 }
 
-
-/// Transition a `Secondary` to the next state.
-pub trait Step: Send {
-    fn step(&mut self, state: State, payload: &[u8]) -> Result<StepData, Error>;
-}
-
-/// An `ImageWriter` should be returned at the `Fetch` state, while a
-/// `TufSigned` report should be returned at a `Commit` or `Abort` state.
-pub struct StepData {
-    pub report: Option<TufSigned>,
-    pub writer: Option<ImageWriter>,
-}
-
+/// A fallback manifest per ECU that will be sent in case of a timeout.
+pub type Manifests = HashMap<String, TufSigned>;
 
 /// A mapping from serials to the payloads to be delivered at each state.
-pub type Payloads = HashMap<String, HashMap<State, Vec<u8>>>;
-/// A fallback manifest per ECU to use in case of timeouts.
-pub type Fallbacks = HashMap<String, TufSigned>;
+pub type Payloads = HashMap<String, HashMap<State, Payload>>;
+
+/// Data that may be delivered to a `Secondary` before executing state transition.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+pub enum Payload {
+    Blob(Vec<u8>),
+    ImageMeta(Vec<u8>),
+    OstreePackage(Vec<u8>),
+    UptaneMetadata(Vec<u8>),
+}
+
+impl Payload {
+    pub fn len(&self) -> usize {
+        match *self {
+            Payload::Blob(ref bytes) => bytes.len(),
+            Payload::ImageMeta(ref bytes) => bytes.len(),
+            Payload::OstreePackage(ref bytes) => bytes.len(),
+            Payload::UptaneMetadata(ref bytes) => bytes.len(),
+        }
+    }
+}
+
+/// Data that may be passed to a `Secondary` following a state transition.
+pub enum StepData {
+    ImageWriter(ImageWriter),
+    TufReport(TufSigned),
+}
 
 
 /// A `Primary` is responsible for coordinating state changes with all
@@ -87,7 +106,7 @@ pub struct Primary {
 
     payloads:  Payloads,
     images:    HashMap<String, ImageReader>,
-    fallbacks: Fallbacks,
+    manifests: Manifests,
 
     acks:    HashMap<State, HashSet<String>>,
     started: DateTime<Utc>,
@@ -103,7 +122,7 @@ impl Primary {
     /// Create a new `Primary` that will wake up the transactional secondaries.
     pub fn new(payloads:  Payloads,
                images:    HashMap<String, ImageReader>,
-               fallbacks: HashMap<String, TufSigned>,
+               manifests: HashMap<String, TufSigned>,
                bus:       Box<Bus>,
                timeout:   Duration,
                recover:   Option<String>) -> Self {
@@ -113,7 +132,7 @@ impl Primary {
 
             payloads:  payloads,
             images:    images,
-            fallbacks: fallbacks,
+            manifests: manifests,
 
             acks: hashmap! {
                 State::Ready  => HashSet::new(),
@@ -175,7 +194,7 @@ impl Primary {
         for (serial, _) in &self.payloads {
             self.signed
                 .remove(serial)
-                .or_else(|| self.fallbacks.get(serial).cloned())
+                .or_else(|| self.manifests.get(serial).cloned())
                 .map(|report| signed.push(report));
         }
         signed
@@ -195,9 +214,7 @@ impl Primary {
                         if txid != self.txid { return Ok(()) }
                         debug!("ack from {}: {:?}", serial, state);
                         let _ = self.acks.get_mut(&state).expect("acks").insert(serial.clone());
-                        if let Ok(signed) = parse_signed(&report) {
-                            let _ = self.signed.insert(serial.clone(), signed);
-                        }
+                        if let Some(signed) = report { self.signed.insert(serial.clone(), signed); }
                         if state == State::Abort && ! is_terminal(self.state) {
                             self.transition(State::Abort)?;
                             Err(Error::AtomicAbort(serial))
@@ -250,14 +267,11 @@ impl Primary {
             if state == State::Ready {
                 self.bus.as_ref().expect("bus").write_wake_up(serial.clone(), self.txid)?;
             } else if self.acks(state).get(serial).is_none() {
-                let default_payload = Vec::new();
-                let payload = states.get(&state).unwrap_or(&default_payload);
-                if payload.len() > BUFFER_SIZE-1024 { return Err(Error::AtomicPayload); }
                 self.write_message(&Message::Next {
                     txid:    self.txid,
                     serial:  serial.clone(),
                     state:   state,
-                    payload: payload.clone()
+                    payload: states.get(&state).cloned()
                 })?;
             }
         }
@@ -277,6 +291,12 @@ impl Primary {
     }
 
     fn write_message(&self, msg: &Message) -> Result<(), Error> {
+        let len = match *msg {
+            Message::Next { payload: Some(ref payload), .. } => payload.len(),
+            Message::Resp { chunk: ref bytes, .. } => bytes.len(),
+            _ => 0
+        };
+        if len > BUFFER_SIZE-1024 { return Err(Error::AtomicPayload) }
         self.bus.as_ref().expect("bus").write_message(msg)
     }
 }
@@ -293,7 +313,7 @@ pub struct Secondary {
     started: DateTime<Utc>,
     timeout: Duration,
     recover: Option<String>,
-    payload: Option<Vec<u8>>,
+    payload: Option<Payload>,
     writers: HashMap<String, ImageWriter>,
     report:  Option<TufSigned>,
 
@@ -345,8 +365,7 @@ impl Secondary {
                 .and_then(|(serial, txid)| {
                     if serial != self.serial { return Ok(()) }
                     self.txid = Some(txid);
-                    self.transition(State::Ready, None)?;
-                    self.write_ack()
+                    self.transition(State::Ready, None)
                 })
                 .or_else(|err| if is_waiting(&err) { Ok(()) } else { Err(err) })?
         }
@@ -356,7 +375,7 @@ impl Secondary {
                 .and_then(|msg| match msg {
                     Message::Next { txid, serial, state, payload } => {
                         if txid != self.txid() || serial != self.serial { return Ok(()) }
-                        self.transition(state, if payload.len() > 0 { Some(payload) } else { None })
+                        self.transition(state, payload)
                     }
 
                     Message::Resp { txid, serial, image, index, chunk } => {
@@ -401,7 +420,7 @@ impl Secondary {
         }
     }
 
-    fn transition(&mut self, state: State, payload: Option<Vec<u8>>) -> Result<(), Error> {
+    fn transition(&mut self, state: State, payload: Option<Payload>) -> Result<(), Error> {
         if self.state == state {
             return self.write_ack();
         } else if ! is_valid(self.state, state) {
@@ -412,31 +431,34 @@ impl Secondary {
         self.checkpoint(state, payload.clone())?;
         self.step(state, payload)
             .map(|step_data| {
-                self.report = step_data.report;
-                match step_data.writer {
-                    Some(writer) => match self.writers.get(&writer.meta.image_name) {
-                        Some(_) => (),
-                        None => {
+                let step_done = match step_data {
+                    None => true,
+                    Some(StepData::ImageWriter(writer)) => {
+                        if let None = self.writers.get(&writer.meta.image_name) {
                             let image = writer.meta.image_name.clone();
                             let _ = self.writers.insert(image.clone(), writer);
                             let _ = self.request_chunk(image, 0);
                         }
-                    },
-                    None => {
-                        self.state = self.next;
-                        let _ = self.write_ack();
+                        false
                     }
+                    Some(StepData::TufReport(report)) => {
+                        self.report = Some(report);
+                        true
+                    }
+                };
+                if step_done {
+                    self.state = self.next;
+                    let _ = self.write_ack();
                 }
             })
             .map_err(|err| {
                 error!("serial {}: {}", self.serial, err);
                 let _ = self.transition(State::Abort, None);
-                let _ = self.write_ack();
                 Error::AtomicAbort(err.to_string())
             })
     }
 
-    fn checkpoint(&mut self, state: State, payload: Option<Vec<u8>>) -> Result<(), Error> {
+    fn checkpoint(&mut self, state: State, payload: Option<Payload>) -> Result<(), Error> {
         self.started = Utc::now();
         self.next = state;
         self.payload = payload;
@@ -446,9 +468,8 @@ impl Secondary {
         Ok(())
     }
 
-    fn step(&mut self, state: State, payload: Option<Vec<u8>>) -> Result<StepData, Error> {
-        let default_payload = Vec::new();
-        self.step.as_mut().expect("step").step(state, payload.as_ref().unwrap_or(&default_payload))
+    fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
+        self.step.as_mut().expect("step").step(state, payload)
     }
 
     fn txid(&self) -> Uuid {
@@ -481,26 +502,17 @@ impl Secondary {
     }
 
     fn write_ack(&self) -> Result<(), Error> {
-        let report = if let Some(ref report) = self.report {
-            Ok(json::to_vec(report)?)
-        } else if is_terminal(self.state) {
-            Err(Error::AtomicSigned)
-        } else {
-            Ok(Vec::new())
-        }?;
+        if let None = self.report {
+            if is_terminal(self.state) { return Err(Error::AtomicSigned); }
+        }
 
         self.write_message(&Message::Ack {
             txid: self.txid(),
             serial: self.serial.clone(),
             state: self.state,
-            report: report
+            report: self.report.clone()
         })
     }
-}
-
-
-fn parse_signed(payload: &[u8]) -> Result<TufSigned, Error> {
-    Ok(json::from_slice(payload)?)
 }
 
 fn is_valid(from: State, to: State) -> bool {
@@ -562,6 +574,7 @@ impl Multicast {
 impl Bus for Multicast {
     fn read_wake_up(&mut self) -> Result<(String, Uuid), Error> {
         let (len, _) = self.wake_up.recv_from(&mut self.msg_buf).map_err(Error::Io)?;
+        trace!("received wake_up: {:?}", &self.msg_buf[..len]);
         Ok(json::from_slice(&self.msg_buf[..len])?)
     }
 
@@ -573,6 +586,7 @@ impl Bus for Multicast {
 
     fn read_message(&mut self) -> Result<Message, Error> {
         let (len, _) = self.message.recv_from(&mut self.msg_buf).map_err(Error::Io)?;
+        trace!("received message: {:?}", &self.msg_buf[..len]);
         Ok(json::from_slice(&self.msg_buf[..len])?)
     }
 
@@ -584,6 +598,7 @@ impl Bus for Multicast {
 }
 
 
+#[cfg(not(feature = "docker"))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -595,40 +610,66 @@ mod tests {
     use datatype::{PrivateKey, SignatureType};
 
 
+    lazy_static! {
+        static ref PRIVATE_KEY: PrivateKey = PrivateKey {
+            keyid: "keyid".into(),
+            der_key: base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("pri_key")
+        };
+    }
+
+    fn step_data(state: State) -> Option<StepData> {
+        if is_terminal(state) {
+            let report = PRIVATE_KEY.sign_data(json::from_str("{}").expect("json"), SignatureType::Ed25519).expect("signed");
+            Some(StepData::TufReport(report))
+        } else {
+            None
+        }
+    }
+
+
     struct Success;
     impl Step for Success {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             Ok(step_data(state))
         }
     }
 
     struct VerifyPayload;
     impl Step for VerifyPayload {
-        fn step(&mut self, state: State, payload: &[u8]) -> Result<StepData, Error> {
-            if state == State::Verify && payload != b"verify payload" { return Err(Error::AtomicPayload) }
-            Ok(step_data(state))
+        fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
+            match (state, payload) {
+                (State::Verify, Some(Payload::Blob(ref b))) if b == b"verify payload" => Ok(None),
+                (State::Verify, _) => Err(Error::AtomicPayload),
+                _ => Ok(step_data(state))
+            }
         }
     }
 
     struct FetchPayload;
     impl Step for FetchPayload {
-        fn step(&mut self, state: State, payload: &[u8]) -> Result<StepData, Error> {
-            if state == State::Fetch && payload != b"fetch payload" { return Err(Error::AtomicPayload) }
-            Ok(step_data(state))
+        fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
+            match (state, payload) {
+                (State::Fetch, Some(Payload::Blob(ref b))) if b == b"fetch payload" => Ok(None),
+                (State::Fetch, _) => Err(Error::AtomicPayload),
+                _ => Ok(step_data(state))
+            }
         }
     }
 
     struct CommitPayload;
     impl Step for CommitPayload {
-        fn step(&mut self, state: State, payload: &[u8]) -> Result<StepData, Error> {
-            if state == State::Commit && payload != b"commit payload" { return Err(Error::AtomicPayload) }
-            Ok(step_data(state))
+        fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
+            match (state, payload) {
+                (State::Commit, Some(Payload::Blob(ref b))) if b == b"commit payload" => Ok(step_data(state)),
+                (State::Commit, _) => Err(Error::AtomicPayload),
+                _ => Ok(step_data(state))
+            }
         }
     }
 
     struct VerifyFail;
     impl Step for VerifyFail {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Verify { return Err(Error::AtomicAbort("verify failed".into())) }
             Ok(step_data(state))
         }
@@ -636,7 +677,7 @@ mod tests {
 
     struct FetchFail;
     impl Step for FetchFail {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Fetch { return Err(Error::AtomicAbort("fetch failed".into())) }
             Ok(step_data(state))
         }
@@ -644,7 +685,7 @@ mod tests {
 
     struct CommitFail;
     impl Step for CommitFail {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Commit {
                 thread::sleep(Duration::from_secs(1));
                 Err(Error::AtomicAbort("commit failed".into()))
@@ -656,7 +697,7 @@ mod tests {
 
     struct VerifyTimeout;
     impl Step for VerifyTimeout {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Verify { thread::sleep(Duration::from_secs(99)) }
             Ok(step_data(state))
         }
@@ -664,7 +705,7 @@ mod tests {
 
     struct FetchTimeout;
     impl Step for FetchTimeout {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Fetch { thread::sleep(Duration::from_secs(99)) }
             Ok(step_data(state))
         }
@@ -672,7 +713,7 @@ mod tests {
 
     struct CommitTimeout;
     impl Step for CommitTimeout {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Commit { thread::sleep(Duration::from_secs(99)) }
             Ok(step_data(state))
         }
@@ -680,7 +721,7 @@ mod tests {
 
     struct VerifyCrash;
     impl Step for VerifyCrash {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Verify { panic!("verify crashed") }
             Ok(step_data(state))
         }
@@ -688,7 +729,7 @@ mod tests {
 
     struct FetchCrash;
     impl Step for FetchCrash {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Fetch { panic!("fetch crashed") }
             Ok(step_data(state))
         }
@@ -696,7 +737,7 @@ mod tests {
 
     struct CommitCrash;
     impl Step for CommitCrash {
-        fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+        fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
             if state == State::Commit { panic!("commit crashed") }
             Ok(step_data(state))
         }
@@ -704,34 +745,18 @@ mod tests {
 
     struct FetchImage;
     impl Step for FetchImage {
-        fn step(&mut self, state: State, payload: &[u8]) -> Result<StepData, Error> {
-            if state == State::Fetch {
-                let meta = json::from_reader(payload).expect("read image metadata");
-                let writer = ImageWriter::new(meta, "/tmp/sota-test-images".into()).expect("writer");
-                Ok(StepData { report: None, writer: Some(writer) })
-            } else {
-                Ok(step_data(state))
+        fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
+            match (state, payload) {
+                (State::Fetch, Some(Payload::ImageMeta(ref bytes))) => {
+                    let meta = json::from_slice(bytes).expect("read ImageMeta");
+                    let writer = ImageWriter::new(meta, "/tmp/sota-test-images".into()).expect("writer");
+                    Ok(Some(StepData::ImageWriter(writer)))
+                }
+                _ => Ok(step_data(state))
             }
         }
     }
 
-
-    lazy_static! {
-        static ref PRIVATE_KEY: PrivateKey = PrivateKey {
-            keyid:   "keyid".into(),
-            der_key: base64::decode("0wm+qYNKH2v7VUMy0lEz0ZfOEtEbdbDNwklW5PPLs4WpCLVDpXuapnO3XZQ9i1wV3aiIxi1b5TxVeVeulbyUyw==").expect("pri_key")
-        };
-    }
-
-    fn step_data(state: State) -> StepData {
-        let report = if is_terminal(state) {
-            let data = json::from_str("{}").expect("json");
-            Some(PRIVATE_KEY.sign_data(data, SignatureType::Ed25519).expect("signed"))
-        } else {
-            None
-        };
-        StepData { report: report, writer: None }
-    }
 
     fn bus() -> Box<Bus> {
         Box::new(Multicast::new(
@@ -770,8 +795,10 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
+    extern crate env_logger;
     #[test]
     fn atomic_payloads() {
+        env_logger::init().unwrap();
         let (a, b, c) = serials("verify_payload");
         let mut sa = Secondary::new(a.clone(), bus(), Box::new(VerifyPayload), timeout(1), None);
         let mut sb = Secondary::new(b.clone(), bus(), Box::new(FetchPayload), timeout(1), None);
@@ -781,9 +808,9 @@ mod tests {
         thread::spawn(move || assert!(sc.listen().is_ok()));
 
         let payloads = hashmap!{
-            a.clone() => hashmap!{State::Verify  => "verify payload".as_bytes().into()},
-            b.clone() => hashmap!{State::Fetch => "fetch payload".as_bytes().into()},
-            c.clone() => hashmap!{State::Commit  => "commit payload".as_bytes().into()},
+            a.clone() => hashmap!{ State::Verify => Payload::Blob(b"verify payload".to_vec()) },
+            b.clone() => hashmap!{ State::Fetch  => Payload::Blob(b"fetch payload".to_vec()) },
+            c.clone() => hashmap!{ State::Commit => Payload::Blob(b"commit payload".to_vec()) },
         };
         let mut primary = Primary::new(payloads, hashmap!{}, hashmap!{}, bus(), timeout(3), None);
         assert!(primary.commit().is_ok());
@@ -791,7 +818,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_verify_fail() {
         let (a, b, c) = serials("verify_fail");
@@ -808,7 +834,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_fetch_fail() {
         let (a, b, c) = serials("fetch_fail");
@@ -825,7 +850,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b, c});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_commit_fail() {
         let (a, b, c) = serials("commit_fail");
@@ -842,7 +866,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{c});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_verify_timeout() {
         let (a, b, c) = serials("verify_timeout");
@@ -859,7 +882,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_fetch_timeout() {
         let (a, b, c) = serials("fetch_timeout");
@@ -876,7 +898,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{a, b});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_commit_timeout() {
         let (a, b, c) = serials("commit_timeout");
@@ -893,7 +914,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_verify_crash() {
         let (a, b, c) = serials("verify_crash");
@@ -920,7 +940,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_fetch_crash() {
         let (a, b, c) = serials("fetch_crash");
@@ -947,7 +966,6 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn atomic_commit_crash() {
         let (a, b, c) = serials("commit_crash");
@@ -996,7 +1014,7 @@ mod tests {
         let payloads = hashmap!{
             a.clone() => hashmap!{},
             b.clone() => hashmap!{},
-            c.clone() => hashmap!{State::Fetch => json::to_vec(&meta).expect("json")}
+            c.clone() => hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta).expect("json")) }
         };
         let images = hashmap!{image_name.into() => reader};
         let mut primary = Primary::new(payloads, images, hashmap!{}, bus(), timeout(10), None);

@@ -30,20 +30,25 @@ fn main() {
 fn start() -> Result<(), Error> {
     let config = parse_args()?;
     let mut secondary = config.to_secondary()?;
-    secondary.listen()
+    info!("Starting a new listener...");
+    match secondary.listen() {
+        Ok(()) => info!("Listener complete."),
+        Err(err) => error!("Listener error: {}", err)
+    }
+    Ok(())
 }
 
 fn parse_args() -> Result<Config, Error> {
     let matches = clap_app!(
         launcher =>
-            (@arg config: -c --config +required +takes_value "Path to the secondary config file")
             (@arg level: -l --level +takes_value "Sets the logging level")
+            (@arg secondary: -s --secondary +required +takes_value "Path to the secondary config")
     ).get_matches();
 
     let level = matches.value_of("level").unwrap_or("INFO");
     start_logging(level);
 
-    let config = match matches.value_of("config") {
+    let config = match matches.value_of("secondary") {
         Some(file) => Util::read_text(file).and_then(|text| text.parse::<Config>()),
         None => Err(Error::Config("no config file given".to_string()))
     }?;

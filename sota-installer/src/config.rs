@@ -38,7 +38,6 @@ impl Config {
         let step = Installer {
             serial: self.ecu.serial.clone(),
             install_type: self.ecu.install_type,
-
             private_key: PrivateKey {
                 keyid: self.ecu.private_key_id.clone(),
                 der_key: Util::read_file(&self.ecu.private_key_path)?

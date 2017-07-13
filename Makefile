@@ -8,9 +8,9 @@ IMAGE_NIGHTLY := advancedtelematic/rust:x86-nightly-2017-07-03
 IMAGE_CLIENT := advancedtelematic/sota-client:latest
 IMAGE_FPM := advancedtelematic/fpm:latest
 
-# client binary target triple
+# binary target triple
 TARGET := x86_64-unknown-linux-gnu
-# client binary features
+# client features
 FEATURES := default
 
 DOCKER_DIR := $(CURDIR)/sota-client/docker
@@ -29,9 +29,10 @@ DOCKER_RUN := \
 		--volume ~/.cargo/git:/root/.cargo/git \
 		--volume ~/.cargo/registry:/root/.cargo/registry
 
-CARGO_CLIENT := $(DOCKER_RUN) --workdir /src/sota-client $(IMAGE_STABLE) cargo
-CARGO_INSTALLER := $(DOCKER_RUN) --workdir /src/sota-installer $(IMAGE_NIGHTLY) cargo
-CARGO_LAUNCHER := $(DOCKER_RUN) --workdir /src/sota-launcher $(IMAGE_NIGHTLY) cargo
+# run the cargo command in docker for each binary
+CLIENT := $(DOCKER_RUN) --workdir /src/sota-client $(IMAGE_STABLE) cargo
+INSTALLER := $(DOCKER_RUN) --workdir /src/sota-installer $(IMAGE_NIGHTLY) cargo
+LAUNCHER := $(DOCKER_RUN) --workdir /src/sota-launcher $(IMAGE_NIGHTLY) cargo
 
 
 .PHONY: help start generate test doc client launcher installer \
@@ -45,20 +46,22 @@ start: image ## Use a local `sota.toml` config file to run the client.
 	@$(DOCKER_RUN) --net=host --volume sota.toml:/usr/local/etc/sota.toml $(IMAGE_CLIENT)
 
 test: ## Run all unit tests.
-	@$(CARGO_CLIENT) test --target=$(TARGET) --features=docker
+	@$(CLIENT) test --target=$(TARGET) --features=docker
 
 doc: ## Generate documentation for the sota crate.
-	@$(CARGO_CLIENT) doc --lib --no-deps --release --features=$(FEATURES)
+	@$(CLIENT) doc --lib --no-deps --release --features=$(FEATURES)
 
-client: sota-client/src/ ## Compile a new client binary.
-	@$(CARGO_CLIENT) build --release --target=$(TARGET) --features=$(FEATURES)
-	@cp sota-client/target/$(TARGET)/release/sota_client $(DOCKER_DIR)
+client: sota-client/src/ ## Compile sota_client.
+	@$(CLIENT) build --release --target=$(TARGET) --features=$(FEATURES)
+	@cp target/$(TARGET)/release/sota_client $(DOCKER_DIR)
 
-launcher: sota-launcher/src/ ## Compile a new launcher binary.
-	@$(CARGO_LAUNCHER) build --release --target=$(TARGET)
+launcher: sota-launcher/src/ ## Compile sota-launcher.
+	@$(LAUNCHER) build --release --target=$(TARGET)
+	@cp target/$(TARGET)/release/sota-launcher $(DOCKER_DIR)
 
-installer: sota-installer/src/ ## Compile a new installer binary.
-	@$(CARGO_INSTALLER) build --release --target=$(TARGET)
+installer: sota-installer/src/ ## Compile sota-installer.
+	@$(INSTALLER) build --release --target=$(TARGET)
+	@cp target/$(TARGET)/release/sota-installer $(DOCKER_DIR)
 
 image: client ## Build a Docker image for running the client.
 	@docker build --tag advancedtelematic/sota-client $(DOCKER_DIR)
@@ -67,8 +70,8 @@ image-uptane: image ## Build a Docker image for running the client with uptane.
 	@docker build --tag advancedtelematic/sota-client-uptane -f $(DOCKER_DIR)/DockerfileUptane .
 
 clean: ## Remove all compiled libraries, builds and temporary files.
-	@$(CARGO_CLIENT) clean
-	@rm -rf $(DOCKER_DIR)/sota_client $(DOCKER_DIR)/*.{deb,rpm} /tmp/sota-*
+	@$(CLIENT) clean && $(INSTALLER) clean && $(LAUNCHER) clean
+	@rm -rf /tmp/sota-* $(DOCKER_DIR)/{*.{deb,rpm},sota_client,sota-installer,sota-launcher}
 
 deb: client ## Create a new DEB package of the client.
 	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh deb

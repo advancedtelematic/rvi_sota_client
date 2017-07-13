@@ -10,7 +10,8 @@ use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Fallbacks, Multicast, Payloads, Primary, Secondary, State, Step, StepData};
+use atomic::{Manifests, Multicast, Payload, Payloads, Primary, Secondary, State,
+             Step, StepData};
 use images::ImageReader;
 use datatype::{CanonicalJson, Config, EcuConfig, EcuCustom, EcuManifests, Error,
                InstallOutcome, Key, KeyType, OstreePackage, PrivateKey, RoleData,
@@ -46,7 +47,7 @@ pub struct Uptane {
     pub private_key: PrivateKey,
     pub sig_type:    SignatureType,
     pub secondaries: Vec<EcuConfig>,
-    pub fallbacks:   Fallbacks,
+    pub manifests:   Manifests,
 
     pub director_verifier: Verifier,
     pub repo_verifier:     Verifier,
@@ -63,11 +64,11 @@ impl Uptane {
         let mut hasher = Sha256::new();
         hasher.input(&pub_key);
 
-        let fallbacks = config.ecus.iter()
+        let manifests = config.ecus.iter()
             .map(|ecu| Util::read_text(&ecu.manifest_path)
                  .and_then(|text| Ok((ecu.ecu_serial.clone(), json::from_str(&text)?))))
-            .collect::<Result<Fallbacks, _>>()
-            .map_err(|err| Error::Config(format!("couldn't read secondary metadata: {}", err)))?;
+            .collect::<Result<Manifests, _>>()
+            .map_err(|err| Error::Config(format!("couldn't read secondary manifest: {}", err)))?;
 
         let mut uptane = Uptane {
             director_server:  config.uptane.director_server.clone(),
@@ -79,7 +80,7 @@ impl Uptane {
             private_key: PrivateKey { keyid: hasher.result_str(), der_key: der_key },
             sig_type:    SignatureType::RsaSsaPss,
             secondaries: config.ecus.clone(),
-            fallbacks:   fallbacks,
+            manifests:   manifests,
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
@@ -173,8 +174,8 @@ impl Uptane {
     /// Download an image from a repository, returning an `ImageReader` on success.
     pub fn fetch_image(&mut self, client: &Client, service: Service, refname: &str) -> Result<ImageReader, Error> {
         let data = self.get(client, service, refname)?;
-        Util::write_file(&format!("/tmp/sota-images/{}", refname), &data)?;
-        ImageReader::new(refname.into(), "/tmp/sota-images".into())
+        Util::write_file(&format!("/tmp/sota-reader-images/{}", refname), &data)?;
+        ImageReader::new(refname.into(), "/tmp/sota-reader-images".into())
     }
 
     /// Download an image from the `Director` repository.
@@ -189,7 +190,7 @@ impl Uptane {
 
     /// Retrieve a list of manifests per ECU.
     pub fn get_manifests(&mut self) -> Result<Vec<TufSigned>, Error> {
-        let mut signed = self.fallbacks.iter().map(|(_, val)| val.clone()).collect::<Vec<_>>();
+        let mut signed = self.manifests.iter().map(|(_, val)| val.clone()).collect::<Vec<_>>();
         signed.push(self.signed_report(None)?);
         Ok(signed)
     }
@@ -211,7 +212,7 @@ impl Uptane {
     pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Vec<TufSigned>, bool), Error> {
         let (images, payloads) = self.fetch_targets(&verified, &treehub, creds)?;
         let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
-        let mut primary = Primary::new(payloads, images, self.fallbacks.clone(), bus, self.atomic_timeout, None);
+        let mut primary = Primary::new(payloads, images, self.manifests.clone(), bus, self.atomic_timeout, None);
 
         match primary.commit() {
             Ok(()) => Ok((primary.into_signed(), true)),
@@ -234,18 +235,18 @@ impl Uptane {
 
                 if let Ok(mut reader) = self.fetch_director(&*creds.client, refname) {
                     let meta = reader.image_meta()?;
-                    images.insert(ecu_serial.clone(), reader);
-                    Ok((ecu_serial, hashmap!{ State::Fetch => json::to_vec(&meta)? }))
+                    images.insert(meta.image_name.clone(), reader);
+                    Ok((ecu_serial, hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta)?) }))
                 } else if let Ok(mut reader) = self.fetch_repo(&*creds.client, refname) {
                     let meta = reader.image_meta()?;
-                    images.insert(ecu_serial.clone(), reader);
-                    Ok((ecu_serial, hashmap!{ State::Fetch => json::to_vec(&meta)? }))
+                    images.insert(meta.image_name.clone(), reader);
+                    Ok((ecu_serial, hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta)?) }))
                 } else {
                     let pkg = OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?;
                     if ecu_serial == self.primary_ecu {
                         primary_pkg = Some(pkg.clone());
                     }
-                    Ok((ecu_serial, hashmap!{ State::Fetch => json::to_vec(&pkg)? }))
+                    Ok((ecu_serial, hashmap!{ State::Fetch => Payload::OstreePackage(json::to_vec(&pkg)?) }))
                 }
             } else {
                 Err(Error::UptaneTargets(format!("refname {} has no custom field", refname)))
@@ -267,7 +268,7 @@ impl Uptane {
 
         if let Some(ref json) = verified.json {
             for (_, mut states) in payloads.iter_mut() {
-                states.insert(State::Verify, json.clone());
+                states.insert(State::Verify, Payload::UptaneMetadata(json.clone()));
             }
         }
 
@@ -286,22 +287,17 @@ pub struct PrimaryInstaller {
 }
 
 impl PrimaryInstaller {
-    fn signed(&self, outcome: InstallOutcome) -> Result<StepData, Error> {
+    fn signed(&self, outcome: InstallOutcome) -> Result<Option<StepData>, Error> {
         let custom = EcuCustom::from_result(outcome.into_result(self.serial.clone()));
         let version = OstreePackage::get_latest(&self.pkg.ecu_serial)?.into_version(Some(custom));
-        Ok(StepData {
-            report: Some(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?),
-            writer: None,
-        })
+        Ok(Some(StepData::TufReport(self.priv_key.sign_data(json::to_value(version)?, self.sig_type)?)))
     }
 }
 
 impl Step for PrimaryInstaller {
-    fn step(&mut self, state: State, _: &[u8]) -> Result<StepData, Error> {
+    fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
         match state {
-            State::Idle | State::Ready | State::Verify | State::Fetch => {
-                Ok(StepData { report: None, writer: None })
-            }
+            State::Idle | State::Ready | State::Verify | State::Fetch => Ok(None),
             State::Commit => self.signed(self.pkg.install(&self.credentials)?),
             State::Abort  => self.signed(InstallOutcome::error("aborted".into()))
         }
@@ -424,10 +420,6 @@ impl Verified {
     pub fn is_new(&self) -> bool {
         self.new_ver > self.old_ver
     }
-
-    pub fn target_readers(&self) -> Result<HashMap<String, ImageReader>, Error> {
-        unimplemented!()
-    }
 }
 
 
@@ -456,7 +448,7 @@ mod tests {
             },
             sig_type: SignatureType::RsaSsaPss,
             secondaries: Vec::new(),
-            fallbacks: hashmap!{},
+            manifests: hashmap!{},
 
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
