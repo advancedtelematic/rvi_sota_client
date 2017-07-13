@@ -31,7 +31,7 @@ shift
 function make_pkg {
   dest="$1"
   bin_dir="${BIN_DIR:-/usr/local/bin}"
-  config_dir="${CONFIG_DIR:-/usr/local/etc}"
+  config_dir="${CONFIG_DIR:-/usr/etc}"
   config_path="${CONFIG_PATH:-${cwd}/../tests/config/default.toml}"
   toml_file=$(mktemp)
 
