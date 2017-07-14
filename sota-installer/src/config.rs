@@ -43,6 +43,8 @@ impl Config {
                 der_key: Util::read_file(&self.ecu.private_key_path)?
             },
             sig_type: self.ecu.signature_type,
+
+            filepath: None,
         };
 
         let timeout = Duration::from_secs(self.transaction.as_ref().and_then(|t| t.timeout).unwrap_or(60));

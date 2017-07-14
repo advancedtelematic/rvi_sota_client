@@ -1,6 +1,5 @@
 use json;
 use serde::{self, Deserialize, Deserializer};
-use std::fs;
 use std::str::FromStr;
 
 use sota::atomic::{Payload, State, Step, StepData};
@@ -43,44 +42,42 @@ pub struct Installer {
     pub install_type: InstallType,
     pub private_key: PrivateKey,
     pub sig_type: SignatureType,
+
+    pub filepath: Option<String>,
 }
 
 impl Step for Installer {
     fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
-        info!("Serial {} Moving to state {:?}", self.serial, state);
         match self.install_type {
-            InstallType::FetchImage => self.install_fetch_image(state, payload),
+            InstallType::FetchImage => {
+                match state {
+                    State::Idle   => Ok(None),
+                    State::Ready  => Ok(None),
+                    State::Verify => Ok(None),
+                    State::Fetch  => self.step_image_writer(payload),
+                    State::Commit => self.step_report(InstallOutcome::ok()),
+                    State::Abort  => self.step_report(InstallOutcome::error("aborted".into()))
+                }
+            },
         }
     }
 }
 
 impl Installer {
-    fn install_fetch_image(&self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
-        match state {
-            State::Idle   => Ok(None),
-            State::Ready  => Ok(None),
-            State::Verify => Ok(None),
-            State::Fetch  => self.step_image_writer(payload),
-            State::Commit => self.step_report(InstallOutcome::ok()),
-            State::Abort  => self.step_report(InstallOutcome::error("aborted".into()))
-        }
-    }
-
-    fn step_image_writer(&self, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
-        match payload {
-            Some(Payload::ImageMeta(bytes)) => {
-                let meta: ImageMeta = json::from_slice(&bytes)?;
-                fs::create_dir_all(IMAGE_DIR)?;
-                Ok(Some(StepData::ImageWriter(ImageWriter::new(meta, IMAGE_DIR.into())?)))
-            }
-            _ => Err(Error::Image(format!("unexpected image_writer payload data: {:?}", payload)))
+    fn step_image_writer(&mut self, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
+        if let Some(Payload::ImageMeta(bytes)) = payload {
+            let meta: ImageMeta = json::from_slice(&bytes)?;
+            self.filepath = Some(meta.image_name.clone());
+            Ok(Some(StepData::ImageWriter(ImageWriter::new(meta, IMAGE_DIR.into())?)))
+        } else {
+            Err(Error::Image(format!("unexpected image_writer payload data: {:?}", payload)))
         }
     }
 
     fn step_report(&self, outcome: InstallOutcome) -> Result<Option<StepData>, Error> {
         let custom = EcuCustom::from_result(outcome.into_result(self.serial.clone()));
         let image = TufImage {
-            filepath: "<undefined>".into(),
+            filepath: if let Some(ref path) = self.filepath { path.clone() } else { "<unknown>".into() },
             fileinfo: TufMeta {
                 length: 0,
                 hashes: hashmap!{ "sha256".into() => "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into() },

@@ -4,13 +4,14 @@ use crypto::sha1::Sha1;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
+use std::path::Path;
 use std::os::unix::fs::FileExt;
 use std::time::Duration;
 
 use datatype::Error;
 
 
-const CHUNK_SIZE: usize = 64*1024;
+const CHUNK_SIZE: usize = 512;
 
 struct Chunk([u8; CHUNK_SIZE]);
 
@@ -110,8 +111,12 @@ pub struct ImageWriter {
 impl ImageWriter {
     /// Prepare to read an image file in chunks.
     pub fn new(meta: ImageMeta, image_dir: String) -> Result<Self, Error> {
-        fs::create_dir_all(&image_dir)?;
-        let file = File::create(&format!("{}/{}", image_dir, meta.image_name))?;
+        let image_path = format!("{}/{}", image_dir, meta.image_name);
+        let path = Path::new(&image_path);
+        if let Some(dir) = path.parent() {
+            fs::create_dir_all(dir)?;
+        }
+        let file = File::create(path)?;
         file.set_len(meta.image_size)?;
 
         Ok(ImageWriter {

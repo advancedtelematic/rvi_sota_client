@@ -14,7 +14,7 @@ use datatype::{Error, TufSigned, Util};
 use images::{ImageReader, ImageWriter};
 
 
-const BUFFER_SIZE: usize = 100*1024;
+const BUFFER_SIZE: usize = 64*1024;
 
 lazy_static! {
     static ref VALID_TRANSITIONS: HashMap<State, Vec<State>> = hashmap! {
@@ -296,7 +296,8 @@ impl Primary {
             Message::Resp { chunk: ref bytes, .. } => bytes.len(),
             _ => 0
         };
-        if len > BUFFER_SIZE-1024 { return Err(Error::AtomicPayload) }
+        //FIXME: udp/tcp buffer sizes
+        //if len > BUFFER_SIZE-1024 { return Err(Error::AtomicPayload) }
         self.bus.as_ref().expect("bus").write_message(msg)
     }
 }
