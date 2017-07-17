@@ -49,8 +49,7 @@ impl Parameter for Start {
             (dir, *size)
         };
         let meta = ImageMeta::new(image_name.clone(), size, self.chunkscount, self.checksum.clone());
-        let writer = ImageWriter::new(meta, dir).map_err(|err| format!("couldn't create image writer: {}", err))?;
-        transfers.active.insert(image_name, writer);
+        transfers.active.insert(image_name, ImageWriter::new(meta, dir));
 
         let chunk = ChunkReceived {
             device:    remote.device_id.clone(),
@@ -112,7 +111,7 @@ impl Parameter for Finish {
         let image_name = transfers.active.get(&format!("{}", self.update_id))
             .ok_or_else(|| format!("unknown package: {}", self.update_id))
             .and_then(|writer| {
-                writer.verify().map_err(|err| format!("couldn't assemble package: {}", err))?;
+                writer.verify_image().map_err(|err| format!("couldn't assemble package: {}", err))?;
                 Ok(writer.meta.image_name.clone())
             })?;
         transfers.active.remove(&format!("{}", self.update_id));

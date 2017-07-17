@@ -291,13 +291,7 @@ impl Primary {
     }
 
     fn write_message(&self, msg: &Message) -> Result<(), Error> {
-        let len = match *msg {
-            Message::Next { payload: Some(ref payload), .. } => payload.len(),
-            Message::Resp { chunk: ref bytes, .. } => bytes.len(),
-            _ => 0
-        };
         //FIXME: udp/tcp buffer sizes
-        //if len > BUFFER_SIZE-1024 { return Err(Error::AtomicPayload) }
         self.bus.as_ref().expect("bus").write_message(msg)
     }
 }
@@ -386,7 +380,7 @@ impl Secondary {
                             .and_then(|writer| {
                                 writer.write_chunk(&chunk, index)?;
                                 if writer.is_complete() {
-                                    Ok(writer.verify().map(|_| None)?)
+                                    Ok(writer.assemble_chunks().map(|_| None)?)
                                 } else {
                                     Ok(Some(index+1))
                                 }
@@ -750,7 +744,7 @@ mod tests {
             match (state, payload) {
                 (State::Fetch, Some(Payload::ImageMeta(ref bytes))) => {
                     let meta = json::from_slice(bytes).expect("read ImageMeta");
-                    let writer = ImageWriter::new(meta, "/tmp/sota-test-images".into()).expect("writer");
+                    let writer = ImageWriter::new(meta, "/tmp/sota-test-images".into());
                     Ok(Some(StepData::ImageWriter(writer)))
                 }
                 _ => Ok(step_data(state))
@@ -796,10 +790,8 @@ mod tests {
         assert_eq!(primary.aborted(), &hashset!{});
     }
 
-    extern crate env_logger;
     #[test]
     fn atomic_payloads() {
-        env_logger::init().unwrap();
         let (a, b, c) = serials("verify_payload");
         let mut sa = Secondary::new(a.clone(), bus(), Box::new(VerifyPayload), timeout(1), None);
         let mut sb = Secondary::new(b.clone(), bus(), Box::new(FetchPayload), timeout(1), None);

@@ -56,6 +56,7 @@ fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
 }
 
 
+#[cfg(not(feature = "docker"))]
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -64,7 +65,6 @@ mod tests {
     use uuid::Uuid;
 
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn websocket_connections() {
         let (ctx, crx) = chan::sync::<CommandExec>(0);

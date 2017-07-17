@@ -68,7 +68,7 @@ impl Installer {
         if let Some(Payload::ImageMeta(bytes)) = payload {
             let meta: ImageMeta = json::from_slice(&bytes)?;
             self.filepath = Some(meta.image_name.clone());
-            Ok(Some(StepData::ImageWriter(ImageWriter::new(meta, IMAGE_DIR.into())?)))
+            Ok(Some(StepData::ImageWriter(ImageWriter::new(meta, IMAGE_DIR.into()))))
         } else {
             Err(Error::Image(format!("unexpected image_writer payload data: {:?}", payload)))
         }
