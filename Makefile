@@ -3,8 +3,7 @@ SOTA_VERSION    := $(shell git rev-parse HEAD | cut -c-7)
 PACKAGE_VERSION := $(shell git describe --tags | cut -c2-)
 
 # docker images
-IMAGE_STABLE := advancedtelematic/rust:x86-1.15.1
-IMAGE_NIGHTLY := advancedtelematic/rust:x86-nightly-2017-07-03
+IMAGE_RUST := advancedtelematic/rust:x86-1.15.1
 IMAGE_CLIENT := advancedtelematic/sota-client:latest
 IMAGE_FPM := advancedtelematic/fpm:latest
 
@@ -30,9 +29,9 @@ DOCKER_RUN := \
 		--volume ~/.cargo/registry:/root/.cargo/registry
 
 # run the cargo command in docker for each binary
-CLIENT := $(DOCKER_RUN) --workdir /src/sota-client $(IMAGE_STABLE) cargo
-INSTALLER := $(DOCKER_RUN) --workdir /src/sota-installer $(IMAGE_NIGHTLY) cargo
-LAUNCHER := $(DOCKER_RUN) --workdir /src/sota-launcher $(IMAGE_NIGHTLY) cargo
+CLIENT := $(DOCKER_RUN) --workdir /src/sota-client $(IMAGE_RUST) cargo
+INSTALLER := $(DOCKER_RUN) --workdir /src/sota-installer $(IMAGE_RUST) cargo
+LAUNCHER := $(DOCKER_RUN) --workdir /src/sota-launcher $(IMAGE_RUST) cargo
 
 
 .PHONY: help start generate test doc client launcher installer \
@@ -84,3 +83,6 @@ sota-version: ## Print the version displayed inside the sota client logs.
 
 package-version: ## Print the version used for building packages.
 	@echo $(PACKAGE_VERSION)
+
+yocto-version: ## Print a list of cargo crates for building with yocto recipies.
+	@cat Cargo.lock | sed -e '1,/metadata/ d' Cargo.lock | awk '{print "crate://crates.io/"$$2 "/" $$3" \\"}'
