@@ -19,10 +19,13 @@ in_ecus="${5-ecus}"       # input secondary ecus file
 main() {
   register_device || { wait_for_ntp && register_device; }
   register_ecus
+
   fetch_metadata root director
   fetch_metadata root repo
+
   generate_toml
   generate_manifests
+  generate_installers
 }
 
 wait_for_ntp() {
@@ -123,7 +126,17 @@ EOF
 }
 
 generate_manifests() {
-  sota-launcher --mode manifests --privkeys "$cert_dir" --level debug
+  sota-launcher manifests --level debug --priv-keys "$cert_dir"
+}
+
+generate_installers() {
+  while read -r serial hw_id; do
+    cat > "$serial.toml" <<EOF
+serial = "$serial"
+private_key_path = "$cert_dir/$serial.der"
+signature_type = "rsassa-pss"
+EOF
+  done < "$in_ecus"
 }
 
 

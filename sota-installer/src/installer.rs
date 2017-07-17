@@ -1,6 +1,5 @@
 use json;
-use serde::{self, Deserialize, Deserializer};
-use std::str::FromStr;
+use std::fs;
 
 use sota::atomic::{Payload, State, Step, StepData};
 use sota::images::{ImageMeta, ImageWriter};
@@ -8,30 +7,9 @@ use sota::datatype::{EcuCustom, EcuVersion, Error, InstallOutcome, PrivateKey,
                      SignatureType, TufImage, TufMeta};
 
 
-const IMAGE_DIR: &'static str = "/tmp/sota-writer-images";
-
-
-#[derive(PartialEq, Clone, Copy, Debug)]
+#[derive(PartialEq, Clone, Debug)]
 pub enum InstallType {
-    FetchImage,
-}
-
-impl FromStr for InstallType {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self, Error> {
-        match s.to_lowercase().as_ref() {
-            "fetchimage" => Ok(InstallType::FetchImage),
-            _ => Err(Error::Parse(format!("unknown installer type: {}", s)))
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for InstallType {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        let s: String = Deserialize::deserialize(de)?;
-        s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
-    }
+    Overwrite { image_path: String },
 }
 
 
@@ -43,20 +21,34 @@ pub struct Installer {
     pub private_key: PrivateKey,
     pub sig_type: SignatureType,
 
+    pub image_dir: String,
     pub filepath: Option<String>,
 }
 
 impl Step for Installer {
     fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
         match self.install_type {
-            InstallType::FetchImage => {
+            InstallType::Overwrite { image_path: ref to } => {
                 match state {
                     State::Idle   => Ok(None),
                     State::Ready  => Ok(None),
                     State::Verify => Ok(None),
-                    State::Fetch  => self.step_image_writer(payload),
-                    State::Commit => self.step_report(InstallOutcome::ok()),
-                    State::Abort  => self.step_report(InstallOutcome::error("aborted".into()))
+                    State::Fetch  => {
+                        if let Some(Payload::ImageMeta(bytes)) = payload {
+                            let meta: ImageMeta = json::from_slice(&bytes)?;
+                            self.filepath = Some(meta.image_name.clone());
+                            Ok(Some(StepData::ImageWriter(ImageWriter::new(meta, self.image_dir.clone()))))
+                        } else {
+                            Err(Error::Image(format!("unexpected image_writer payload data: {:?}", payload)))
+                        }
+                    },
+                    State::Commit => {
+                        let from = format!("{}/{}", self.image_dir, self.filepath.as_ref().expect("filepath"));
+                        fs::copy(&from, to)?;
+                        fs::remove_file(from)?;
+                        self.step_report(InstallOutcome::ok())
+                    },
+                    State::Abort => self.step_report(InstallOutcome::error("aborted".into()))
                 }
             },
         }
@@ -64,16 +56,6 @@ impl Step for Installer {
 }
 
 impl Installer {
-    fn step_image_writer(&mut self, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
-        if let Some(Payload::ImageMeta(bytes)) = payload {
-            let meta: ImageMeta = json::from_slice(&bytes)?;
-            self.filepath = Some(meta.image_name.clone());
-            Ok(Some(StepData::ImageWriter(ImageWriter::new(meta, IMAGE_DIR.into()))))
-        } else {
-            Err(Error::Image(format!("unexpected image_writer payload data: {:?}", payload)))
-        }
-    }
-
     fn step_report(&self, outcome: InstallOutcome) -> Result<Option<StepData>, Error> {
         let custom = EcuCustom::from_result(outcome.into_result(self.serial.clone()));
         let image = TufImage {

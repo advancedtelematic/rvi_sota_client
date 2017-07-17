@@ -1,15 +1,8 @@
-[ecu]
 serial = "my-ecu"
-install_type = "FetchImage"
-bus_type = "udp"
 private_key_id = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
 private_key_path = "/tmp/super-secret"
 signature_type = "rsassa-pss"
 
-[transaction]
 timeout = 30
-recover = "/tmp/recover"
-
-[udp]
-wake_up = "232.0.0.011:23211"
-message = "232.0.0.011:23212"
+bus_type = "udp"
+image_dir = "/tmp/sota-writer-images"

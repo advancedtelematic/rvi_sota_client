@@ -1,0 +1,2 @@
+serial = "my-ecu"
+private_key_path = "/tmp/super-secret"

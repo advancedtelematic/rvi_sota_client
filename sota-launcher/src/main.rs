@@ -15,6 +15,7 @@ mod config;
 mod manifests;
 mod mtu;
 
+use clap::AppSettings;
 use env_logger::LogBuilder;
 use log::LogLevelFilter;
 use std::process;
@@ -53,40 +54,44 @@ fn start() -> Result<()> {
 fn parse_args() -> Result<App> {
     let matches = clap_app!(
         launcher =>
-            (@arg level: -l --level +takes_value "Sets the logging level")
-            (@arg mode: -m --mode +required +takes_value "Sets the launch mode")
-            (@arg env: -e --env +takes_value "Set the environment type")
-            (@arg session: -s --session +takes_value "Set the PLAY_SESSION cookie")
-            (@arg privkeys: --privkeys +takes_value "Directory containing private DER keys")
-            (@arg targets: --targets +takes_value "Path to a TOML file containing the launch targets")
+            (setting: AppSettings::SubcommandRequiredElseHelp)
+            (setting: AppSettings::VersionlessSubcommands)
+
+            (@arg level: -l --level +takes_value +global "Sets the logging level")
+
+            (@subcommand mtu =>
+                (about: "Launch a multi-target update")
+                (setting: AppSettings::ArgRequiredElseHelp)
+                (@arg env: -e --env +takes_value "Set the environment type")
+                (@arg session: -s --session +takes_value "Set the PLAY_SESSION cookie")
+                (@arg targets: -t --targets +takes_value "Path to a TOML file containing the launch targets")
+            )
+
+            (@subcommand manifests =>
+                (about: "Generate per-ECU manifest files")
+                (setting: AppSettings::ArgRequiredElseHelp)
+                (@arg privkeys: -k --("priv-keys") +takes_value "Directory containing private DER keys")
+            )
     ).get_matches();
 
     let level = matches.value_of("level").unwrap_or("INFO");
     start_logging(level);
 
-    let app = match matches.value_of("mode").unwrap_or("").parse()? {
-        Mode::Manifests => App::GenerateManifests {
-            priv_keys_dir: matches.value_of("privkeys")
-                .ok_or_else(|| ErrorKind::Config("--privkeys flag required".to_string()))?.into()
-        },
-
-        Mode::Mtu => {
-            let env: Environment = matches.value_of("env")
-                .ok_or_else(|| ErrorKind::Config("--env flag required".to_string()))?.parse()?;
-            let session: PlaySession = matches.value_of("session")
-                .ok_or_else(|| ErrorKind::Config("--session flag required".to_string()))?.parse()?;
-
-            let targets_file = matches.value_of("targets")
-                .ok_or_else(|| ErrorKind::Config("--targets flag required".to_string()))?;
-            let targets = Util::read_text(targets_file)?.parse()?;
-
-            App::MultiTargetUpdate {
-                env: env,
-                session: session,
-                targets: targets,
-            }
+    let app = if let Some(cmd) = matches.subcommand_matches("mtu") {
+        let targets = cmd.value_of("targets").ok_or_else(|| ErrorKind::Config("--targets flag required".to_string()))?;
+        App::MultiTargetUpdate {
+            env: cmd.value_of("env").ok_or_else(|| ErrorKind::Config("--env flag required".to_string()))?.parse()?,
+            session: cmd.value_of("session").ok_or_else(|| ErrorKind::Config("--session flag required".to_string()))?.parse()?,
+            targets: Util::read_text(targets)?.parse()?
         }
+    } else if let Some(cmd) = matches.subcommand_matches("manifests") {
+        App::GenerateManifests {
+            priv_keys_dir: cmd.value_of("privkeys").ok_or_else(|| ErrorKind::Config("--priv-keys flag required".to_string()))?.into()
+        }
+    } else {
+        Err(ErrorKind::Config("no subcommand provided".into()))?
     };
+
     Ok(app)
 }
 
