@@ -171,21 +171,18 @@ impl Uptane {
         Ok(verified)
     }
 
-    /// Download an image from a repository, returning an `ImageReader` on success.
-    pub fn fetch_image(&mut self, client: &Client, service: Service, refname: &str) -> Result<ImageReader, Error> {
-        let data = self.get(client, service, refname)?;
+    /// Download an image from the `Director` repository.
+    pub fn fetch_director(&mut self, client: &Client, refname: &str) -> Result<ImageReader, Error> {
+        let data = self.get(client, Service::Director, refname)?;
         Util::write_file(&format!("/tmp/sota-reader-images/{}", refname), &data)?;
         ImageReader::new(refname.into(), "/tmp/sota-reader-images".into())
     }
 
-    /// Download an image from the `Director` repository.
-    pub fn fetch_director(&mut self, client: &Client, refname: &str) -> Result<ImageReader, Error> {
-        self.fetch_image(client, Service::Director, refname)
-    }
-
     /// Download an image from the `Repo` repository.
     pub fn fetch_repo(&mut self, client: &Client, refname: &str) -> Result<ImageReader, Error> {
-        self.fetch_image(client, Service::Repo, &format!("targets/{}", refname))
+        let data = self.get(client, Service::Repo, &format!("targets/{}", refname))?;
+        Util::write_file(&format!("/tmp/sota-reader-images/{}", refname), &data)?;
+        ImageReader::new(refname.into(), "/tmp/sota-reader-images".into())
     }
 
     /// Retrieve a list of manifests per ECU.

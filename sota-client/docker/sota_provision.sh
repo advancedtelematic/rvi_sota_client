@@ -64,6 +64,7 @@ register_ecus() {
   echo "Registering ECUs with Director..."
   openssl genpkey -algorithm RSA -out "$out_pri.der" -outform DER -pkeyopt rsa_keygen_bits:2048
   openssl rsa -pubout -in "$out_pri.der" -inform DER -out "$out_pri.pub"
+  # join the next line and jump back to the start before escaping all newlines
   pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_pri.pub")
   ecus='{"ecu_serial":"'"$primary_serial"'","hardware_identifier":"'"$hardware_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
 

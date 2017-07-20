@@ -56,8 +56,7 @@ fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
 }
 
 
-#[cfg(not(feature = "docker"))]
-#[cfg(test)]
+#[cfg(all(test, not(feature = "docker")))]
 mod tests {
     use super::*;
     use crossbeam;

@@ -593,8 +593,7 @@ impl Bus for Multicast {
 }
 
 
-#[cfg(not(feature = "docker"))]
-#[cfg(test)]
+#[cfg(all(test, not(feature = "docker")))]
 mod tests {
     use super::*;
     use base64;
