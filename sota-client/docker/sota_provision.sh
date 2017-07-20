@@ -2,7 +2,7 @@
 
 set -xeuo pipefail
 
-device_id="${SOTA_DEVICE_ID-$(ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
+device_id="${SOTA_DEVICE_ID-$(petname || ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
 hardware_id="${SOTA_HARDWARE_ID-$(cat /etc/hostname)}"
 primary_serial=$(python -c "import random; print(random.randint(10**12, 10**13-1))")
 cert_dir="${SOTA_CERT_DIR-/usr/local/etc/sota}"
