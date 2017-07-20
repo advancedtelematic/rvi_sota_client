@@ -30,7 +30,6 @@ DOCKER_RUN := \
 		--workdir /src
 CARGO := $(DOCKER_RUN) $(IMAGE_RUST) cargo
 
-
 .PHONY: help start generate test doc client image image-uptane deb rpm sota-version package-version
 .DEFAULT_GOAL := help
 
@@ -49,9 +48,9 @@ test: ## Run all unit tests.
 doc: ## Generate documentation for the sota crate.
 	$(CARGO) doc --lib --no-deps --release --features=$(FEATURES)
 
-client: src/ ## Compile a new release build of the client.
+client: sota-client/src ## Compile a new release build of the client.
 	$(CARGO) build --release --target=$(TARGET) --features=$(FEATURES)
-	@cp target/$(TARGET)/release/sota_client run/
+	@cp target/$(TARGET)/release/sota_client sota-client/docker/
 
 image: client ## Build a Docker image for running the client.
 	@docker build --tag advancedtelematic/sota-client $(DOCKER_DIR)
@@ -64,10 +63,10 @@ clean: ## Remove all compiled libraries, builds and temporary files.
 	@rm -rf $(DOCKER_DIR)/sota_client $(DOCKER_DIR)/*.{deb,rpm} /tmp/sota-*
 
 deb: client ## Create a new DEB package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) $(DOCKER_DIR)/make_package.sh deb
+	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh
 
 rpm: client ## Create a new RPM package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) $(DOCKER_DIR)/make_package.sh rpm
+	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh
 
 sota-version: ## Print the version displayed inside the sota client logs.
 	@echo $(SOTA_VERSION)
