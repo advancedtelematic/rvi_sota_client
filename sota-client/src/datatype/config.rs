@@ -1,10 +1,8 @@
-use std::fs::File;
-use std::io::prelude::*;
 use std::ops::Deref;
 use toml;
 use uuid::Uuid;
 
-use datatype::{Auth, ClientCredentials, Error, SocketAddrV4, Url};
+use datatype::{Auth, ClientCredentials, Error, SocketAddrV4, Url, Util};
 use http::TlsData;
 use pacman::PacMan;
 
@@ -16,6 +14,7 @@ pub struct Config {
     pub core:    CoreConfig,
     pub dbus:    DBusConfig,
     pub device:  DeviceConfig,
+    pub ecus:    Vec<EcuConfig>,
     pub gateway: GatewayConfig,
     pub network: NetworkConfig,
     pub rvi:     RviConfig,
@@ -27,10 +26,7 @@ impl Config {
     /// Read a toml config file using default values for missing sections or fields.
     pub fn load(path: &str) -> Result<Config, Error> {
         info!("Loading config file: {}", path);
-        let mut file = File::open(path).map_err(|err| Error::Config(format!("couldn't open config: {}", err)))?;
-        let mut toml = String::new();
-        file.read_to_string(&mut toml).map_err(|err| Error::Config(format!("couldn't read config: {}", err)))?;
-        Config::parse(&toml)
+        Config::parse(&Util::read_text(path)?)
     }
 
     /// Parse a toml config using default values for missing sections or fields.
@@ -43,8 +39,8 @@ impl Config {
     /// Return the initial Auth type from the current Config.
     pub fn initial_auth(&self) -> Result<Auth, &'static str> {
         match (self.auth.as_ref(), self.tls.as_ref()) {
-            (None,    None)    => Ok(Auth::None),
-            (None,    Some(_)) => Ok(Auth::Certificate),
+            (None, None) => Ok(Auth::None),
+            (None, Some(_)) => Ok(Auth::Certificate),
             (Some(_), Some(_)) => Err("Need one of [auth] or [tls] section only."),
             (Some(&AuthConfig { client_id: ref id, client_secret: ref secret, .. }), None) => {
                 Ok(Auth::Credentials(ClientCredentials { client_id: id.clone(), client_secret: secret.clone() }))
@@ -77,6 +73,7 @@ struct PartialConfig {
     pub core:    Option<ParsedCoreConfig>,
     pub dbus:    Option<ParsedDBusConfig>,
     pub device:  Option<ParsedDeviceConfig>,
+    pub ecus:    Option<Vec<ParsedEcuConfig>>,
     pub gateway: Option<ParsedGatewayConfig>,
     pub network: Option<ParsedNetworkConfig>,
     pub rvi:     Option<ParsedRviConfig>,
@@ -91,6 +88,7 @@ impl PartialConfig {
             core:    self.core.map(|cfg| cfg.defaultify()).unwrap_or_default(),
             dbus:    self.dbus.map(|cfg| cfg.defaultify()).unwrap_or_default(),
             device:  self.device.map(|cfg| cfg.defaultify()).unwrap_or_default(),
+            ecus:    self.ecus.map(|vec| vec.into_iter().map(|cfg| cfg.defaultify()).collect()).unwrap_or_default(),
             gateway: self.gateway.map(|cfg| cfg.defaultify()).unwrap_or_default(),
             network: self.network.map(|cfg| cfg.defaultify()).unwrap_or_default(),
             rvi:     self.rvi.map(|cfg| cfg.defaultify()).unwrap_or_default(),
@@ -301,6 +299,43 @@ impl Defaultify<DeviceConfig> for ParsedDeviceConfig {
             package_manager: self.package_manager.unwrap_or(default.package_manager),
             auto_download:   self.auto_download.unwrap_or(default.auto_download),
             system_info:     self.system_info.or(default.system_info),
+        }
+    }
+}
+
+
+/// The [[ecu]] configuration section.
+#[derive(Deserialize, PartialEq, Eq, Debug, Clone)]
+pub struct EcuConfig {
+    pub ecu_serial:      String,
+    pub public_key_path: String,
+    pub manifest_path:   String,
+}
+
+impl Default for EcuConfig {
+    fn default() -> EcuConfig {
+        EcuConfig {
+            ecu_serial:      "my-serial".into(),
+            public_key_path: "/tmp/my-serial.pub".into(),
+            manifest_path:   "/tmp/my-serial.manifest".into(),
+        }
+    }
+}
+
+#[derive(Deserialize, Default)]
+struct ParsedEcuConfig {
+    ecu_serial:      Option<String>,
+    public_key_path: Option<String>,
+    manifest_path:   Option<String>,
+}
+
+impl Defaultify<EcuConfig> for ParsedEcuConfig {
+    fn defaultify(self) -> EcuConfig {
+        let default = EcuConfig::default();
+        EcuConfig {
+            ecu_serial:      self.ecu_serial.unwrap_or(default.ecu_serial),
+            public_key_path: self.public_key_path.unwrap_or(default.public_key_path),
+            manifest_path:   self.manifest_path.unwrap_or(default.manifest_path),
         }
     }
 }

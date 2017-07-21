@@ -10,7 +10,8 @@ use std::process::{Command, Output};
 use std::str;
 use tar::Archive;
 
-use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome, TufMeta, Url, Util};
+use datatype::{EcuCustom, EcuVersion, Error, InstallCode, InstallOutcome,
+               TufMeta, TufImage, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
 
@@ -81,7 +82,7 @@ impl OstreePackage {
     /// Convert the current `OstreePackage` into an `EcuVersion`.
     pub fn into_version(self, custom: Option<EcuCustom>) -> EcuVersion {
         let meta = TufMeta::from("sha256".into(), self.commit);
-        EcuVersion::from(self.ecu_serial, self.refName, meta, custom)
+        EcuVersion::from(self.ecu_serial, TufImage { filepath: self.refName, fileinfo: meta }, custom)
     }
 
     /// Install this package using the `ostree` command.

@@ -15,11 +15,11 @@ cwd="$(cd "$(dirname "$0")" && pwd)"
 case $1 in
   "deb" )
     pac_man="deb"
-    pac_flags="--deb-systemd ${cwd}/sota_client_default.service"
+    pac_flags="--deb-systemd ${cwd}/sota-client.service"
     ;;
   "rpm" )
     pac_man="rpm"
-    pac_flags="--rpm-service ${cwd}/sota_client_default.service"
+    pac_flags="--rpm-service ${cwd}/sota-client.service"
     ;;
   *)
     echo "unknown package format $1"

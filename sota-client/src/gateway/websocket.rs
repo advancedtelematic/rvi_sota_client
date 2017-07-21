@@ -56,7 +56,7 @@ fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
 }
 
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "docker")))]
 mod tests {
     use super::*;
     use crossbeam;
@@ -64,7 +64,6 @@ mod tests {
     use uuid::Uuid;
 
 
-    #[cfg(not(feature = "docker"))]
     #[test]
     fn websocket_connections() {
         let (ctx, crx) = chan::sync::<CommandExec>(0);

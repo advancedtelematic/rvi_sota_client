@@ -1,0 +1,8 @@
+serial = "my-ecu"
+private_key_id = "1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef"
+private_key_path = "/tmp/super-secret"
+signature_type = "rsassa-pss"
+
+timeout = 30
+bus_type = "udp"
+image_dir = "/tmp/sota-writer-images"

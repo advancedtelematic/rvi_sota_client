@@ -206,15 +206,12 @@ pub struct EcuVersion {
 }
 
 impl EcuVersion {
-    pub fn from(ecu_serial: String, refname: String, meta: TufMeta, custom: Option<EcuCustom>) -> Self {
+    pub fn from(ecu_serial: String, image: TufImage, custom: Option<EcuCustom>) -> Self {
         EcuVersion {
             attacks_detected: "".into(),
             custom: custom,
             ecu_serial: ecu_serial,
-            installed_image: TufImage {
-                filepath: refname,
-                fileinfo: meta
-            },
+            installed_image: image,
             previous_timeserver_time: "1970-01-01T00:00:00Z".into(),
             timeserver_time: "1970-01-01T00:00:00Z".into(),
         }

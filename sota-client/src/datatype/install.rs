@@ -17,6 +17,11 @@ impl InstallOutcome {
         InstallOutcome { code: code, stdout: stdout, stderr: stderr }
     }
 
+    /// Create a new installation outcome with a code of `OK`.
+    pub fn ok() -> InstallOutcome {
+        InstallOutcome { code: InstallCode::OK, stdout: "".into(), stderr: "".into() }
+    }
+
     /// Create a new installation outcome with a code of `GENERAL_ERROR`.
     pub fn error(stderr: String) -> InstallOutcome {
         InstallOutcome { code: InstallCode::GENERAL_ERROR, stdout: "".into(), stderr: stderr }

@@ -1,4 +1,6 @@
 use crypto::ed25519;
+use crypto::digest::Digest;
+use crypto::sha2::Sha256;
 use json;
 use openssl::hash::MessageDigest;
 use openssl::pkey::PKey;
@@ -13,7 +15,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use untrusted::Input;
 
-use datatype::Error;
+use datatype::{EcuVersion, Error, PrivateKey, TufSigned, Util};
 
 
 const RSA_PKCS1_PSS_PADDING: c_int = 6;
@@ -94,6 +96,13 @@ impl SignatureType {
                 verify().unwrap_or_else(|err| { trace!("RSA SSA-PSS verification failed: {}", err); false })
             }
         }
+    }
+
+    pub fn sign_manifest(&self, manifest: EcuVersion, private_key_path: &str) -> Result<TufSigned, Error> {
+        let mut hasher = Sha256::new();
+        hasher.input(&json::to_vec(&manifest)?);
+        let key = PrivateKey { keyid: hasher.result_str(), der_key: Util::read_file(private_key_path)? };
+        key.sign_data(json::to_value(manifest)?, *self)
     }
 }
 
