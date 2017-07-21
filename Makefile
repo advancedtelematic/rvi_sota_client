@@ -63,10 +63,10 @@ clean: ## Remove all compiled libraries, builds and temporary files.
 	@rm -rf $(DOCKER_DIR)/sota_client $(DOCKER_DIR)/*.{deb,rpm} /tmp/sota-*
 
 deb: client ## Create a new DEB package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh
+	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh deb
 
 rpm: client ## Create a new RPM package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh
+	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh rpm
 
 sota-version: ## Print the version displayed inside the sota client logs.
 	@echo $(SOTA_VERSION)
