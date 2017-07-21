@@ -8,6 +8,7 @@ pub struct Util;
 
 impl Util {
     pub fn read_file(path: &str) -> Result<Vec<u8>, Error> {
+        trace!("reading file: {}", path);
         let mut file = BufReader::new(File::open(path)
             .map_err(|err| Error::Client(format!("couldn't open {}: {}", path, err)))?);
         let mut buf = Vec::new();
@@ -17,6 +18,7 @@ impl Util {
     }
 
     pub fn read_text(path: &str) -> Result<String, Error> {
+        trace!("reading text from file: {}", path);
         let mut file = BufReader::new(File::open(path)
             .map_err(|err| Error::Client(format!("couldn't open {}: {}", path, err)))?);
         let mut text = String::new();
@@ -26,6 +28,7 @@ impl Util {
     }
 
     pub fn write_file(path: &str, buf: &[u8]) -> Result<(), Error> {
+        trace!("writing to file: {}", path);
         let mut file = OpenOptions::new()
             .create(true)
             .write(true)

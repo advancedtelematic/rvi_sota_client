@@ -1,6 +1,7 @@
 #[macro_use] extern crate clap;
 extern crate env_logger;
 #[macro_use] extern crate log;
+#[macro_use] extern crate maplit;
 extern crate serde;
 #[macro_use] extern crate serde_derive;
 extern crate serde_json as json;
@@ -15,8 +16,8 @@ use env_logger::LogBuilder;
 use log::LogLevelFilter;
 use std::process;
 
-use config::{Config, Text};
-use sota::datatype::Error;
+use config::Config;
+use sota::datatype::{Error, Util};
 
 
 fn main() {
@@ -43,7 +44,7 @@ fn parse_args() -> Result<Config, Error> {
     start_logging(level);
 
     let config = match matches.value_of("config") {
-        Some(file) => Text::read(file).and_then(|text| text.parse::<Config>()),
+        Some(file) => Util::read_text(file).and_then(|text| text.parse::<Config>()),
         None => Err(Error::Config("no config file given".to_string()))
     }?;
 

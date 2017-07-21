@@ -64,7 +64,8 @@ impl Uptane {
         hasher.input(&pub_key);
 
         let fallbacks = config.ecus.iter()
-            .map(|ecu| Util::read_text(&ecu.manifest_path).and_then(|text| Ok(json::from_str(&text)?)))
+            .map(|ecu| Util::read_text(&ecu.manifest_path)
+                 .and_then(|text| Ok((ecu.ecu_serial.clone(), json::from_str(&text)?))))
             .collect::<Result<Fallbacks, _>>()
             .map_err(|err| Error::Config(format!("couldn't read secondary metadata: {}", err)))?;
 
@@ -183,7 +184,14 @@ impl Uptane {
 
     /// Download an image from the `Repo` repository.
     pub fn fetch_repo(&mut self, client: &Client, refname: &str) -> Result<ImageReader, Error> {
-        self.fetch_image(client, Service::Repo, refname)
+        self.fetch_image(client, Service::Repo, &format!("targets/{}", refname))
+    }
+
+    /// Retrieve a list of manifests per ECU.
+    pub fn get_manifests(&mut self) -> Result<Vec<TufSigned>, Error> {
+        let mut signed = self.fallbacks.iter().map(|(_, val)| val.clone()).collect::<Vec<_>>();
+        signed.push(self.signed_report(None)?);
+        Ok(signed)
     }
 
     /// Generate a new signed TUF installation report.

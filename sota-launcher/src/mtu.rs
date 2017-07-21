@@ -1,66 +1,62 @@
-use reqwest;
+use reqwest::header::Headers;
+use reqwest::Client;
 use serde::{self, Deserialize, Deserializer, Serialize, Serializer};
+use std::result;
 use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
-use std::fs::File;
-use std::io::{self, Read};
-use std::result;
+use std::io::Read;
 use std::str::FromStr;
-use toml;
-use uuid;
+use uuid::Uuid;
+
+use config::*;
 
 
-error_chain!{
-    foreign_links {
-        Http(reqwest::Error);
-        Io(io::Error);
-        Toml(toml::de::Error);
-        Uuid(uuid::ParseError);
-    }
-
-    errors {
-        Config(s: String) {
-            description("config error")
-            display("config error: '{}'", s)
-        }
-    }
+pub struct MultiTargetUpdate {
+    client: Client,
+    env: Environment,
+    session: PlaySession,
 }
 
-
-#[derive(PartialEq, Clone, Copy, Debug)]
-pub enum Environment {
-    CI,
-    QA,
-    Production,
-}
-
-impl FromStr for Environment {
-    type Err = Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_ref() {
-            "ci" => Ok(Environment::CI),
-            "qa" => Ok(Environment::QA),
-            "production" => Ok(Environment::Production),
-            _ => Err(format!("unknown environment: {}", s).into())
-        }
+impl MultiTargetUpdate {
+    pub fn new(env: Environment, session: PlaySession) -> Result<Self> {
+        Ok(MultiTargetUpdate {
+            client: Client::new()?,
+            env: env,
+            session: session,
+        })
     }
-}
 
-impl Display for Environment {
-    fn fmt(&self, f: &mut Formatter) -> fmt::Result {
-        match *self {
-            Environment::CI => write!(f, "https://ci-app.atsgarage.com/api/v1"),
-            Environment::QA => write!(f, "https://qa-app.atsgarage.com/api/v1"),
-            Environment::Production => write!(f, "https://app.atsgarage.com/api/v1"),
-        }
+    pub fn create(&self, targets: &UpdateTargets) -> Result<Uuid> {
+        let mut resp = self.client
+            .post(&format!("{}/multi_target_updates", self.env))
+            .json(targets)
+            .headers(self.headers())
+            .send()?;
+
+        let mut body = String::new();
+        resp.read_to_string(&mut body)?;
+        debug!("create mtu response: {}", body);
+        let uuid = body.trim_matches('"').parse::<Uuid>()?;
+        Ok(uuid)
     }
-}
 
-impl<'de> Deserialize<'de> for Environment {
-    fn deserialize<D: Deserializer<'de>>(de: D) -> result::Result<Self, D::Error> {
-        let s: String = Deserialize::deserialize(de)?;
-        s.parse().map_err(|err| serde::de::Error::custom(format!("{}", err)))
+    pub fn launch(&self, device_id: Uuid, update_id: Uuid) -> Result<()> {
+        let mut resp = self.client
+            .put(&format!("{}/admin/devices/{}/multi_target_update/{}", self.env, device_id, update_id))
+            .headers(self.headers())
+            .send()?;
+
+        let mut body = String::new();
+        resp.read_to_string(&mut body)?;
+        debug!("launch response: {}", body);
+        Ok(())
+    }
+
+    fn headers(&self) -> Headers {
+        let mut headers = Headers::new();
+        headers.set_raw("Cookie", vec![self.session.into_bytes()]);
+        headers.set_raw("Csrf-Token", vec![self.session.csrf_token.as_bytes().to_vec()]);
+        headers
     }
 }
 
@@ -68,6 +64,24 @@ impl<'de> Deserialize<'de> for Environment {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct UpdateTargets {
     pub targets: HashMap<String, Update>,
+}
+
+impl UpdateTargets {
+    pub fn from(targets: &[Target]) -> Self {
+        UpdateTargets {
+            targets: targets.into_iter().map(|target| {
+                let update = Update {
+                    from: None,
+                    to: UpdateTarget {
+                        target: target.target.clone(),
+                        length: target.length,
+                        checksum: Checksum { method: target.method, hash: target.hash.clone() }
+                    }
+                };
+                (target.hw_id.clone(), update)
+            }).collect::<HashMap<String, Update>>()
+        }
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -187,18 +201,6 @@ impl<'de> Deserialize<'de> for PlaySession {
 impl PlaySession {
     pub fn into_bytes(&self) -> Vec<u8> {
         format!("{}", self).as_bytes().to_vec()
-    }
-}
-
-
-pub struct Text;
-
-impl Text {
-    pub fn read(path: &str) -> Result<String> {
-        let mut file = File::open(path)?;
-        let mut text = String::new();
-        file.read_to_string(&mut text)?;
-        Ok(text)
     }
 }
 

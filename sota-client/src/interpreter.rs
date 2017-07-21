@@ -272,8 +272,8 @@ impl CommandInterpreter {
                 if let Some(signed) = signed {
                     uptane.put_manifest(&*self.http, signed)?;
                 } else {
-                    let report = uptane.signed_report(None)?;
-                    uptane.put_manifest(&*self.http, vec![report])?;
+                    let signed = uptane.get_manifests()?;
+                    uptane.put_manifest(&*self.http, signed)?;
                 }
                 Event::UptaneManifestSent
             }

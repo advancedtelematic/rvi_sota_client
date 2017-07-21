@@ -5,7 +5,7 @@ use std::str::FromStr;
 use sota::atomic::{State, Step, StepData};
 use sota::images::{ImageMeta, ImageWriter};
 use sota::datatype::{EcuCustom, EcuVersion, Error, InstallOutcome, PrivateKey,
-                     SignatureType, TufImage};
+                     SignatureType, TufImage, TufMeta};
 
 
 #[derive(PartialEq, Clone, Copy, Debug)]
@@ -39,8 +39,6 @@ pub struct Installer {
     pub install_type: InstallType,
     pub private_key: PrivateKey,
     pub sig_type: SignatureType,
-
-    pub tuf_image: Option<TufImage>,
 }
 
 impl Step for Installer {
@@ -75,16 +73,17 @@ impl Installer {
 
     fn step_report(&self, outcome: InstallOutcome) -> Result<StepData, Error> {
         let custom = EcuCustom::from_result(outcome.into_result(self.serial.clone()));
-        let version = self.to_version(self.tuf_image()?, Some(custom));
+        let image = TufImage {
+            filepath: "<undefined>".into(),
+            fileinfo: TufMeta {
+                length: 0,
+                hashes: hashmap!{ "sha256".into() => "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855".into() },
+                custom: None,
+            }
+        };
+        let version = self.to_version(image, Some(custom));
         let report = self.private_key.sign_data(json::to_value(version)?, self.sig_type)?;
         Ok(StepData { report: Some(report), writer: None })
-    }
-
-    fn tuf_image(&self) -> Result<TufImage, Error> {
-        match self.tuf_image {
-            Some(ref image) => Ok(image.clone()),
-            None => Err(Error::Image("tuf_image not set".into()))
-        }
     }
 
     fn to_version(&self, image: TufImage, custom: Option<EcuCustom>) -> EcuVersion {

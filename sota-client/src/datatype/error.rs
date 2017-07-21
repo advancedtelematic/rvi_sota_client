@@ -6,6 +6,7 @@ use json::Error as SerdeJsonError;
 use openssl::error::ErrorStack as OpensslErrors;
 use pem::Error as PemError;
 use ring::error::Unspecified as RingError;
+use std;
 use std::convert::From;
 use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
@@ -81,6 +82,10 @@ pub enum Error {
     Utf8(Utf8Error),
     #[cfg(feature = "websocket")]
     Websocket(WebsocketError),
+}
+
+impl std::error::Error for Error {
+    fn description(&self) -> &str { "SOTA error" }
 }
 
 impl Display for Error {

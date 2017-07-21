@@ -4,7 +4,7 @@ set -xeuo pipefail
 
 device_id="${SOTA_DEVICE_ID:-$(petname || ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
 hardware_id="${SOTA_HARDWARE_ID:-$(cat /etc/hostname)}"
-primary_serial="${SOTA_PRIMARY_SERIAL:-$(echo $(tr -dc '[:alnum:]' < /dev/urandom | dd bs=1 count=10 2>/dev/null))}"
+primary_serial="${SOTA_PRIMARY_SERIAL:-$(tr -dc '[:alnum:]' < /dev/urandom | dd bs=1 count=10 2>/dev/null)}"
 cert_dir="${SOTA_CERT_DIR:-/usr/local/etc/sota}"
 
 mkdir -p "$cert_dir" && cd "$cert_dir"
@@ -22,6 +22,7 @@ main() {
   fetch_metadata root director
   fetch_metadata root repo
   generate_toml
+  generate_manifests
 }
 
 wait_for_ntp() {
@@ -119,6 +120,10 @@ public_key_path = "$cert_dir/$serial.pub"
 manifest_path = "$cert_dir/$serial.manifest"
 EOF
   done < "$in_ecus"
+}
+
+generate_manifests() {
+  sota-launcher --mode manifests --privkeys "$cert_dir" --level debug
 }
 
 

@@ -1,6 +1,4 @@
 use serde::{self, Deserialize, Deserializer};
-use std::fs::File;
-use std::io::Read;
 use std::str::FromStr;
 use std::time::Duration;
 use toml;
@@ -46,8 +44,6 @@ impl Config {
                 der_key: Util::read_file(&self.ecu.private_key_path)?
             },
             sig_type: self.ecu.signature_type,
-
-            tuf_image: None,
         };
 
         let timeout = Duration::from_secs(self.transaction.as_ref().and_then(|t| t.timeout).unwrap_or(60));
