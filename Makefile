@@ -32,6 +32,7 @@ DOCKER_RUN := \
 CLIENT := $(DOCKER_RUN) --workdir /src/sota-client $(IMAGE_RUST) cargo
 INSTALLER := $(DOCKER_RUN) --workdir /src/sota-installer $(IMAGE_RUST) cargo
 LAUNCHER := $(DOCKER_RUN) --workdir /src/sota-launcher $(IMAGE_RUST) cargo
+PACKAGE := $(DOCKER_RUN) --workdir /src $(IMAGE_FPM) sota-client/docker/make_package.sh
 
 
 .PHONY: help start generate test doc client launcher installer \
@@ -73,10 +74,10 @@ clean: ## Remove all compiled libraries, builds and temporary files.
 	@rm -rf /tmp/sota-* $(DOCKER_DIR)/{*.{deb,rpm},sota_client,sota-installer,sota-launcher}
 
 deb: client ## Create a new DEB package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh deb
+	$(PACKAGE) $@
 
 rpm: client ## Create a new RPM package of the client.
-	$(DOCKER_RUN) $(IMAGE_FPM) docker/make_package.sh rpm
+	$(PACKAGE) $@
 
 sota-version: ## Print the version displayed inside the sota client logs.
 	@echo $(SOTA_VERSION)
