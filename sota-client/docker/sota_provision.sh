@@ -17,6 +17,7 @@ in_ecus="${5-ecus}"       # input secondary ecus file
 
 
 main() {
+  prepare_keys
   register_device || { wait_for_ntp && register_device; }
   register_ecus
 
@@ -35,14 +36,28 @@ wait_for_ntp() {
   done
 }
 
-register_device() {
-  echo "Registering device: $device_id"
+prepare_keys() {
+  echo "Preparing keys ..."
+
   [ ! -f "$in_reg.p12"  ] && { echo "Missing '$in_reg.p12' in $PWD"; exit 1; }
   [   -f "$out_dev.p12" ] && { echo "Already provisioned '$out_dev.p12' in $PWD"; exit 0; }
 
   openssl pkcs12 -in "$in_reg.p12" -out "$in_reg.pem" -nodes -passin pass:""
   openssl pkcs12 -in "$in_reg.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
     | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
+
+  openssl genpkey -algorithm RSA -out "$out_pri.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+  openssl rsa -pubout -in "$out_pri.der" -inform DER -out "$out_pri.pub"
+
+  while read -r serial hw_id; do
+    openssl genpkey -algorithm RSA -out "$serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+    openssl rsa -pubout -in "$serial.der" -inform DER -out "$serial.pub"
+  done < "$in_ecus"
+}
+
+register_device() {
+  echo "Registering device: $device_id"
+
   curl -vvf --cacert "$out_ca.crt" --cert "$in_reg.pem" "$SOTA_GATEWAY_URI/devices" \
     -H 'Content-Type: application/json' \
     -d '{"deviceId":"'"$device_id"'","ttl":365}' \
@@ -62,15 +77,12 @@ register_device() {
 
 register_ecus() {
   echo "Registering ECUs with Director..."
-  openssl genpkey -algorithm RSA -out "$out_pri.der" -outform DER -pkeyopt rsa_keygen_bits:2048
-  openssl rsa -pubout -in "$out_pri.der" -inform DER -out "$out_pri.pub"
+
   # join the next line and jump back to the start before escaping all newlines
   pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_pri.pub")
   ecus='{"ecu_serial":"'"$primary_serial"'","hardware_identifier":"'"$hardware_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
 
   while read -r serial hw_id; do
-    openssl genpkey -algorithm RSA -out "$serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
-    openssl rsa -pubout -in "$serial.der" -inform DER -out "$serial.pub"
     pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$serial.pub")
     ecus+=',{"ecu_serial":"'"$serial"'","hardware_identifier":"'"$hw_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
   done < "$in_ecus"
