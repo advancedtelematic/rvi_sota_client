@@ -2,9 +2,13 @@
 
 set -xeuo pipefail
 
+random_serial() {
+  echo $(tr -dc '[:alnum:]' < /dev/urandom | dd bs=1 count=10 2>/dev/null)
+}
+
 device_id="${SOTA_DEVICE_ID:-$(petname || ifconfig -a | grep -oE '([[:xdigit:]]{1,2}:){5}[[:xdigit:]]{1,2}' | head -n1)}"
 hardware_id="${SOTA_HARDWARE_ID:-$(cat /etc/hostname)}"
-primary_serial="${SOTA_PRIMARY_SERIAL:-$(echo $(tr -dc '[:alnum:]' < /dev/urandom | dd bs=1 count=10 2>/dev/null))}"
+primary_serial="${SOTA_PRIMARY_SERIAL:-$(random_serial)}"
 cert_dir="${SOTA_CERT_DIR:-/usr/local/etc/sota}"
 
 mkdir -p "$cert_dir" && cd "$cert_dir"
@@ -14,9 +18,11 @@ out_dev="${2-device}"     # output device credentials file prefix
 out_ca="${3-ca}"          # output ca certificates file prefix
 out_pri="${4-primary}"    # output primary ecu file prefix
 in_ecus="${5-ecus}"       # input secondary ecus file
+in_hardware="${6-secondary_hardware}" # input secondary hardware file
 
 
 main() {
+  prepare_ecus
   prepare_keys
   register_device || { wait_for_ntp && register_device; }
   register_ecus
@@ -34,6 +40,17 @@ wait_for_ntp() {
     sleep 5
     echo "Waiting for NTP sync..."
   done
+}
+
+prepare_ecus() {
+  if [ ! -f "$in_ecus" ]; then
+    touch "$in_ecus"
+    if [ -f "$in_hardware" ]; then
+      while read -r hw_id; do
+        echo "$(random_serial) $hw_id" >> $in_ecus
+      done < "$in_hardware"
+    fi
+  fi
 }
 
 prepare_keys() {
