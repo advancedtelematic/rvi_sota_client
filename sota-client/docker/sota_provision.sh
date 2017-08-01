@@ -25,8 +25,10 @@ main() {
   fetch_metadata root repo
 
   generate_toml
-  generate_manifests
-  generate_installers
+  if [ -f "$in_ecus" ]; then
+    generate_manifests
+    generate_installers
+  fi
 }
 
 wait_for_ntp() {
@@ -127,6 +129,7 @@ private_key_path = "$cert_dir/$out_pri.der"
 public_key_path = "$cert_dir/$out_pri.pub"
 EOF
 
+if [ -f "$in_ecus" ]; then
   while read -r serial hw_id; do
     cat >> sota.toml <<EOF
 
@@ -136,6 +139,7 @@ public_key_path = "$cert_dir/$serial.pub"
 manifest_path = "$cert_dir/$serial.manifest"
 EOF
   done < "$in_ecus"
+fi
 }
 
 generate_manifests() {
