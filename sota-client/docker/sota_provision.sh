@@ -24,8 +24,10 @@ main() {
   fetch_metadata root repo
 
   generate_toml
-  generate_manifests
-  generate_installers
+  if [ -f "$in_ecus" ]; then
+    generate_manifests
+    generate_installers
+  fi
 }
 
 wait_for_ntp() {
@@ -68,12 +70,14 @@ register_ecus() {
   pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_pri.pub")
   ecus='{"ecu_serial":"'"$primary_serial"'","hardware_identifier":"'"$hardware_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
 
-  while read -r serial hw_id; do
-    openssl genpkey -algorithm RSA -out "$serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
-    openssl rsa -pubout -in "$serial.der" -inform DER -out "$serial.pub"
-    pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$serial.pub")
-    ecus+=',{"ecu_serial":"'"$serial"'","hardware_identifier":"'"$hw_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
-  done < "$in_ecus"
+  if [ -f "$in_ecus" ]; then
+    while read -r serial hw_id; do
+      openssl genpkey -algorithm RSA -out "$serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+      openssl rsa -pubout -in "$serial.der" -inform DER -out "$serial.pub"
+      pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$serial.pub")
+      ecus+=',{"ecu_serial":"'"$serial"'","hardware_identifier":"'"$hw_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
+    done < "$in_ecus"
+  fi
 
   curl -vvf --cacert "$out_ca.crt" --cert "$out_dev.pem" \
     "$SOTA_GATEWAY_URI/director/ecus" \
@@ -115,6 +119,7 @@ private_key_path = "$cert_dir/$out_pri.der"
 public_key_path = "$cert_dir/$out_pri.pub"
 EOF
 
+if [ -f "$in_ecus" ]; then
   while read -r serial hw_id; do
     cat >> sota.toml <<EOF
 
@@ -124,6 +129,7 @@ public_key_path = "$cert_dir/$serial.pub"
 manifest_path = "$cert_dir/$serial.manifest"
 EOF
   done < "$in_ecus"
+fi
 }
 
 generate_manifests() {
