@@ -10,7 +10,7 @@ use net2::{UdpBuilder, UdpSocketExt};
 use net2::unix::UnixUdpBuilderExt;
 use uuid::Uuid;
 
-use datatype::{Error, TufSigned, Util};
+use datatype::{Error, Manifests, TufSigned, Util};
 use images::{ImageReader, ImageWriter};
 
 
@@ -64,9 +64,6 @@ pub enum Message {
     Resp { txid: Uuid, serial: String, image: String, index: u64, chunk: Vec<u8> },
 }
 
-/// A fallback manifest per ECU that will be sent in case of a timeout.
-pub type Manifests = HashMap<String, TufSigned>;
-
 /// A mapping from serials to the payloads to be delivered at each state.
 pub type Payloads = HashMap<String, HashMap<State, Payload>>;
 
@@ -105,8 +102,8 @@ pub struct Primary {
     state: State,
 
     payloads:  Payloads,
-    images:    HashMap<String, ImageReader>,
     manifests: Manifests,
+    images:    HashMap<String, ImageReader>,
 
     acks:    HashMap<State, HashSet<String>>,
     started: DateTime<Utc>,
@@ -121,8 +118,8 @@ pub struct Primary {
 impl Primary {
     /// Create a new `Primary` that will wake up the transactional secondaries.
     pub fn new(payloads:  Payloads,
+               manifests: Manifests,
                images:    HashMap<String, ImageReader>,
-               manifests: HashMap<String, TufSigned>,
                bus:       Box<Bus>,
                timeout:   Duration,
                recover:   Option<String>) -> Self {
@@ -131,8 +128,8 @@ impl Primary {
             state: State::Idle,
 
             payloads:  payloads,
-            images:    images,
             manifests: manifests,
+            images:    images,
 
             acks: hashmap! {
                 State::Ready  => HashSet::new(),
@@ -189,15 +186,16 @@ impl Primary {
     }
 
     /// Convert the completed transaction into a list of signed ECU reports.
-    pub fn into_signed(mut self) -> Vec<TufSigned> {
-        let mut signed = Vec::new();
-        for (serial, _) in &self.payloads {
-            self.signed
-                .remove(serial)
-                .or_else(|| self.manifests.get(serial).cloned())
-                .map(|report| signed.push(report));
-        }
-        signed
+    pub fn into_manifests(self) -> Manifests {
+        self.payloads
+            .iter()
+            .filter_map(|(serial, _)| {
+                self.signed
+                    .get(serial)
+                    .or_else(|| self.manifests.get(serial))
+                    .map(|manifest| (serial.clone(), manifest.clone()))
+            })
+            .collect()
     }
 
     /// Transition all secondaries to the next state.
@@ -1009,7 +1007,7 @@ mod tests {
             c.clone() => hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta).expect("json")) }
         };
         let images = hashmap!{image_name.into() => reader};
-        let mut primary = Primary::new(payloads, images, hashmap!{}, bus(), timeout(10), None);
+        let mut primary = Primary::new(payloads, hashmap!{}, images, bus(), timeout(10), None);
         assert!(primary.commit().is_ok());
         assert_eq!(primary.committed(), &hashset!{a, b, c});
         assert_eq!(primary.aborted(), &hashset!{});

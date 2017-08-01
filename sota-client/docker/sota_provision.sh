@@ -142,6 +142,11 @@ primary_ecu_hardware_identifier = "$hardware_id"
 metadata_path = "$cert_dir/metadata"
 private_key_path = "$cert_dir/$out_pri.der"
 public_key_path = "$cert_dir/$out_pri.pub"
+
+[[ecus]]
+ecu_serial = "$primary_serial"
+public_key_path = "$cert_dir/$out_pri.pub"
+manifest_path = "$cert_dir/$out_pri.manifest"
 EOF
 
   while read -r serial hw_id; do
