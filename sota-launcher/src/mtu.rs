@@ -67,7 +67,7 @@ pub struct UpdateTargets {
 }
 
 impl UpdateTargets {
-    pub fn from(targets: &[Target]) -> Self {
+    pub fn from(targets: &[Target], format: TargetFormat, generate_diff: bool) -> Self {
         UpdateTargets {
             targets: targets.into_iter().map(|target| {
                 let update = Update {
@@ -76,7 +76,9 @@ impl UpdateTargets {
                         target: target.target.clone(),
                         length: target.length,
                         checksum: Checksum { method: target.method, hash: target.hash.clone() }
-                    }
+                    },
+                    format: format,
+                    generate_diff: generate_diff,
                 };
                 (target.hw_id.clone(), update)
             }).collect::<HashMap<String, Update>>()
@@ -84,10 +86,22 @@ impl UpdateTargets {
     }
 }
 
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum TargetFormat {
+    Binary,
+    Ostree,
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Update {
     pub from: Option<UpdateTarget>,
-    pub to: UpdateTarget
+    pub to: UpdateTarget,
+    #[serde(rename = "targetFormat")]
+    pub format: TargetFormat,
+    #[serde(rename = "generateDiff")]
+    pub generate_diff: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug)]

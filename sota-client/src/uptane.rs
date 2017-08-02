@@ -10,11 +10,10 @@ use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Manifests, Multicast, Payload, Payloads, Primary, Secondary, State,
-             Step, StepData};
+use atomic::{Multicast, Payload, Payloads, Primary, Secondary, State, Step, StepData};
 use images::ImageReader;
 use datatype::{CanonicalJson, Config, EcuConfig, EcuCustom, EcuManifests, Error,
-               InstallOutcome, Key, KeyType, OstreePackage, PrivateKey, RoleData,
+               InstallOutcome, Key, KeyType, Manifests, OstreePackage, PrivateKey, RoleData,
                RoleMeta, RoleName, Signature, SignatureType, TufSigned, Url, Util};
 use http::{Client, Response};
 use pacman::Credentials;
@@ -185,36 +184,35 @@ impl Uptane {
         ImageReader::new(refname.into(), "/tmp/sota-reader-images".into())
     }
 
-    /// Retrieve a list of manifests per ECU.
-    pub fn get_manifests(&mut self) -> Result<Vec<TufSigned>, Error> {
-        let mut signed = self.manifests.iter().map(|(_, val)| val.clone()).collect::<Vec<_>>();
-        signed.push(self.signed_report(None)?);
-        Ok(signed)
-    }
-
     /// Generate a new signed TUF installation report.
     pub fn signed_report(&mut self, custom: Option<EcuCustom>) -> Result<TufSigned, Error> {
         let version = OstreePackage::get_latest(&self.primary_ecu)?.into_version(custom);
         self.private_key.sign_data(json::to_value(version)?, self.sig_type)
     }
 
-    /// Send a signed manifest with a list of signed objects to the Director server.
-    pub fn put_manifest(&mut self, client: &Client, signed: Vec<TufSigned>) -> Result<(), Error> {
-        let ecus = EcuManifests { primary_ecu_serial: self.primary_ecu.clone(), ecu_version_manifest: signed };
+    /// Send a signed manifest to `Director` containing individually signed ECU manifests.
+    pub fn put_manifest(&mut self, client: &Client, manifests: Option<Manifests>) -> Result<(), Error> {
+        let mut versions = self.manifests.clone();
+        if let Some(manifests) = manifests {
+            for (serial, version) in manifests {
+                let _ = versions.insert(serial, version);
+            }
+        }
+        let ecus = EcuManifests { primary_ecu_serial: self.primary_ecu.clone(), ecu_version_manifests: versions };
         let manifest = self.private_key.sign_data(json::to_value(ecus)?, self.sig_type)?;
         Ok(self.put(client, Service::Director, "manifest", json::to_vec(&manifest)?)?)
     }
 
     /// Start a transaction to install the verified targets to their respective ECUs.
-    pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Vec<TufSigned>, bool), Error> {
+    pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Manifests, bool), Error> {
         let (images, payloads) = self.fetch_targets(&verified, &treehub, creds)?;
         let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
-        let mut primary = Primary::new(payloads, images, self.manifests.clone(), bus, self.atomic_timeout, None);
+        let mut primary = Primary::new(payloads, self.manifests.clone(), images, bus, self.atomic_timeout, None);
 
         match primary.commit() {
-            Ok(()) => Ok((primary.into_signed(), true)),
+            Ok(()) => Ok((primary.into_manifests(), true)),
             Err(Error::AtomicAbort(_)) |
-            Err(Error::AtomicTimeout)  => Ok((primary.into_signed(), false)),
+            Err(Error::AtomicTimeout)  => Ok((primary.into_manifests(), false)),
             Err(err) => Err(err)
         }
     }
@@ -471,11 +469,12 @@ mod tests {
     fn test_read_manifest() {
         let bytes = Util::read_file("tests/uptane_basic/director/manifest.json").expect("couldn't read manifest.json");
         let signed = json::from_slice::<TufSigned>(&bytes).expect("couldn't load manifest");
-        let mut ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
-        assert_eq!(ecus.primary_ecu_serial, "<primary_ecu_serial>");
-        assert_eq!(ecus.ecu_version_manifest.len(), 1);
-        let ver0 = ecus.ecu_version_manifest.pop().unwrap();
-        let ecu0 = json::from_value::<EcuVersion>(ver0.signed).expect("couldn't load first manifest");
+        let ecus = json::from_value::<EcuManifests>(signed.signed).expect("couldn't load signed manifest");
+        let serial = "<primary_ecu_serial>";
+        assert_eq!(ecus.primary_ecu_serial, serial);
+        assert_eq!(ecus.ecu_version_manifests.len(), 1);
+        let ver0 = ecus.ecu_version_manifests.get(serial).unwrap();
+        let ecu0 = json::from_value::<EcuVersion>(ver0.signed.clone()).expect("couldn't load first manifest");
         assert_eq!(ecu0.installed_image.filepath, "<ostree_branch>-<ostree_commit>");
     }
 

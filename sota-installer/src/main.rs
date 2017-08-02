@@ -16,7 +16,8 @@ use clap::AppSettings;
 use env_logger::LogBuilder;
 use log::LogLevelFilter;
 use std::path::Path;
-use std::{fs, process};
+use std::{fs, process, thread};
+use std::time::Duration;
 
 use config::{App, Config};
 use installer::InstallType;
@@ -41,7 +42,7 @@ fn start() -> Result<(), Error> {
             Ok(()) => info!("Listener complete."),
             Err(err) => error!("Listener error: {}", err)
         }
-        if oneshot { break }
+        if oneshot { break } else { thread::sleep(Duration::from_secs(1)) }
     }
 
     Ok(())

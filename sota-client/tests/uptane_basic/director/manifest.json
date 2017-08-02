@@ -6,8 +6,8 @@
   }],
   "signed": {
     "primary_ecu_serial": "<primary_ecu_serial>",
-    "ecu_version_manifest": [
-      {
+    "ecu_version_manifests": {
+      "<primary_ecu_serial>": {
         "signatures": [{
           "method": "rsassa-pss",
           "sig": "<sig>",
@@ -36,6 +36,6 @@
           }
         }
       }
-    ]
+    }
   }
 }

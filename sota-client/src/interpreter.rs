@@ -98,8 +98,8 @@ impl Interpreter<Event, CommandExec> for EventInterpreter {
                 }
             }
 
-            Event::UptaneInstallComplete(signed) | Event::UptaneInstallFailed(signed) => {
-                queue(Command::UptaneSendManifest(Some(signed)));
+            Event::UptaneInstallComplete(manifests) | Event::UptaneInstallFailed(manifests) => {
+                queue(Command::UptaneSendManifest(Some(manifests)));
             }
 
             Event::UptaneManifestNeeded if self.pacman == PacMan::Uptane => {
@@ -267,14 +267,9 @@ impl CommandInterpreter {
 
             (Command::Shutdown, _) => process::exit(0),
 
-            (Command::UptaneSendManifest(signed), CommandMode::Uptane(uptane)) => {
+            (Command::UptaneSendManifest(manifests), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                if let Some(signed) = signed {
-                    uptane.put_manifest(&*self.http, signed)?;
-                } else {
-                    let signed = uptane.get_manifests()?;
-                    uptane.put_manifest(&*self.http, signed)?;
-                }
+                uptane.put_manifest(&*self.http, manifests)?;
                 Event::UptaneManifestSent
             }
 
@@ -286,7 +281,8 @@ impl CommandInterpreter {
                     Err(err) => {
                         error!("Uptane installation error: {}", err);
                         let result = InstallOutcome::error(err.to_string()).into_result(uptane.primary_ecu.clone());
-                        Event::UptaneInstallFailed(vec![uptane.signed_report(Some(EcuCustom::from_result(result)))?])
+                        let report = uptane.signed_report(Some(EcuCustom::from_result(result)))?;
+                        Event::UptaneInstallFailed(hashmap!{ uptane.primary_ecu.clone() => report })
                     }
                 }
             }

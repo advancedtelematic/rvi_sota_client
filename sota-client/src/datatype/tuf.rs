@@ -188,10 +188,12 @@ impl FromStr for KeyType {
 }
 
 
+pub type Manifests = HashMap<String, TufSigned>;
+
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct EcuManifests {
-    pub primary_ecu_serial:   String,
-    pub ecu_version_manifest: Vec<TufSigned>,
+    pub primary_ecu_serial: String,
+    pub ecu_version_manifests: Manifests,
 }
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]

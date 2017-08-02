@@ -27,6 +27,6 @@ pub use self::network::{Method, SocketAddrV4, Url};
 pub use self::ostree::OstreePackage;
 pub use self::signature::{Signature, SignatureType};
 pub use self::tuf::{EcuCustom, EcuManifests, EcuVersion, Key, KeyType, KeyValue,
-                    PrivateKey, RoleData, RoleName, RoleMeta, TufCustom, TufImage,
-                    TufMeta, TufSigned};
+                    Manifests, PrivateKey, RoleData, RoleName, RoleMeta, TufCustom,
+                    TufImage, TufMeta, TufSigned};
 pub use self::util::Util;

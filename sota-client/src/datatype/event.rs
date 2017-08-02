@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::fmt::{self, Display, Formatter};
 use uuid::Uuid;
 
-use datatype::{DownloadComplete, InstallReport, InstallResult, OstreePackage,
-               Package, TufMeta, TufSigned, UpdateAvailable, UpdateRequest};
+use datatype::{DownloadComplete, InstallReport, InstallResult, Manifests, OstreePackage,
+               Package, TufMeta, UpdateAvailable, UpdateRequest};
 use uptane::Verified;
 
 
@@ -64,10 +64,10 @@ pub enum Event {
     UptaneSnapshotUpdated(HashMap<String, TufMeta>),
     /// The updated target.json metadata.
     UptaneTargetsUpdated(Verified),
-    /// An update was installed to the primary ECU.
-    UptaneInstallComplete(Vec<TufSigned>),
-    /// An update was not installed to the primary ECU.
-    UptaneInstallFailed(Vec<TufSigned>),
+    /// An update was installed to a specific ECU.
+    UptaneInstallComplete(Manifests),
+    /// An update was not installed to a specific ECU.
+    UptaneInstallFailed(Manifests),
     /// An event requesting an external ECU to install a package.
     UptaneInstallNeeded(OstreePackage),
     /// A manifest should be sent to the Director server.

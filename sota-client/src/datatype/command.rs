@@ -2,8 +2,8 @@ use std::fmt::{self, Display, Formatter};
 use std::str::FromStr;
 use uuid::Uuid;
 
-use datatype::{Auth, ClientCredentials, Error, InstallCode, InstallReport, InstallResult,
-               InstalledSoftware, Package, TufSigned};
+use datatype::{Auth, ClientCredentials, Error, InstallCode, InstallReport,
+               InstallResult, InstalledSoftware, Manifests, Package};
 use uptane::Verified;
 
 
@@ -37,8 +37,8 @@ pub enum Command {
     /// Send an installation report.
     SendInstallReport(InstallReport),
 
-    /// Send the current manifest to the Director server.
-    UptaneSendManifest(Option<Vec<TufSigned>>),
+    /// Send signed reports from ECUs to the Director server.
+    UptaneSendManifest(Option<Manifests>),
     /// Install the verified targets.json metadata to their respective ECUs.
     UptaneStartInstall(Verified),
 }
