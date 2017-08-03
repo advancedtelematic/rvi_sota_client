@@ -45,7 +45,7 @@ wait_for_ntp() {
 
 prepare_creds() {
   # Prepare credentials here since aktualizr no longer requires unzipping.
-  if [ -n "${in_reg}.zip" ]; then
+  if [ -f "${in_reg}.zip" ]; then
     unzip "${in_reg}.zip" autoprov.url autoprov_credentials.p12
     export SOTA_GATEWAY_URI=`cat autoprov.url`
     rm autoprov.url
