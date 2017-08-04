@@ -22,6 +22,7 @@ in_hardware="${6-secondary_hardware}" # input secondary hardware file
 
 
 main() {
+  prepare_creds
   prepare_ecus
   prepare_keys
   register_device || { wait_for_ntp && register_device; }
@@ -40,6 +41,16 @@ wait_for_ntp() {
     sleep 5
     echo "Waiting for NTP sync..."
   done
+}
+
+prepare_creds() {
+  # Prepare credentials here since aktualizr no longer requires unzipping.
+  if [ -f "${in_reg}.zip" ]; then
+    unzip "${in_reg}.zip" autoprov.url autoprov_credentials.p12
+    export SOTA_GATEWAY_URI=`cat autoprov.url`
+    rm autoprov.url
+    mv autoprov_credentials.p12 "${in_reg}.p12"
+  fi
 }
 
 prepare_ecus() {
