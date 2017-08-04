@@ -16,7 +16,6 @@ mkdir -p "$cert_dir" && cd "$cert_dir"
 in_reg="${1-credentials}" # input registration credentials file prefix
 out_dev="${2-device}"     # output device credentials file prefix
 out_ca="${3-ca}"          # output ca certificates file prefix
-out_pri="${4-primary}"    # output primary ecu file prefix
 in_ecus="${5-ecus}"       # input secondary ecus file
 in_hardware="${6-secondary_hardware}" # input secondary hardware file
 
@@ -25,6 +24,7 @@ main() {
   prepare_creds
   prepare_ecus
   prepare_keys
+
   register_device || { wait_for_ntp && register_device; }
   register_ecus
 
@@ -44,10 +44,9 @@ wait_for_ntp() {
 }
 
 prepare_creds() {
-  # Prepare credentials here since aktualizr no longer requires unzipping.
   if [ -f "${in_reg}.zip" ]; then
     unzip "${in_reg}.zip" autoprov.url autoprov_credentials.p12
-    export SOTA_GATEWAY_URI=`cat autoprov.url`
+    export SOTA_GATEWAY_URI=$(cat autoprov.url)
     rm autoprov.url
     mv autoprov_credentials.p12 "${in_reg}.p12"
   fi
@@ -74,8 +73,8 @@ prepare_keys() {
   openssl pkcs12 -in "$in_reg.p12" -cacerts -nokeys -passin pass:"" 2>/dev/null \
     | sed -n '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > "$out_ca.crt"
 
-  openssl genpkey -algorithm RSA -out "$out_pri.der" -outform DER -pkeyopt rsa_keygen_bits:2048
-  openssl rsa -pubout -in "$out_pri.der" -inform DER -out "$out_pri.pub"
+  openssl genpkey -algorithm RSA -out "$primary_serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
+  openssl rsa -pubout -in "$primary_serial.der" -inform DER -out "$primary_serial.pub"
 
   while read -r serial hw_id; do
     openssl genpkey -algorithm RSA -out "$serial.der" -outform DER -pkeyopt rsa_keygen_bits:2048
@@ -107,7 +106,7 @@ register_ecus() {
   echo "Registering ECUs with Director..."
 
   # join the next line and jump back to the start before escaping all newlines
-  pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$out_pri.pub")
+  pubkey=$(sed -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' < "$primary_serial.pub")
   ecus='{"ecu_serial":"'"$primary_serial"'","hardware_identifier":"'"$hardware_id"'","clientKey":{"keytype":"RSA","keyval":{"public":"'"$pubkey"'"}}}'
 
   while read -r serial hw_id; do
@@ -151,13 +150,13 @@ repo_server = "$SOTA_GATEWAY_URI/repo"
 primary_ecu_serial = "$primary_serial"
 primary_ecu_hardware_identifier = "$hardware_id"
 metadata_path = "$cert_dir/metadata"
-private_key_path = "$cert_dir/$out_pri.der"
-public_key_path = "$cert_dir/$out_pri.pub"
+private_key_path = "$cert_dir/$primary_serial.der"
+public_key_path = "$cert_dir/$primary_serial.pub"
 
 [[ecus]]
 ecu_serial = "$primary_serial"
-public_key_path = "$cert_dir/$out_pri.pub"
-manifest_path = "$cert_dir/$out_pri.manifest"
+public_key_path = "$cert_dir/$primary_serial.pub"
+manifest_path = "$cert_dir/$primary_serial.manifest"
 EOF
 
   while read -r serial hw_id; do
