@@ -525,7 +525,7 @@ impl Default for UptaneConfig {
             public_key_path:    "/usr/local/etc/sota/ecuprimary.pub".to_string(),
             atomic_wake_up:     "232.0.0.011:23211".parse().unwrap(),
             atomic_message:     "232.0.0.012:23212".parse().unwrap(),
-            atomic_timeout_sec: 60,
+            atomic_timeout_sec: 300,
         }
     }
 }
@@ -649,7 +649,7 @@ mod tests {
         public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
         atomic_wake_up = "232.0.0.011:23211"
         atomic_message = "232.0.0.012:23212"
-        atomic_timeout_sec = 60
+        atomic_timeout_sec = 300
         "#;
 
 

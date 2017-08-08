@@ -59,4 +59,4 @@ private_key_path = "/usr/local/etc/sota/ecuprimary.pem"
 public_key_path = "/usr/local/etc/sota/ecuprimary.pub"
 multicast_address = "224.0.0.101"
 multicast_port = 9999
-atomic_timeout_sec = 60
+atomic_timeout_sec = 300
