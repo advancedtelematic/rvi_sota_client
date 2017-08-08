@@ -209,12 +209,13 @@ impl Uptane {
         let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
         let mut primary = Primary::new(payloads, self.manifests.clone(), images, bus, self.atomic_timeout, None);
 
-        match primary.commit() {
-            Ok(()) => Ok((primary.into_manifests(), true)),
-            Err(Error::AtomicAbort(_)) |
-            Err(Error::AtomicTimeout)  => Ok((primary.into_manifests(), false)),
-            Err(err) => Err(err)
-        }
+        let is_success = match primary.commit() {
+            Ok(()) => true,
+            Err(Error::AtomicAbort(reason)) => { error!("Install aborted: {}", reason); false }
+            Err(Error::AtomicTimeout) => { error!("Install aborted: timeout"); false }
+            Err(err) => return Err(err)
+        };
+        Ok((primary.into_manifests(), is_success))
     }
 
     fn fetch_targets(&mut self, verified: &Verified, treehub: &Url, creds: Credentials)
