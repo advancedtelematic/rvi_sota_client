@@ -207,7 +207,7 @@ impl Uptane {
     pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Manifests, bool), Error> {
         let (images, payloads) = self.fetch_targets(&verified, &treehub, creds)?;
         let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
-        let mut primary = Primary::new(payloads, self.manifests.clone(), images, bus, self.atomic_timeout, None);
+        let mut primary = Primary::new(payloads, images, bus, self.atomic_timeout, None);
 
         let is_success = match primary.commit() {
             Ok(()) => true,
