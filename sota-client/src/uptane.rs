@@ -238,7 +238,7 @@ impl Uptane {
                     images.insert(meta.image_name.clone(), reader);
                     Ok((ecu_serial, hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta)?) }))
                 } else {
-                    let pkg = OstreePackage::from_meta(meta.clone(), "sha256", treehub)?;
+                    let pkg = OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?;
                     if ecu_serial == self.primary_ecu { primary_pkg = Some(pkg.clone()); }
                     Ok((ecu_serial, hashmap!{ State::Fetch => Payload::OstreePackage(json::to_vec(&pkg)?) }))
                 }

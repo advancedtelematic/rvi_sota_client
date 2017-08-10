@@ -25,7 +25,7 @@ impl Manifests {
     }
 
     fn tuf_image(serial: &str) -> Result<TufImage> {
-        let current = OstreePackage::get_current(serial)?;
+        let current = OstreePackage::get_latest(serial)?;
         Ok(TufImage {
             filepath: current.commit.clone(),
             fileinfo: TufMeta {
