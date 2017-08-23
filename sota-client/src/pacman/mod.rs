@@ -5,7 +5,6 @@ pub mod test;
 pub mod uptane;
 
 
-use json;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use std::str::FromStr;
 
@@ -85,11 +84,8 @@ impl FromStr for PacMan {
 
 impl<'de> Deserialize<'de> for PacMan {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<PacMan, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("invalid package manager: {}", err)))
-        } else {
-            Err(SerdeError::custom("Not a package manager."))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| SerdeError::custom(format!("invalid package manager: {}", err)))
     }
 }
 

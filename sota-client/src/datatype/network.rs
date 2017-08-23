@@ -1,5 +1,4 @@
 use hyper::method::Method as HyperMethod;
-use json;
 use serde::de::{Deserialize, Deserializer, Error as SerdeError};
 use serde::ser::{Serialize, Serializer};
 use std::fmt::{self, Display, Formatter};
@@ -28,11 +27,8 @@ impl FromStr for SocketAddrV4 {
 
 impl<'de> Deserialize<'de> for SocketAddrV4 {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<SocketAddrV4, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("invalid SocketAddrV4: {}", err)))
-        } else {
-            Err(SerdeError::custom("Not a SocketAddrV4"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| SerdeError::custom(format!("invalid SocketAddrV4: {}", err)))
     }
 }
 
@@ -84,11 +80,8 @@ impl Serialize for Url {
 
 impl<'de> Deserialize<'de> for Url {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Url, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("invalid Url: {}", err)))
-        } else {
-            Err(SerdeError::custom("Not a Url"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| SerdeError::custom(format!("invalid Url: {}", err)))
     }
 }
 

@@ -82,11 +82,8 @@ impl Display for RoleName {
 
 impl<'de> Deserialize<'de> for RoleName {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<RoleName, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("unknown RoleName: {}", err)))
-        } else {
-            Err(SerdeError::custom("Unknown `RoleName` from `_type` field"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| SerdeError::custom(format!("unknown RoleName: {}", err)))
     }
 }
 
@@ -167,11 +164,8 @@ pub enum KeyType {
 
 impl<'de> Deserialize<'de> for KeyType {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("unknown KeyType: {}", err)))
-        } else {
-            Err(SerdeError::custom("unknown KeyType"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| SerdeError::custom(format!("unknown KeyType: {}", err)))
     }
 }
 

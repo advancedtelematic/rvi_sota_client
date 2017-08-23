@@ -37,11 +37,8 @@ pub enum SignatureType {
 
 impl<'de> Deserialize<'de> for SignatureType {
     fn deserialize<D: Deserializer<'de>>(de: D) -> Result<Self, D::Error> {
-        if let json::Value::String(ref s) = Deserialize::deserialize(de)? {
-            s.parse().map_err(|err| SerdeError::custom(format!("unknown SignatureType: {}", err)))
-        } else {
-            Err(SerdeError::custom("unknown SignatureType"))
-        }
+        let s: String = Deserialize::deserialize(de)?;
+        s.parse().map_err(|err| SerdeError::custom(format!("unknown SignatureType: {}", err)))
     }
 }
 
