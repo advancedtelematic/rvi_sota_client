@@ -3,3 +3,4 @@ sota-client/docker/*.{deb,rpm}
 sota-client/docker/sota_client
 sota-client/docker/sota-installer
 sota-client/docker/sota-launcher
+sota-client/docker/sota-client.service

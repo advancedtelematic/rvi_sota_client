@@ -11,6 +11,9 @@ fi
 
 cwd="$(cd "$(dirname "$0")" && pwd)"
 : "${PACKAGE_VERSION:?}" # check package version is set
+export BIN_DIR="${BIN_DIR:-/usr/local/bin}"
+export CONFIG_DIR="${CONFIG_DIR:-/usr/local/etc}"
+envsubst < ${cwd}/sota-client.service.tpl > ${cwd}/sota-client.service
 
 case $1 in
   "deb" )
@@ -30,8 +33,6 @@ shift
 
 function make_pkg {
   dest="$1"
-  bin_dir="${BIN_DIR:-/usr/local/bin}"
-  config_dir="${CONFIG_DIR:-/usr/local/etc}"
   config_path="${CONFIG_PATH:-${cwd}/../tests/config/default.toml}"
   toml_file=$(mktemp)
 
@@ -51,10 +52,10 @@ function make_pkg {
     --version "${PACKAGE_VERSION}" \
     --package NAME-VERSION.TYPE \
     ${pac_flags} \
-    "${cwd}/sota_client=${bin_dir}/sota_client" \
-    "${cwd}/sota_sysinfo.sh=${bin_dir}/sota_sysinfo.sh" \
-    "${cwd}/sota_certificates=${config_dir}/sota_certificates" \
-    "${toml_file}=${config_dir}/sota.toml"
+    "${cwd}/sota_client=${BIN_DIR}/sota_client" \
+    "${cwd}/sota_sysinfo.sh=${BIN_DIR}/sota_sysinfo.sh" \
+    "${cwd}/sota_certificates=${CONFIG_DIR}/sota_certificates" \
+    "${toml_file}=${CONFIG_DIR}/sota.toml"
 
   [[ -n "${dest}" ]] && mv -f sota-client*.${pac_man} "${dest}"
   rm -f "${toml_file}"
