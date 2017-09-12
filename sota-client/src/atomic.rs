@@ -3,7 +3,7 @@ use json;
 use std::fs::{self, File};
 use std::io::{BufReader, ErrorKind};
 use std::collections::{HashMap, HashSet};
-use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
+use std::net::{Ipv4Addr, TcpListener, SocketAddrV4, UdpSocket};
 use std::path::Path;
 use std::time::Duration;
 use net2::{UdpBuilder, UdpSocketExt};
@@ -520,6 +520,48 @@ fn is_waiting(err: &Error) -> bool {
         Error::Io(ref err) if err.kind() == ErrorKind::TimedOut => true,
         Error::Io(ref err) if err.kind() == ErrorKind::WouldBlock => true,
         _ => false
+    }
+}
+
+
+/// The `Primary` will listen for connections from `Secondary` ECUs.
+pub struct Tcp {
+    msg_buf: [u8; BUFFER_SIZE],
+}
+
+impl Tcp {
+    pub fn listen(addr: SocketAddrV4) -> Result<Self, Error> {
+        let listener = TcpListener::bind(addr)?;
+        thread::spawn(|| {
+            loop {
+                match listener.accept() {
+                    unimplemented!()
+                }
+            }
+        });
+    }
+
+    fn connect(addr: SocketAddrV4) -> Result<UdpSocket, Error> {
+        unimplemented!()
+    }
+}
+
+
+impl Bus for Tcp {
+    fn read_wake_up(&mut self) -> Result<(String, Uuid), Error> {
+        unimplemented!()
+    }
+
+    fn write_wake_up(&self, serial: String, txid: Uuid) -> Result<(), Error> {
+        unimplemented!()
+    }
+
+    fn read_message(&mut self) -> Result<Message, Error> {
+        unimplemented!()
+    }
+
+    fn write_message(&self, msg: &Message) -> Result<(), Error> {
+        unimplemented!()
     }
 }
 

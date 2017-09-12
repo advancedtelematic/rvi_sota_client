@@ -16,6 +16,9 @@ const CHUNK_DIR: &'static str = "/tmp/sota-image-chunks";
 const CHUNK_SIZE: usize = 512;
 
 
+/// A mapping from an identifier to the currently active images.
+pub type Images = HashMap<String, ImageReader>;
+
 struct Chunk([u8; CHUNK_SIZE]);
 
 impl Default for Chunk {

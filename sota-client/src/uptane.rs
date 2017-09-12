@@ -11,7 +11,7 @@ use std::net::SocketAddrV4;
 use std::time::Duration;
 
 use atomic::{Multicast, Payload, Payloads, Primary, Secondary, State, Step, StepData};
-use images::ImageReader;
+use images::{ImageReader, Images};
 use datatype::{CanonicalJson, Config, EcuConfig, EcuCustom, EcuManifests, Error,
                InstallOutcome, Key, KeyType, Manifests, OstreePackage, PrivateKey, RoleData,
                RoleMeta, RoleName, Signature, SignatureType, TufSigned, Url, Util};
@@ -219,7 +219,7 @@ impl Uptane {
     }
 
     fn fetch_targets(&mut self, verified: &Verified, treehub: &Url, creds: Credentials)
-                     -> Result<(HashMap<String, ImageReader>, Payloads), Error> {
+                     -> Result<(Images, Payloads), Error> {
         let mut primary_pkg = None;
         let mut images = HashMap::new();
         let targets = verified.data.targets.as_ref()
