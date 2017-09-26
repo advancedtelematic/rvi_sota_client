@@ -264,8 +264,7 @@ fn build_config(version: &Option<String>) -> Config {
     opts.optopt("", "uptane-metadata-path", "change the directory used to save Uptane metadata.", "PATH");
     opts.optopt("", "uptane-private-key-path", "change the path to the private key for the primary ECU", "PATH");
     opts.optopt("", "uptane-public-key-path", "change the path to the public key for the primary ECU", "PATH");
-    opts.optopt("", "uptane-atomic-wake-up", "change the atomic transaction UDP multicast wake-up address", "IP:PORT");
-    opts.optopt("", "uptane-atomic-message", "change the atomic transaction UDP multicast message address", "IP:PORT");
+    opts.optopt("", "uptane-atomic-primary", "change the atomic transaction Primary server", "IP:PORT");
     opts.optopt("", "uptane-atomic-timeout-sec", "change the atomic update timeout duration", "SEC");
 
     let cli = opts.parse(&args[1..]).expect("couldn't parse args");
@@ -348,8 +347,7 @@ fn build_config(version: &Option<String>) -> Config {
     cli.opt_str("uptane-metadata-path").map(|text| config.uptane.metadata_path = text);
     cli.opt_str("uptane-private-key-path").map(|text| config.uptane.private_key_path = text);
     cli.opt_str("uptane-public-key-path").map(|text| config.uptane.public_key_path = text);
-    cli.opt_str("uptane-atomic-wake-up").map(|addr| config.uptane.atomic_wake_up = addr.parse().expect("Invalid uptane-atomic-wake-up"));
-    cli.opt_str("uptane-atomic-message").map(|addr| config.uptane.atomic_message = addr.parse().expect("Invalid uptane-atomic-message"));
+    cli.opt_str("uptane-atomic-primary").map(|addr| config.uptane.atomic_primary = addr.parse().expect("Invalid uptane-atomic-primary"));
     cli.opt_str("uptane-atomic-timeout-sec").map(|sec| config.uptane.atomic_timeout_sec = sec.parse().expect("Invalid uptane-atomic-timeout-sec"));
 
     if cli.opt_present("print") {

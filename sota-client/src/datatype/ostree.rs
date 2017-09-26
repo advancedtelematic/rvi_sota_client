@@ -73,7 +73,10 @@ impl OstreePackage {
     /// Convert from `TufMeta` into an `OstreePackage`.
     pub fn from_meta(mut meta: TufMeta, refname: String, hash_type: &str, treehub: &Url) -> Result<Self, Error> {
         match (meta.hashes.remove(hash_type), meta.custom) {
-            (Some(commit), Some(custom)) => Ok(OstreePackage::new(custom.ecuIdentifier, refname, commit, treehub)),
+            (Some(commit), Some(custom)) => match custom.ecuIdentifier {
+                Some(ecu) => Ok(OstreePackage::new(ecu, refname, commit, treehub)),
+                None => Err(Error::UptaneTargets(format!("{} missing ecuIdentifier", refname))),
+            },
             (None, _) => Err(Error::UptaneTargets(format!("{} missing {} hash", refname, hash_type))),
             (_, None) => Err(Error::UptaneTargets(format!("{} missing custom field", refname))),
         }

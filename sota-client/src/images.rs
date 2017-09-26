@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use crypto::digest::Digest;
-use crypto::sha1::Sha1;
+use crypto::sha2::Sha256;
 use std::collections::{HashMap, HashSet};
 use std::fs::{self, File, OpenOptions};
 use std::io::Write;
@@ -13,7 +13,7 @@ use datatype::{Error, Util};
 
 
 const CHUNK_DIR: &'static str = "/tmp/sota-image-chunks";
-const CHUNK_SIZE: usize = 512;
+const CHUNK_SIZE: usize = 64*1024;
 
 
 struct Chunk([u8; CHUNK_SIZE]);
@@ -26,21 +26,21 @@ impl Default for Chunk {
 
 
 /// Metadata regarding an image to be transferred between ECUs in chunks.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct ImageMeta {
     pub image_name: String,
     pub image_size: u64,
     pub num_chunks: u64,
-    pub sha1sum: String,
+    pub sha256sum: String,
 }
 
 impl ImageMeta {
-    pub fn new(image_name: String, image_size: u64, num_chunks: u64, sha1sum: String) -> Self {
+    pub fn new(image_name: String, image_size: u64, num_chunks: u64, sha256sum: String) -> Self {
         ImageMeta {
             image_name: image_name,
             image_size: image_size,
             num_chunks: num_chunks,
-            sha1sum: sha1sum,
+            sha256sum: sha256sum,
         }
     }
 }
@@ -81,13 +81,13 @@ impl ImageReader {
         Ok(&self.chunk.0[..len])
     }
 
-    /// Generate a SHA1 checksum of the image data.
-    pub fn sha1sum(&mut self) -> Result<String, Error> {
-        let mut hash = Sha1::new();
+    /// Generate a SHA256 checksum of the image data.
+    pub fn sha256sum(&mut self) -> Result<String, Error> {
+        let mut hasher = Sha256::new();
         for index in 0..self.num_chunks {
-            hash.input(&self.read_chunk(index)?);
+            hasher.input(&self.read_chunk(index)?);
         }
-        Ok(hash.result_str())
+        Ok(hasher.result_str())
     }
 
     /// Generate metadata about the image.
@@ -96,7 +96,7 @@ impl ImageReader {
             image_name: self.image_name.clone(),
             image_size: self.image_size,
             num_chunks: self.num_chunks,
-            sha1sum: self.sha1sum()?,
+            sha256sum: self.sha256sum()?,
         })
     }
 }
@@ -109,16 +109,65 @@ pub struct ImageWriter {
     pub image_dir: String,
     pub last_written: DateTime<Utc>,
     pub chunks_written: HashSet<u64>,
+    pub chunks_available: HashSet<u64>,
 }
 
 impl ImageWriter {
     /// Prepare to write an image file in chunks.
     pub fn new(meta: ImageMeta, image_dir: String) -> Self {
+        let chunks = (0..meta.num_chunks).collect();
         ImageWriter {
             meta: meta,
             image_dir: image_dir,
             last_written: Utc::now(),
             chunks_written: HashSet::new(),
+            chunks_available: chunks,
+        }
+    }
+
+    /// Write a specific chunk of an image to disk for re-assembly.
+    pub fn write_chunk(&mut self, data: &[u8], index: u64) -> Result<(), Error> {
+        let chunk_path = format!("{}/{}/{}", CHUNK_DIR, self.meta.image_name, index);
+        let path = Path::new(&chunk_path);
+        if let Some(dir) = path.parent() { fs::create_dir_all(dir)?; }
+        trace!("saving chunk {} to {}", index, chunk_path);
+        Util::write_file(&chunk_path, data)?;
+        self.chunks_written.insert(index);
+        self.chunks_available.remove(&index);
+        self.last_written = Utc::now();
+        Ok(())
+    }
+
+    /// Assemble all saved chunks into an output image.
+    pub fn assemble_chunks(&self) -> Result<(), Error> {
+        if self.chunks_available.len() > 0 {
+            return Err(Error::Image(format!("{} chunks remaining", self.chunks_available.len())))
+        }
+        let chunks_dir = format!("{}/{}", CHUNK_DIR, self.meta.image_name);
+        let mut indices = fs::read_dir(&chunks_dir)?.map(|entry| {
+            entry.map_err(|err| Error::Image(format!("bad entry: {}", err))).and_then(|entry| {
+                entry.file_name().to_str().ok_or_else(|| Error::Image(format!("invalid filename: {:?}", entry)))
+                    .and_then(|name| u64::from_str(name).map_err(|err| Error::Image(format!("bad index: {}", err))))
+            })
+        }).collect::<Result<Vec<u64>, _>>()?;
+        indices.sort();
+
+        let image_path = format!("{}/{}", self.image_dir, self.meta.image_name);
+        let path = Path::new(&image_path);
+        if let Some(dir) = path.parent() { fs::create_dir_all(dir)?; }
+        debug!("re-assembling chunks at `{}`", image_path);
+        let mut file = File::create(&image_path)?;
+        let mut hasher = Sha256::new();
+        for index in indices {
+            let chunk = Util::read_file(&format!("{}/{}", chunks_dir, index))?;
+            file.write(&chunk)?;
+            hasher.input(&chunk);
+        }
+
+        if hasher.result_str() != self.meta.sha256sum {
+            Err(Error::Image(format!("expected sha256 of `{}`, got `{}`", self.meta.sha256sum, hasher.result_str())))
+        } else {
+            Ok(())
         }
     }
 
@@ -138,66 +187,33 @@ impl ImageWriter {
         file.write_at(data, index * CHUNK_SIZE as u64)?;
         file.flush()?;
         self.chunks_written.insert(index);
+        self.chunks_available.remove(&index);
         self.last_written = Utc::now();
         Ok(())
     }
 
-    /// Write a specific chunk of an image to disk for re-assembly.
-    pub fn write_chunk(&mut self, data: &[u8], index: u64) -> Result<(), Error> {
-        let chunk_path = format!("{}/{}/{}", CHUNK_DIR, self.meta.image_name, index);
-        let path = Path::new(&chunk_path);
-        if let Some(dir) = path.parent() { fs::create_dir_all(dir)?; }
-        trace!("saving chunk to {}", chunk_path);
-        Util::write_file(&chunk_path, data)?;
-        self.chunks_written.insert(index);
-        self.last_written = Utc::now();
-        Ok(())
-    }
-
-    /// Assemble all saved chunks into an output image.
-    pub fn assemble_chunks(&self) -> Result<(), Error> {
-        if ! self.is_complete() {
-            return Err(Error::Image(format!("only {} of {} chunks written", self.chunks_written.len(), self.meta.num_chunks)))
-        }
-        let chunks_dir = format!("{}/{}", CHUNK_DIR, self.meta.image_name);
-        let mut indices = fs::read_dir(&chunks_dir)?.map(|entry| {
-            entry.map_err(|err| Error::Image(format!("bad entry: {}", err))).and_then(|entry| {
-                entry.file_name().to_str().ok_or_else(|| Error::Image(format!("invalid filename: {:?}", entry)))
-                    .and_then(|name| u64::from_str(name).map_err(|err| Error::Image(format!("bad index: {}", err))))
-            })
-        }).collect::<Result<Vec<u64>, _>>()?;
-        indices.sort();
-
-        let image_path = format!("{}/{}", self.image_dir, self.meta.image_name);
-        let path = Path::new(&image_path);
-        if let Some(dir) = path.parent() { fs::create_dir_all(dir)?; }
-        debug!("re-assembling chunks at `{}`", image_path);
-        let mut file = File::create(&image_path)?;
-        let mut hash = Sha1::new();
-        for index in indices {
-            let chunk = Util::read_file(&format!("{}/{}", chunks_dir, index))?;
-            file.write(&chunk)?;
-            hash.input(&chunk);
-        }
-
-        if hash.result_str() != self.meta.sha1sum {
-            Err(Error::Image(format!("expected sha1sum of `{}`, got `{}`", self.meta.sha1sum, hash.result_str())))
+    /// Verify the checksum of all directly written chunks is correct.
+    pub fn verify_direct(&self) -> Result<(), Error> {
+        let mut hasher = Sha256::new();
+        hasher.input(&Util::read_file(&format!("{}/{}", self.image_dir, self.meta.image_name))?);
+        if hasher.result_str() != self.meta.sha256sum {
+            Err(Error::Image(format!("expected sha256 of `{}`, got `{}`", self.meta.sha256sum, hasher.result_str())))
         } else {
             Ok(())
         }
     }
 
-    /// Boolean indicating whether all chunks have been written.
-    pub fn is_complete(&self) -> bool {
-        self.chunks_written.len() == self.meta.num_chunks as usize
+    /// Return the index of an unwritten chunk.
+    pub fn next_chunk(&self) -> Option<u64> {
+        self.chunks_available.iter().next().map(|index| *index)
     }
 
     /// Verify the output image checksum.
     pub fn verify_image(&self) -> Result<(), Error> {
         let mut reader = ImageReader::new(self.meta.image_name.clone(), self.image_dir.clone())?;
-        let checksum = reader.sha1sum()?;
-        if checksum != self.meta.sha1sum {
-            Err(Error::Image(format!("expected sha1sum of `{}`, got `{}`", self.meta.sha1sum, checksum)))
+        let checksum = reader.sha256sum()?;
+        if checksum != self.meta.sha256sum {
+            Err(Error::Image(format!("expected sha256 of `{}`, got `{}`", self.meta.sha256sum, checksum)))
         } else {
             Ok(())
         }
@@ -206,8 +222,7 @@ impl ImageWriter {
 
 impl Drop for ImageWriter {
     fn drop(&mut self) {
-        fs::remove_dir_all(format!("{}/{}", CHUNK_DIR, self.meta.image_name))
-            .unwrap_or_else(|err| error!("couldn't remove chunks dir: {}", err));
+        let _ = fs::remove_dir_all(format!("{}/{}", CHUNK_DIR, self.meta.image_name));
     }
 }
 
@@ -260,11 +275,11 @@ mod test {
         ImageReader::new(image_name, image_dir).expect("test image")
     }
 
-    fn random_data(mut buf: &mut [u8]) -> String {
-        let mut hash = Sha1::new();
-        SystemRandom::new().fill(&mut buf).expect("fill buf");
-        hash.input(&buf);
-        hash.result_str()
+    fn fill_random_then_sha256(mut buf: &mut [u8]) -> String {
+        let mut hasher = Sha256::new();
+        SystemRandom::new().fill(buf).expect("fill buf");
+        hasher.input(&buf);
+        hasher.result_str()
     }
 
     #[test]
@@ -274,14 +289,14 @@ mod test {
         let outfile = "test-image-out.dat";
         let mut buf = [0; CHUNK_SIZE+1];
         let size = (CHUNK_SIZE+1) as u64;
-        let sha1 = random_data(&mut buf);
+        let sha256 = fill_random_then_sha256(&mut buf);
 
         let mut reader = new_reader(infile.into(), dir.clone(), &buf);
         assert_eq!(reader.image_size, size);
         assert_eq!(reader.num_chunks, 2);
-        assert_eq!(reader.sha1sum().expect("sha1sum"), sha1);
+        assert_eq!(reader.sha256sum().expect("sha256sum"), sha256);
 
-        let meta = ImageMeta::new(outfile.into(), size, reader.num_chunks, sha1.into());
+        let meta = ImageMeta::new(outfile.into(), size, reader.num_chunks, sha256.into());
         let mut writer = ImageWriter::new(meta, dir.clone());
         for index in 0..reader.num_chunks {
             let chunk = reader.read_chunk(index).expect("read chunk");

@@ -12,36 +12,42 @@ name = "sota_client"
 path = "src/main.rs"
 
 [dependencies]
-base64 = "0.5.2"
+base64 = "0.6.0"
+bincode = "0.8.0"
+bytes = { version = "0.4.4", features = ["serde"] }
+byteorder = "1.1.0"
 chan = "0.1.18"
 chan-signal = "0.2.0"
 chrono = { version = "0.4.0", features = ["serde"] }
-crossbeam = "0.2.10"
-dbus = { version = "0.5.1", optional = true }
-env_logger = "0.4.2"
-getopts = "0.2.14"
+crossbeam = "0.3.0"
+dbus = { version = "0.5.4", optional = true }
+env_logger = "0.4.3"
+getopts = "0.2.15"
 hex = "0.2.0"
-hyper = { version = "0.10.9", default-features = false }
+hmac = "0.4.2"
+hyper = { version = "0.10.12", default-features = false }
 itoa = "0.3.1"
 lazy_static = "0.2.6"
-log = "0.3.6"
+libc = "0.2.26"
+log = "0.3.8"
 maplit = "0.1.4"
-net2 = "0.2.29"
-openssl = "0.9.11"
-pem = "0.4.0"
+net2 = "0.2.31"
+openssl = "0.9.14"
+pem = "0.4.1"
 ring = { git = "https://github.com/briansmith/ring", rev = "e48cdbc5fab0c5a78a9dff5c25444d474e2dca83", features = [ "rsa_signing" ] }
 rust-crypto = "0.2.36"
-serde_derive = "1.0.2"
-serde = "1.0.2"
-serde_json = "1.0.1"
-tar = "0.4.11"
-time = "0.1.37"
-toml = "0.4.0"
-tungstenite = { version = "0.2.2", default-features = false, optional = true }
+serde_derive = "1.0.10"
+serde = "1.0.10"
+serde_json = "1.0.2"
+sha2 = "0.6.0"
+tar = "0.4.13"
+time = "0.1.38"
+toml = "0.4.2"
+tungstenite = { version = "0.2.4", default-features = false, optional = true }
 unix_socket = { version = "0.5.0", optional = true }
 untrusted = "0.3.2"
-url = "1.2.1"
-uuid = { version = "0.5.0", features = ["serde", "v4"] }
+url = "1.5.1"
+uuid = { version = "0.5.1", features = ["serde", "v4"] }
 
 [features]
 default = ["socket"]
