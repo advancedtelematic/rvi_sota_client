@@ -1,4 +1,5 @@
 use base64;
+use bytes::Bytes;
 use crypto::digest::Digest;
 use crypto::sha2::Sha256;
 use hex::FromHex;
@@ -10,7 +11,8 @@ use std::fmt::{self, Display, Formatter};
 use std::net::SocketAddrV4;
 use std::time::Duration;
 
-use atomic::{Multicast, Payload, Payloads, Primary, Secondary, State, Step, StepData};
+use atomic::{Payload, Payloads, Primary, Secondary, State, Step, StepData,
+             TcpClient, TcpServer};
 use images::ImageReader;
 use datatype::{CanonicalJson, Config, EcuConfig, EcuCustom, EcuManifests, Error,
                InstallOutcome, Key, KeyType, Manifests, OstreePackage, PrivateKey, RoleData,
@@ -51,9 +53,9 @@ pub struct Uptane {
     pub director_verifier: Verifier,
     pub repo_verifier:     Verifier,
 
-    pub atomic_wake_addr: SocketAddrV4,
-    pub atomic_msg_addr:  SocketAddrV4,
-    pub atomic_timeout:   Duration,
+    pub atomic_primary: SocketAddrV4,
+    pub atomic_timeout: Duration,
+    pub atomic_server:  TcpServer,
 }
 
 impl Uptane {
@@ -84,9 +86,9 @@ impl Uptane {
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
 
-            atomic_wake_addr: *config.uptane.atomic_wake_up,
-            atomic_msg_addr:  *config.uptane.atomic_message,
+            atomic_primary: *config.uptane.atomic_primary,
             atomic_timeout: Duration::from_secs(config.uptane.atomic_timeout_sec),
+            atomic_server:  TcpServer::new(*config.uptane.atomic_primary)?,
         };
 
         uptane.add_root_keys(Service::Director)?;
@@ -206,8 +208,7 @@ impl Uptane {
     /// Start a transaction to install the verified targets to their respective ECUs.
     pub fn install(&mut self, verified: Verified, treehub: Url, creds: Credentials) -> Result<(Manifests, bool), Error> {
         let (images, payloads) = self.fetch_targets(&verified, &treehub, creds)?;
-        let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
-        let mut primary = Primary::new(payloads, images, bus, self.atomic_timeout, None);
+        let mut primary = Primary::new(payloads, images, &self.atomic_server, self.atomic_timeout, None);
 
         let is_success = match primary.commit() {
             Ok(()) => true,
@@ -220,53 +221,56 @@ impl Uptane {
 
     fn fetch_targets(&mut self, verified: &Verified, treehub: &Url, creds: Credentials)
                      -> Result<(HashMap<String, ImageReader>, Payloads), Error> {
-        let mut primary_pkg = None;
-        let mut images = HashMap::new();
-        let targets = verified.data.targets.as_ref()
-            .ok_or_else(|| Error::UptaneTargets("no targets found".into()))?;
+        let mut install_primary = None;
+        let mut reader_images = HashMap::new();
+        let mut payloads = verified.data.targets.as_ref()
+            .ok_or_else(|| Error::UptaneTargets("no targets found".into()))
+            .and_then(|targets| {
+                targets.iter()
+                    .map(|(refname, meta)| {
+                        let custom = meta.custom.as_ref()
+                            .ok_or_else(|| Error::UptaneTargets(format!("refname {} has no custom field", refname)))?;
+                        let serial = custom.ecuIdentifier.as_ref()
+                            .ok_or_else(|| Error::UptaneTargets(format!("refname {} has no ecuIdentifier", refname)))?;
+                        let reader = self.fetch_director(&*creds.client, refname)
+                            .or_else(|_| self.fetch_repo(&*creds.client, refname));
+                        let payload = match reader {
+                            Ok(mut reader) => {
+                                let meta = reader.image_meta()?;
+                                reader_images.insert(meta.image_name.clone(), reader);
+                                Payload::ImageMeta(Bytes::from(json::to_vec(&meta)?))
+                            }
+                            Err(_) => {
+                                let pkg = OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?;
+                                if serial == &self.primary_ecu { install_primary = Some(pkg.clone()) }
+                                Payload::OstreePackage(Bytes::from(json::to_vec(&pkg)?))
+                            }
+                        };
+                        Ok((serial.clone(), hashmap! { State::Fetch => payload }))
+                    })
+                    .collect::<Result<HashMap<_, _>, _>>()
+            })?;
 
-        let mut payloads = targets.iter()
-            .map(|(refname, meta)| if let Some(ref custom) = meta.custom {
-                let ecu_serial = custom.ecuIdentifier.clone();
-
-                if let Ok(mut reader) = self.fetch_director(&*creds.client, refname) {
-                    let meta = reader.image_meta()?;
-                    images.insert(meta.image_name.clone(), reader);
-                    Ok((ecu_serial, hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta)?) }))
-                } else if let Ok(mut reader) = self.fetch_repo(&*creds.client, refname) {
-                    let meta = reader.image_meta()?;
-                    images.insert(meta.image_name.clone(), reader);
-                    Ok((ecu_serial, hashmap!{ State::Fetch => Payload::ImageMeta(json::to_vec(&meta)?) }))
-                } else {
-                    let pkg = OstreePackage::from_meta(meta.clone(), refname.clone(), "sha256", treehub)?;
-                    if ecu_serial == self.primary_ecu { primary_pkg = Some(pkg.clone()); }
-                    Ok((ecu_serial, hashmap!{ State::Fetch => Payload::OstreePackage(json::to_vec(&pkg)?) }))
-                }
-            } else {
-                Err(Error::UptaneTargets(format!("refname {} has no custom field", refname)))
-            })
-            .collect::<Result<HashMap<_, _>, _>>()?;
-
-        if let Some(pkg) = primary_pkg {
-            let bus = Box::new(Multicast::new(self.atomic_wake_addr, self.atomic_msg_addr)?);
-            let inst = Box::new(PrimaryInstaller {
+        if let Some(pkg) = install_primary {
+            let client = TcpClient::new(self.primary_ecu.clone(), self.atomic_primary)?;
+            let step = PrimaryInstaller {
                 serial: self.primary_ecu.clone(),
                 pkg: pkg,
                 sig_type: self.sig_type,
                 priv_key: self.private_key.clone(),
                 credentials: creds
-            });
-            let mut ecu = Secondary::new(self.primary_ecu.clone(), bus, inst, self.atomic_timeout, None);
+            };
+            let mut ecu = Secondary::new(client, Box::new(step), self.atomic_timeout, None);
             thread::spawn(move || ecu.listen());
         }
 
         if let Some(ref json) = verified.json {
             for (_, mut states) in payloads.iter_mut() {
-                states.insert(State::Verify, Payload::UptaneMetadata(json.clone()));
+                states.insert(State::Verify, Payload::UptaneMetadata(Bytes::from(json.clone())));
             }
         }
 
-        Ok((images, payloads))
+        Ok((reader_images, payloads))
     }
 }
 
@@ -291,7 +295,7 @@ impl PrimaryInstaller {
 impl Step for PrimaryInstaller {
     fn step(&mut self, state: State, _: Option<Payload>) -> Result<Option<StepData>, Error> {
         match state {
-            State::Idle | State::Ready | State::Verify | State::Fetch => Ok(None),
+            State::Idle | State::Start | State::Verify | State::Fetch => Ok(None),
             State::Commit => self.signed(self.pkg.install(&self.credentials)?),
             State::Abort  => self.signed(InstallOutcome::error("aborted".into()))
         }
@@ -447,9 +451,9 @@ mod tests {
             director_verifier: Verifier::default(),
             repo_verifier:     Verifier::default(),
 
-            atomic_wake_addr: SocketAddrV4::new(Ipv4Addr::new(232,0,0,101), 23211),
-            atomic_msg_addr:  SocketAddrV4::new(Ipv4Addr::new(232,0,0,102), 23212),
-            atomic_timeout:   Duration::from_secs(60),
+            atomic_primary: SocketAddrV4::new(Ipv4Addr::new(127,0,0,1), 2310),
+            atomic_timeout: Duration::from_secs(300),
+            atomic_server:  TcpServer::default(),
         };
         uptane.add_root_keys(Service::Director).expect("add director root keys");
         uptane
@@ -491,7 +495,7 @@ mod tests {
         }).expect("get /file.img");
         let custom = extract_custom(targets);
         let image  = custom.get("/file.img").expect("get /file.img custom");
-        assert_eq!(image.ecuIdentifier, "some-ecu-id");
+        assert_eq!(image.ecuIdentifier, Some("some-ecu-id".into()));
     }
 
     #[test]

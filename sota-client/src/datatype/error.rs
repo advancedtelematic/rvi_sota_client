@@ -1,4 +1,5 @@
 use base64::DecodeError as Base64Error;
+use bincode::Error as BincodeError;
 use chrono::ParseError as ChronoParseError;
 use hex::FromHexError;
 use hyper::error::Error as HyperError;
@@ -32,11 +33,13 @@ use interpreter::CommandExec;
 pub enum Error {
     Addr(AddrParseError),
     AtomicAbort(String),
+    AtomicOffline(String),
     AtomicPayload,
     AtomicSigned,
     AtomicState(State, State),
     AtomicTimeout,
     Base64(Base64Error),
+    Bincode(BincodeError),
     Canonical(String),
     Client(String),
     Command(String),
@@ -93,11 +96,13 @@ impl Display for Error {
         let inner: String = match *self {
             Error::Addr(ref err)        => format!("Address parse error: {}", err),
             Error::AtomicAbort(ref err) => format!("Atomic transaction aborted: {}", err),
+            Error::AtomicOffline(ref serial) => format!("Secondary offline: {}", serial),
             Error::AtomicPayload        => "Transaction payload too large".into(),
             Error::AtomicSigned         => "Commit or Abort state needs TufSigned".into(),
             Error::AtomicState(from, to) => format!("Atomic transition invalid: {:?} -> {:?}", from, to),
             Error::AtomicTimeout        => "Transaction timed out".into(),
             Error::Base64(ref err)      => format!("Base64 parse error: {}", err),
+            Error::Bincode(ref err)     => format!("Bincode conversion error: {}", err),
             Error::Canonical(ref err)   => format!("Canonical JSON error: {}", err),
             Error::Client(ref err)      => format!("Http client error: {}", err),
             Error::Command(ref err)     => format!("Unknown Command: {}", err),
@@ -154,7 +159,6 @@ impl<E> From<PoisonError<E>> for Error {
     }
 }
 
-
 macro_rules! derive_from {
     ([ $( $from: ident => $to: ident ),* ]) => {
         $(impl From<$from> for Error {
@@ -176,6 +180,7 @@ macro_rules! derive_from {
 derive_from!([
     AddrParseError   => Addr,
     Base64Error      => Base64,
+    BincodeError     => Bincode,
     ChronoParseError => DateTime,
     FromHexError     => Hex,
     FromUtf8Error    => FromUtf8,

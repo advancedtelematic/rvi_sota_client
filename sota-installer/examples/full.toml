@@ -4,5 +4,5 @@ private_key_path = "/tmp/super-secret"
 signature_type = "rsassa-pss"
 
 timeout = 30
-bus_type = "udp"
+primary = "127.0.0.1:2310"
 image_dir = "/tmp/sota-writer-images"

@@ -15,8 +15,7 @@ mod installer;
 use clap::AppSettings;
 use env_logger::LogBuilder;
 use log::LogLevelFilter;
-use std::path::Path;
-use std::{fs, process, thread};
+use std::{process, thread};
 use std::time::Duration;
 
 use config::{App, Config};
@@ -34,10 +33,10 @@ fn main() {
 fn start() -> Result<(), Error> {
     let app = parse_args()?;
     let oneshot = app.oneshot;
-    let mut secondary = app.into_secondary()?;
 
     loop {
         info!("Starting a new listener...");
+        let mut secondary = app.to_secondary()?;
         match secondary.listen() {
             Ok(()) => info!("Listener complete."),
             Err(err) => error!("Listener error: {}", err)
@@ -60,8 +59,8 @@ fn parse_args() -> Result<App, Error> {
             (@arg oneshot: -o --oneshot +global "Run the installer once then exit")
 
             (@subcommand overwrite =>
-                (about: "Overwrite a specific file each time")
-                (@arg path: --path +takes_value +required "Output file path")
+                (about: "Overwrite any existing images")
+                (@arg dir: --dir +takes_value +required "Output directory")
             )
     ).get_matches();
 
@@ -74,9 +73,10 @@ fn parse_args() -> Result<App, Error> {
     }?;
 
     let install_type = if let Some(cmd) = matches.subcommand_matches("overwrite") {
-        let image_path = cmd.value_of("path").ok_or_else(|| Error::Config("overwrite expects a --path flag".into()))?.into();
-        if let Some(dir) = Path::new(&image_path).parent() { fs::create_dir_all(dir)?; }
-        InstallType::Overwrite { image_path: image_path }
+        InstallType::Overwrite {
+            output_dir: cmd.value_of("dir")
+                .ok_or_else(|| Error::Config("overwrite expects --dir".into()))?.into()
+        }
     } else {
         return Err(Error::Config("no subcommand provided".into()));
     };

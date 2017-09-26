@@ -41,7 +41,9 @@ impl TufMeta {
 #[allow(non_snake_case)]
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone)]
 pub struct TufCustom {
-    pub ecuIdentifier: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ecuIdentifier: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub uri: Option<String>,
 }
 

@@ -1,4 +1,7 @@
 extern crate base64;
+extern crate bincode;
+extern crate bytes;
+extern crate byteorder;
 extern crate chan;
 extern crate chrono;
 extern crate crossbeam;
@@ -6,10 +9,12 @@ extern crate crypto;
 #[cfg(feature = "rvi")]
 extern crate dbus;
 extern crate hex;
+extern crate hmac;
 extern crate hyper;
 extern crate itoa;
 #[macro_use]
 extern crate lazy_static;
+extern crate libc;
 #[macro_use]
 extern crate log;
 #[macro_use]
@@ -22,6 +27,7 @@ extern crate serde;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde_json as json;
+extern crate sha2;
 extern crate tar;
 extern crate time;
 extern crate toml;
