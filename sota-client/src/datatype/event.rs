@@ -59,7 +59,7 @@ pub enum Event {
     SystemInfoSent,
 
     /// There are no new Uptane updates.
-    UptaneTimestampUpdated,
+    UptaneNoUpdates,
     /// The updated snapshot.json metadata.
     UptaneSnapshotUpdated(HashMap<String, TufMeta>),
     /// The updated target.json metadata.

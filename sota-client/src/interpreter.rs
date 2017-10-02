@@ -180,11 +180,11 @@ impl CommandInterpreter {
             (Command::GetUpdateRequests, CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
                 let _ = uptane.get_director(&*self.http, RoleName::Root)?;
-                if uptane.get_director(&*self.http, RoleName::Timestamp)?.is_new() {
-                    let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
+                let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
+                if targets.is_new() {
                     Event::UptaneTargetsUpdated(Box::new(targets))
                 } else {
-                    Event::UptaneTimestampUpdated
+                    Event::UptaneNoUpdates
                 }
             }
 
