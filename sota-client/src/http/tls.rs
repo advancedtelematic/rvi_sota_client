@@ -86,7 +86,7 @@ impl TlsClient {
 impl Default for TlsClient {
     fn default() -> Self {
         match *CONNECTOR.lock().unwrap() {
-            Some(ref connector) => TlsClient(connector.clone()),
+            Some(ref connector) => TlsClient(Arc::clone(connector)),
             None => panic!("TlsClient::init not called")
         }
     }

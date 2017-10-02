@@ -8,7 +8,7 @@ use datatype::Error;
 pub struct CanonicalJson;
 
 impl CanonicalJson {
-    pub fn into_bytes(value: json::Value) -> Result<Vec<u8>, Error> {
+    pub fn convert(value: json::Value) -> Result<Vec<u8>, Error> {
         let json = JsonValue::from(value)?;
         let mut buf = Vec::new();
         json.write(&mut buf)?;
@@ -37,15 +37,14 @@ impl JsonValue {
             json::Value::Null => Ok(JsonValue::Null),
             json::Value::Bool(b) => Ok(JsonValue::Bool(b)),
             json::Value::Number(n) => {
-                n.as_i64().map(JsonNumber::I64)
-                    .or(n.as_u64().map(JsonNumber::U64))
+                n.as_i64()
+                    .map(JsonNumber::I64)
+                    .or_else(|| n.as_u64().map(JsonNumber::U64))
                     .map(JsonValue::Number)
                     .ok_or_else(|| Error::Canonical(format!("couldn't parse as i64 or u64: {}", n)))
             }
             json::Value::Array(arr) => {
-                let vals = arr.into_iter()
-                    .map(|val| Self::from(val))
-                    .collect::<Result<Vec<_>, _>>()?;
+                let vals = arr.into_iter().map(Self::from).collect::<Result<Vec<_>, _>>()?;
                 Ok(JsonValue::Array(vals))
             }
             json::Value::Object(obj) => {
@@ -97,7 +96,7 @@ impl JsonValue {
         }
     }
 
-    fn write_str(mut buf: &mut Vec<u8>, input: &str) -> Result<(), Error> {
+    fn write_str(buf: &mut Vec<u8>, input: &str) -> Result<(), Error> {
         let val = json::to_value(json::Value::String(input.into()))?;
         Ok(buf.extend(json::to_string(&val)?.as_bytes()))
     }

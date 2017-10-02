@@ -78,7 +78,10 @@ impl AuthClient {
                 let mut body = Vec::new();
                 let data = match resp.read_to_end(&mut body) {
                     Ok(_) => ResponseData { code: resp.status, body: body },
-                    Err(err) => return Response::Error(Error::Client(format!("couldn't read response body: {}", err)))
+                    Err(err) => {
+                        let msg = format!("couldn't read response body: {}", err);
+                        return Response::Error(Box::new(Error::Client(msg)));
+                    }
                 };
                 debug!("response body size: {}", data.body.len());
 
@@ -87,13 +90,13 @@ impl AuthClient {
                 } else if resp.status.is_success() {
                     Response::Success(data)
                 } else if resp.status == StatusCode::Unauthorized || resp.status == StatusCode::Forbidden {
-                    Response::Error(Error::HttpAuth(data))
+                    Response::Error(Box::new(Error::HttpAuth(data)))
                 } else {
                     Response::Failed(data)
                 }
             }
 
-            Err(err) => Response::Error(Error::Client(format!("couldn't send request: {}", err)))
+            Err(err) => Response::Error(Box::new(Error::Client(format!("couldn't send request: {}", err))))
         }
     }
 
@@ -106,13 +109,18 @@ impl AuthClient {
                     url: match loc.parse() {
                         Ok(absolute) => absolute,
                         Err(_) if loc[0..1] == *"/" => req.request.url.join(loc), // relative
-                        Err(err) => return Response::Error(Error::Parse(format!("`{}` not a url: {}", loc, err)))
+                        Err(err) => {
+                            let msg = format!("`{}` not a url: {}", loc, err);
+                            return Response::Error(Box::new(Error::Parse(msg)))
+                        }
                     },
                     method: req.request.method.clone(),
                     body:   req.request.body.clone(),
                 }))
             })
-            .unwrap_or_else(|| Response::Error(Error::Client("redirect missing Location header".into())))
+            .unwrap_or_else(|| {
+                Response::Error(Box::new(Error::Client("redirect missing Location header".into())))
+            })
     }
 }
 

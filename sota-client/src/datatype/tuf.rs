@@ -145,7 +145,7 @@ pub struct PrivateKey {
 
 impl PrivateKey {
     pub fn sign_data(&self, data: json::Value, sig_type: SignatureType) -> Result<TufSigned, Error> {
-        let cjson = CanonicalJson::into_bytes(json::to_value(&data)?)?;
+        let cjson = CanonicalJson::convert(json::to_value(&data)?)?;
         let signed = TufSigned {
             signatures: vec![Signature {
                 keyid:  self.keyid.clone(),

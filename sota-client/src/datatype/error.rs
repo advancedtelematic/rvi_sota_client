@@ -65,8 +65,8 @@ pub enum Error {
     Recv(RecvError),
     Ring(RingError),
     Rvi(String),
-    SendCommand(SendError<CommandExec>),
-    SendEvent(SendError<Event>),
+    SendCommand(Box<SendError<CommandExec>>),
+    SendEvent(Box<SendError<Event>>),
     Socket(String),
     SystemInfo(String),
     Toml(TomlError),
@@ -171,7 +171,7 @@ macro_rules! derive_from {
     ([ $( $error: ident < $ty: ty > => $to: ident),* ]) => {
         $(impl From<$error<$ty>> for Error {
             fn from(err: $error<$ty>) -> Error {
-                Error::$to(err)
+                Error::$to(Box::new(err))
             }
         })*
     };

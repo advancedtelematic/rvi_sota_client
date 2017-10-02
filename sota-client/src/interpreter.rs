@@ -182,7 +182,7 @@ impl CommandInterpreter {
                 let _ = uptane.get_director(&*self.http, RoleName::Root)?;
                 if uptane.get_director(&*self.http, RoleName::Timestamp)?.is_new() {
                     let targets = uptane.get_director(&*self.http, RoleName::Targets)?;
-                    Event::UptaneTargetsUpdated(targets)
+                    Event::UptaneTargetsUpdated(Box::new(targets))
                 } else {
                     Event::UptaneTimestampUpdated
                 }
@@ -275,7 +275,7 @@ impl CommandInterpreter {
 
             (Command::UptaneStartInstall(targets), CommandMode::Uptane(uptane)) => {
                 let mut uptane = uptane.borrow_mut();
-                match uptane.install(targets, self.treehub()?, self.credentials()) {
+                match uptane.install(*targets, self.treehub()?, self.credentials()) {
                     Ok((signed, true))  => Event::UptaneInstallComplete(signed),
                     Ok((signed, false)) => Event::UptaneInstallFailed(signed),
                     Err(err) => {
@@ -321,7 +321,7 @@ impl CommandInterpreter {
     /// Return the treehub URL.
     fn treehub(&self) -> Result<Url, Error> {
         self.config.tls.as_ref()
-            .map(|ref tls| tls.server.join("/treehub"))
+            .map(|tls| tls.server.join("/treehub"))
             .ok_or_else(|| Error::Config("tls.server required".into()))
     }
 }

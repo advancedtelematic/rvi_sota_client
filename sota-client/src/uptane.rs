@@ -133,7 +133,7 @@ impl Uptane {
         match rx.recv().expect("couldn't GET from uptane") {
             Response::Success(data) => Ok(data.body),
             Response::Failed(data)  => Err(data.into()),
-            Response::Error(err)    => Err(err)
+            Response::Error(err)    => Err(*err)
         }
     }
 
@@ -143,7 +143,7 @@ impl Uptane {
         match rx.recv().expect("couldn't PUT bytes to uptane") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(data.into()),
-            Response::Error(err)   => Err(err)
+            Response::Error(err)   => Err(*err)
         }
     }
 
@@ -265,7 +265,7 @@ impl Uptane {
         }
 
         if let Some(ref json) = verified.json {
-            for (_, mut states) in payloads.iter_mut() {
+            for states in payloads.values_mut() {
                 states.insert(State::Verify, Payload::UptaneMetadata(Bytes::from(json.clone())));
             }
         }
@@ -339,7 +339,7 @@ impl Verifier {
     pub fn verify_signed(&mut self, role: RoleName, signed: TufSigned) -> Result<Verified, Error> {
         let current = {
             let meta = self.roles.get(&role).ok_or_else(|| Error::UptaneRole(format!("{} not found", role)))?;
-            self.verify_signatures(&meta, &signed)?;
+            self.verify_signatures(meta, &signed)?;
             meta.version
         };
 
@@ -362,7 +362,7 @@ impl Verifier {
 
     /// Verify that a role-defined threshold of signatures successfully validate.
     pub fn verify_signatures(&self, meta: &RoleMeta, signed: &TufSigned) -> Result<(), Error> {
-        let cjson = CanonicalJson::into_bytes(json::to_value(&signed.signed)?)?;
+        let cjson = CanonicalJson::convert(json::to_value(&signed.signed)?)?;
         let valid = signed.signatures
             .iter()
             .filter(|sig| meta.keyids.contains(&sig.keyid))

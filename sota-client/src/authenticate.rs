@@ -18,7 +18,7 @@ pub fn pkcs12(client: &Client, server: Url, payload: &RegistrationPayload) -> Re
     match rx.recv().expect("no authenticate response received") {
         Response::Success(data) => Ok(data.body),
         Response::Failed(data)  => Err(data.into()),
-        Response::Error(err)    => Err(err)
+        Response::Error(err)    => Err(*err)
     }
 }
 
@@ -30,7 +30,7 @@ pub fn oauth2(server: Url, client: &Client) -> Result<AccessToken, Error> {
     match rx.recv().expect("no authenticate response received") {
         Response::Success(data) => Ok(json::from_slice(&data.body)?),
         Response::Failed(data)  => Err(data.into()),
-        Response::Error(err)    => Err(err)
+        Response::Error(err)    => Err(*err)
     }
 }
 

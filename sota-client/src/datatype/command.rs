@@ -40,7 +40,7 @@ pub enum Command {
     /// Send signed reports from ECUs to the Director server.
     UptaneSendManifest(Option<Manifests>),
     /// Install the verified targets.json metadata to their respective ECUs.
-    UptaneStartInstall(Verified),
+    UptaneStartInstall(Box<Verified>),
 }
 
 impl FromStr for Command {

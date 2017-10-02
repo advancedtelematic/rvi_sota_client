@@ -49,13 +49,13 @@ pub struct Request {
 pub enum Response {
     Success(ResponseData),
     Failed(ResponseData),
-    Error(Error)
+    Error(Box<Error>)
 }
 
 impl Display for Response {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         match *self {
-            Response::Success(ref data) => write!(f, "{}", data),
+            Response::Success(ref data) |
             Response::Failed(ref data)  => write!(f, "{}", data),
             Response::Error(ref err)    => write!(f, "{}", err),
         }

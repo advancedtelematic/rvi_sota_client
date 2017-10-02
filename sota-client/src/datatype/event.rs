@@ -63,7 +63,7 @@ pub enum Event {
     /// The updated snapshot.json metadata.
     UptaneSnapshotUpdated(HashMap<String, TufMeta>),
     /// The updated target.json metadata.
-    UptaneTargetsUpdated(Verified),
+    UptaneTargetsUpdated(Box<Verified>),
     /// An update was installed to a specific ECU.
     UptaneInstallComplete(Manifests),
     /// An update was not installed to a specific ECU.

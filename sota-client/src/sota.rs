@@ -38,7 +38,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         match rx.recv().expect("couldn't get update requests") {
             Response::Success(data) => Ok(json::from_slice::<Vec<UpdateRequest>>(&data.body)?),
             Response::Failed(data)  => Err(data.into()),
-            Response::Error(err)    => Err(err)
+            Response::Error(err)    => Err(*err)
         }
     }
 
@@ -48,7 +48,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         let data = match rx.recv().expect("couldn't download update") {
             Response::Success(data) => Ok(data),
             Response::Failed(data)  => Err(data.into()),
-            Response::Error(err)    => Err(err)
+            Response::Error(err)    => Err(*err)
         }?;
 
         let path = format!("{}/{}", self.config.device.packages_dir, id);
@@ -75,7 +75,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         match rx.recv().expect("couldn't send installed packages") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(data.into()),
-            Response::Error(err)   => Err(err)
+            Response::Error(err)   => Err(*err)
         }
     }
 
@@ -86,7 +86,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         match rx.recv().expect("couldn't send update report") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(data.into()),
-            Response::Error(err)   => Err(err)
+            Response::Error(err)   => Err(*err)
         }
     }
 
@@ -96,7 +96,7 @@ impl<'c, 'h> Sota<'c, 'h> {
         match rx.recv().expect("couldn't send system info") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(data.into()),
-            Response::Error(err)   => Err(err)
+            Response::Error(err)   => Err(*err)
         }
     }
 }

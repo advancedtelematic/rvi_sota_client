@@ -35,7 +35,9 @@ impl Client for TestClient {
             .pop_front()
             .map(|body| ResponseData { code: StatusCode::Ok, body: body })
             .map(|data| resp_tx.send(Response::Success(data)))
-            .unwrap_or_else(|| resp_tx.send(Response::Error(Error::Client(req.url.to_string()))))
+            .unwrap_or_else(|| {
+                resp_tx.send(Response::Error(Box::new(Error::Client(req.url.to_string()))))
+            })
     }
 
     fn is_testing(&self) -> bool { true }

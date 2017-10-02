@@ -161,7 +161,7 @@ impl<'s> Primary<'s> {
         info!("Transaction {} complete.", self.txid);
         if let Some(ref path) = self.recover { let _ = fs::remove_file(path); }
 
-        if self.aborted().len() > 0 {
+        if ! self.aborted().is_empty() {
             Err(Error::AtomicAbort(format!("Secondary aborts: {:?}", self.aborted())))
         } else if self.committed().len() < self.payloads.len() {
             Err(Error::AtomicTimeout)
@@ -289,7 +289,7 @@ impl<'s> Primary<'s> {
     fn write_message(&self, serial: &str, msg: &SecondaryMessage) -> Result<(), Error> {
         match self.server.as_ref().expect("tcp server").write_message(serial, msg) {
             Ok(()) => Ok(()),
-            Err(ref err) if should_retry(&err) => Ok(()),
+            Err(ref err) if should_retry(err) => Ok(()),
             Err(err) => Err(err)
         }
     }
@@ -405,7 +405,7 @@ impl Secondary {
 
         if let Some(ref path) = self.recover { fs::remove_file(path)?; }
         if self.state == State::Abort {
-            Err(Error::AtomicAbort(format!("{}", self.serial)))
+            Err(Error::AtomicAbort(self.serial.clone()))
         } else {
             Ok(())
         }
@@ -429,7 +429,7 @@ impl Secondary {
                 }
 
                 Some(StepData::ImageWriter(writer)) => {
-                    if let None = self.writers.get(&writer.meta.image_name) {
+                    if self.writers.get(&writer.meta.image_name).is_none() {
                         let image = writer.meta.image_name.clone();
                         let _ = self.writers.insert(image.clone(), writer);
                         self.request_chunk(image, 0)
@@ -519,7 +519,7 @@ fn is_terminal(state: State) -> bool {
 fn in_progress(state: State) -> bool {
     match state {
         State::Start | State::Verify | State::Fetch => true,
-        _ => false
+        State::Idle | State::Commit | State::Abort => false
     }
 }
 
@@ -566,12 +566,12 @@ impl TcpServer {
             _addr: listener.local_addr()?,
         };
 
-        let clients = server.clients.clone();
-        let messages = server.messages.clone();
+        let clients = Arc::clone(&server.clients);
+        let messages = Arc::clone(&server.messages);
         thread::spawn(move || {
             for stream in listener.incoming() {
                 stream.map_err(Error::Io)
-                    .and_then(|s| Self::accept_stream(s, clients.clone(), messages.clone()))
+                    .and_then(|s| Self::accept_stream(s, Arc::clone(&clients), Arc::clone(&messages)))
                     .unwrap_or_else(|err| warn!("Unable to open TCP connection: {}", err))
             }
         });
@@ -594,7 +594,7 @@ impl TcpServer {
             let client_stream = stream.try_clone()?;
             clients.lock().unwrap().insert(s.clone(), client_stream);
 
-            let messages = messages.clone();
+            let messages = Arc::clone(&messages);
             thread::spawn(move || loop {
                 match read_stream(&mut stream) {
                     Ok(msg) => messages.lock().unwrap().push_back((s.clone(), msg)),
@@ -669,7 +669,7 @@ impl TcpClient {
 }
 
 /// Read the data size then read the rest of the data from the stream.
-fn read_stream<T: DeserializeOwned>(mut stream: &mut Read) -> Result<T, Error> {
+fn read_stream<T: DeserializeOwned>(stream: &mut Read) -> Result<T, Error> {
     let mut size_buf = [0; 4];
     stream.read_exact(&mut size_buf)?;
     let num_bytes = BigEndian::read_u32(&size_buf);
@@ -687,7 +687,7 @@ fn read_stream<T: DeserializeOwned>(mut stream: &mut Read) -> Result<T, Error> {
 }
 
 /// Write the data size then write the referenced data to the stream.
-fn write_stream<T: Serialize>(mut stream: &mut Write, data: &T) -> Result<(), Error> {
+fn write_stream<T: Serialize>(stream: &mut Write, data: &T) -> Result<(), Error> {
     let encoded = bincode::serialize(data, Infinite)?;
     let mut size_buf = [0; 4];
     BigEndian::write_u32(&mut size_buf, encoded.len() as u32);

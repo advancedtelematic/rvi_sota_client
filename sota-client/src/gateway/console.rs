@@ -16,9 +16,9 @@ impl Gateway for Console {
         let (etx, erx) = chan::sync::<Event>(0);
 
         thread::spawn(move || loop {
-            let _ = get_input()
+            get_input()
                 .map(|cmd| ctx.send(CommandExec { cmd: cmd, etx: Some(etx.clone()) }))
-                .map_err(|err| error!("Console: {:?}", err));
+                .unwrap_or_else(|err| error!("Console: {:?}", err));
         });
 
         thread::spawn(move || loop {

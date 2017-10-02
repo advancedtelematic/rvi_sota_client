@@ -85,7 +85,7 @@ impl ImageReader {
     pub fn sha256sum(&mut self) -> Result<String, Error> {
         let mut hasher = Sha256::new();
         for index in 0..self.num_chunks {
-            hasher.input(&self.read_chunk(index)?);
+            hasher.input(self.read_chunk(index)?);
         }
         Ok(hasher.result_str())
     }
@@ -140,7 +140,7 @@ impl ImageWriter {
 
     /// Assemble all saved chunks into an output image.
     pub fn assemble_chunks(&self) -> Result<(), Error> {
-        if self.chunks_available.len() > 0 {
+        if ! self.chunks_available.is_empty() {
             return Err(Error::Image(format!("{} chunks remaining", self.chunks_available.len())))
         }
         let chunks_dir = format!("{}/{}", CHUNK_DIR, self.meta.image_name);
@@ -160,7 +160,7 @@ impl ImageWriter {
         let mut hasher = Sha256::new();
         for index in indices {
             let chunk = Util::read_file(&format!("{}/{}", chunks_dir, index))?;
-            file.write(&chunk)?;
+            file.write_all(&chunk)?;
             hasher.input(&chunk);
         }
 
@@ -205,7 +205,7 @@ impl ImageWriter {
 
     /// Return the index of an unwritten chunk.
     pub fn next_chunk(&self) -> Option<u64> {
-        self.chunks_available.iter().next().map(|index| *index)
+        self.chunks_available.iter().next().cloned()
     }
 
     /// Verify the output image checksum.

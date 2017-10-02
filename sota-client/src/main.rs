@@ -274,10 +274,10 @@ fn build_config(version: &Option<String>) -> Config {
         exit!(0, if let Some(ref v) = *version { v } else { "unknown" });
     }
 
-    let mut config = match cli.opt_str("config").or_else(|| env::var("SOTA_CONFIG").ok()) {
-        Some(file) => Config::load(&file).expect("Error loading config"),
-        None => exit!(1, "Config flag or SOTA_CONFIG environment variable required")
-    };
+    let mut config = cli.opt_str("config")
+        .or_else(|| env::var("SOTA_CONFIG").ok())
+        .map(|file| Config::load(&file).expect("Error loading config"))
+        .unwrap_or_else(|| exit!(1, "Config flag or SOTA_CONFIG environment variable required"));
 
     config.auth.as_mut().map(|auth_cfg| {
         cli.opt_str("auth-server").map(|text| auth_cfg.server = text.parse().expect("Invalid auth-server URL"));

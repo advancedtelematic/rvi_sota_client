@@ -143,11 +143,11 @@ impl OstreePackage {
         debug!("getting a static delta from {}", current_commit);
         let (current, next)  = (Ostree::hash(current_commit)?, Ostree::hash(&self.commit)?);
         let (prefix, suffix) = current.split_at(2);
-        let url  = format!("{}/deltas/{}/{}-{}/apply-offline.tar", server, prefix, suffix, next);
+        let url = format!("{}/deltas/{}/{}-{}/apply-offline.tar", server, prefix, suffix, next);
         let data = match client.get(url.parse()?, None).recv().expect("get_delta") {
             Response::Success(data) => Ok(data),
             Response::Failed(data)  => Err(data.into()),
-            Response::Error(err)    => Err(err)
+            Response::Error(err)    => Err(*err)
         }?;
 
         let tar = format!("/tmp/sota-delta-{}-{}.tar", current_commit, self.commit);
