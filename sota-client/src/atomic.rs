@@ -545,9 +545,9 @@ fn should_retry(err: &Error) -> bool {
 
 /// A `TcpServer` will read `PrimaryMessage`s from each connected `TcpClient`.
 pub struct TcpServer {
-    clients: Arc<Mutex<HashMap<String, TcpStream>>>,
+    clients:  Arc<Mutex<HashMap<String, TcpStream>>>,
     messages: Arc<Mutex<VecDeque<(String, PrimaryMessage)>>>,
-    _addr: SocketAddr,
+    _addr:    SocketAddr,
 }
 
 impl Default for TcpServer {

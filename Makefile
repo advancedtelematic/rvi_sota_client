@@ -35,8 +35,8 @@ LAUNCHER := $(DOCKER_RUN) --workdir /src/sota-launcher $(IMAGE_RUST) cargo
 PACKAGE := $(DOCKER_RUN) --workdir /src $(IMAGE_FPM) sota-client/docker/make_package.sh
 
 
-.PHONY: help start generate test doc client launcher installer \
-	image image-uptane deb rpm sota-version package-version
+.PHONY: help start test doc client launcher installer image image-uptane \
+	clean deb rpm sota-version package-version yocto-version
 .DEFAULT_GOAL := help
 
 help:
