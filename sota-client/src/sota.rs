@@ -19,7 +19,7 @@ pub struct Sota<'c, 'h> {
 impl<'c, 'h> Sota<'c, 'h> {
     /// Creates a new instance for Sota communication.
     pub fn new(config: &'c Config, client: &'h Client) -> Sota<'c, 'h> {
-        Sota { config: config, client: client }
+        Sota { config, client }
     }
 
     /// When using cert authentication returns an endpoint of: `<tls-server>/core/<path>`
@@ -43,29 +43,32 @@ impl<'c, 'h> Sota<'c, 'h> {
     }
 
     /// Download a specific update.
-    pub fn download_update(&mut self, id: Uuid) -> Result<DownloadComplete, Error> {
-        let rx = self.client.get(self.endpoint(&format!("updates/{}/download", id)), None);
+    pub fn download_update(&mut self, update_id: Uuid) -> Result<DownloadComplete, Error> {
+        let rx = self.client.get(self.endpoint(&format!("updates/{}/download", update_id)), None);
         let data = match rx.recv().expect("couldn't download update") {
             Response::Success(data) => Ok(data),
             Response::Failed(data)  => Err(data.into()),
             Response::Error(err)    => Err(*err)
         }?;
 
-        let path = format!("{}/{}", self.config.device.packages_dir, id);
-        let mut file = File::create(&path).map_err(|err| Error::Client(format!("couldn't create path {}: {}", path, err)))?;
+        let update_image = format!("{}/{}", self.config.device.packages_dir, update_id);
+        let mut file = File::create(&update_image)
+            .map_err(|err| Error::Client(format!("couldn't create path {}: {}", update_image, err)))?;
         let _ = io::copy(&mut &*data.body, &mut file)?;
-        Ok(DownloadComplete { update_id: id, update_image: path.into(), signature: "".into() })
+        let signature = "".into();
+        Ok(DownloadComplete { update_id, update_image, signature })
     }
 
     /// Install an update using the current package manager.
-    pub fn install_update(&mut self, id: &Uuid, creds: &Credentials) -> Result<InstallResult, Error> {
-        let path = format!("{}/{}", self.config.device.packages_dir, id);
+    pub fn install_update(&mut self, update_id: &Uuid, creds: &Credentials) -> Result<InstallResult, Error> {
+        let path = format!("{}/{}", self.config.device.packages_dir, update_id);
         self.config.device
             .package_manager
             .install_package(&path, creds)
             .and_then(|outcome| {
-                fs::remove_file(&path).unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
-                Ok(outcome.into_result(format!("{}", id)))
+                fs::remove_file(&path)
+                    .unwrap_or_else(|err| error!("couldn't remove installed package: {}", err));
+                Ok(outcome.into_result(format!("{}", update_id)))
             })
     }
 
@@ -82,7 +85,7 @@ impl<'c, 'h> Sota<'c, 'h> {
     /// Send the outcome of a package installation.
     pub fn send_install_report(&mut self, report: &InstallReport) -> Result<(), Error> {
         let url = self.endpoint(&format!("updates/{}", report.update_id));
-        let rx  = self.client.post(url, Some(json::to_vec(&report.operation_results)?));
+        let rx = self.client.post(url, Some(json::to_vec(&report.operation_results)?));
         match rx.recv().expect("couldn't send update report") {
             Response::Success(_)   => Ok(()),
             Response::Failed(data) => Err(data.into()),

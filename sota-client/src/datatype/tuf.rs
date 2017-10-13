@@ -222,7 +222,7 @@ pub struct EcuCustom {
 }
 
 impl EcuCustom {
-    pub fn from_result(result: InstallResult) -> Self {
-        EcuCustom { operation_result: result }
+    pub fn from_result(operation_result: InstallResult) -> Self {
+        EcuCustom { operation_result }
     }
 }

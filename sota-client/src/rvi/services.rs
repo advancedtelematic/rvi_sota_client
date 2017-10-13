@@ -51,11 +51,11 @@ impl Services {
     pub fn register_services<F: Fn(&str) -> String>(&mut self, register: F) {
         let _ = register("/sota/notify");
         let mut remote = self.remote.lock().unwrap();
-        remote.local   = Some(LocalServices {
-            start:    register("/sota/start"),
-            chunk:    register("/sota/chunk"),
-            abort:    register("/sota/abort"),
-            finish:   register("/sota/finish"),
+        remote.local = Some(LocalServices {
+            start: register("/sota/start"),
+            chunk: register("/sota/chunk"),
+            abort: register("/sota/abort"),
+            finish: register("/sota/finish"),
             getpackages: register("/sota/getpackages")
         });
     }
@@ -133,10 +133,10 @@ impl RemoteServices {
 
 #[derive(Clone, Deserialize, Serialize)]
 pub struct LocalServices {
-    pub start:    String,
-    pub abort:    String,
-    pub chunk:    String,
-    pub finish:   String,
+    pub start:       String,
+    pub abort:       String,
+    pub chunk:       String,
+    pub finish:      String,
     pub getpackages: String,
 }
 

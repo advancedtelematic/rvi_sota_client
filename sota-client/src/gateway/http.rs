@@ -33,17 +33,17 @@ struct HttpHandler {
 impl Handler for HttpHandler {
     fn handle(&self, req: HyperRequest, mut resp: HyperResponse) {
         let mut body = Vec::new();
-        let _ = json::from_reader(req)
-            .map_err(|err| {
-                error!("couldn't read HTTP request: {}", err);
-                *resp.status_mut() = StatusCode::BadRequest;
-            })
+        json::from_reader(req)
             .map(|cmd| {
                 let (etx, erx) = chan::async::<Event>();
                 self.ctx.send(CommandExec { cmd: cmd, etx: Some(etx) });
                 body = json::to_vec(&erx.recv().expect("no http response")).expect("encode event");
                 resp.headers_mut().set(ContentType(Mime(TopLevel::Application, SubLevel::Json, vec![])));
                 *resp.status_mut() = StatusCode::Ok;
+            })
+            .unwrap_or_else(|err| {
+                error!("couldn't read HTTP request: {}", err);
+                *resp.status_mut() = StatusCode::BadRequest;
             });
         resp.send(&body).expect("couldn't send HTTP response");
     }

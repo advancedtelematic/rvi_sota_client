@@ -31,9 +31,9 @@ impl Gateway for Socket {
 
         for conn in cmd_sock.incoming() {
             let ctx = ctx.clone();
-            let _ = conn
-                .map_err(|err| error!("couldn't open socket connection: {}", err))
-                .map(|stream| thread::spawn(move || handle_stream(stream, &ctx)));
+            conn.map(|stream| thread::spawn(move || handle_stream(stream, &ctx)))
+                .map(|_handle| ())
+                .unwrap_or_else(|err| error!("couldn't open socket connection: {}", err));
         }
     }
 }

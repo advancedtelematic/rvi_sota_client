@@ -194,7 +194,7 @@ fn start_update_poller(interval: u64, ctx: &Sender<CommandExec>) {
     let (etx, erx) = chan::async::<Event>();
     loop {
         ctx.send(CommandExec { cmd: Command::GetUpdateRequests, etx: Some(etx.clone()) });
-        let _ = erx.recv(); // wait for the response
+        let _ = erx.recv(); // wait for the response before starting the timer
         thread::sleep(Duration::from_secs(interval));
     }
 }

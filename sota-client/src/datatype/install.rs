@@ -14,17 +14,22 @@ pub struct InstallOutcome {
 impl InstallOutcome {
     /// Create a new installation outcome.
     pub fn new(code: InstallCode, stdout: String, stderr: String) -> InstallOutcome {
-        InstallOutcome { code: code, stdout: stdout, stderr: stderr }
+        InstallOutcome { code, stdout, stderr }
+    }
+
+    /// Create a new installation outcome with empty stdout and stderr fields.
+    pub fn empty(code: InstallCode) -> InstallOutcome {
+        Self::new(code, "".into(), "".into())
     }
 
     /// Create a new installation outcome with a code of `OK`.
     pub fn ok() -> InstallOutcome {
-        InstallOutcome { code: InstallCode::OK, stdout: "".into(), stderr: "".into() }
+        Self::empty(InstallCode::OK)
     }
 
     /// Create a new installation outcome with a code of `GENERAL_ERROR`.
     pub fn error(stderr: String) -> InstallOutcome {
-        InstallOutcome { code: InstallCode::GENERAL_ERROR, stdout: "".into(), stderr: stderr }
+        Self::new(InstallCode::GENERAL_ERROR, "".into(), stderr)
     }
 
     /// Convert an `InstallOutcome` into a `InstallResult
@@ -44,8 +49,8 @@ pub struct InstallResult {
 
 impl InstallResult {
     /// Create a new installation result.
-    pub fn new(id: String, code: InstallCode, text: String) -> InstallResult {
-        InstallResult { id: id, result_code: code, result_text: text }
+    pub fn new(id: String, result_code: InstallCode, result_text: String) -> InstallResult {
+        InstallResult { id, result_code, result_text }
     }
 
     /// Convert a single installation result to an `InstallReport`.
@@ -64,8 +69,8 @@ pub struct InstallReport {
 
 impl InstallReport {
     /// Create a new report from a list of installation results.
-    pub fn new(update_id: String, results: Vec<InstallResult>) -> Self {
-        InstallReport { update_id: update_id, operation_results: results }
+    pub fn new(update_id: String, operation_results: Vec<InstallResult>) -> Self {
+        InstallReport { update_id, operation_results }
     }
 }
 
@@ -196,6 +201,6 @@ pub struct InstalledSoftware {
 impl InstalledSoftware {
     /// Instantiate a new list of the software installed on the device.
     pub fn new(packages: Vec<InstalledPackage>, firmwares: Vec<InstalledFirmware>) -> InstalledSoftware {
-        InstalledSoftware { packages: packages, firmwares: firmwares }
+        InstalledSoftware { packages, firmwares }
     }
 }

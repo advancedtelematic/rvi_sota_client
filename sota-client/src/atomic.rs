@@ -225,12 +225,8 @@ impl<'s> Primary<'s> {
                         let chunk = self.images.get_mut(&image)
                             .ok_or_else(|| Error::Image(format!("not found: {}", image)))
                             .and_then(|reader| reader.read_chunk(index))?.into();
-                        self.write_message(&serial, &SecondaryMessage::Chunk {
-                            txid: txid,
-                            image: image,
-                            index: index,
-                            chunk: chunk,
-                        })
+                        let msg = SecondaryMessage::Chunk { txid, image, index, chunk };
+                        self.write_message(&serial, &msg)
                     }
                 },
 
@@ -465,7 +461,7 @@ impl Secondary {
     /// Send a request to the `Primary` for a new image chunk.
     fn request_chunk(&mut self, image: String, index: u64) -> Result<(), Error> {
         let txid = self.txid();
-        self.write_message(&PrimaryMessage::Chunk { txid: txid, image: image, index: index })
+        self.write_message(&PrimaryMessage::Chunk { txid, image, index })
     }
 
     /// Send an acknowledgement to the `Primary` of a state transition.
@@ -477,7 +473,7 @@ impl Secondary {
             None if is_terminal(self.state) => return Err(Error::AtomicSigned),
             None => None
         };
-        self.write_message(&PrimaryMessage::Ack { txid: txid, state: state, payload: payload })
+        self.write_message(&PrimaryMessage::Ack { txid, state, payload })
     }
 
     fn step(&mut self, state: State, payload: Option<Payload>) -> Result<Option<StepData>, Error> {
@@ -519,7 +515,7 @@ fn is_terminal(state: State) -> bool {
 fn in_progress(state: State) -> bool {
     match state {
         State::Start | State::Verify | State::Fetch => true,
-        State::Idle | State::Commit | State::Abort => false
+        State::Idle  | State::Commit | State::Abort => false
     }
 }
 
@@ -528,13 +524,13 @@ fn should_retry(err: &Error) -> bool {
         Error::AtomicOffline(_) => true,
         Error::Io(ref err) => match err.kind() {
             ErrorKind::ConnectionReset |
-            ErrorKind::Interrupted |
-            ErrorKind::TimedOut |
-            ErrorKind::UnexpectedEof |
-            ErrorKind::WouldBlock => true,
+            ErrorKind::Interrupted     |
+            ErrorKind::TimedOut        |
+            ErrorKind::UnexpectedEof   |
+            ErrorKind::WouldBlock      => true,
             _ => match err.raw_os_error() {
                 Some(libc::EPROTOTYPE) |
-                Some(libc::EDEADLK) => true,
+                Some(libc::EDEADLK)    => true,
                 _ => false
             }
         },
@@ -647,7 +643,7 @@ impl TcpClient {
         stream.set_read_timeout(Some(Duration::from_millis(500)))?;
         stream.set_write_timeout(Some(Duration::from_millis(500)))?;
         write_stream(&mut stream, &PrimaryMessage::Connect { serial: serial.clone() })?;
-        Ok(TcpClient { serial: serial, stream: stream })
+        Ok(TcpClient { serial, stream })
     }
 
     /// Read a new message from the connected TCP stream.
@@ -719,7 +715,7 @@ fn write_stream<T: Serialize>(stream: &mut Write, data: &T) -> Result<(), Error>
 mod tests {
     use super::*;
     use base64;
-    use ring::rand::SystemRandom;
+    use ring::rand::{SecureRandom, SystemRandom};
     use std::{panic, thread};
     use time;
 

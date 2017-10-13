@@ -144,12 +144,17 @@ impl ImageWriter {
             return Err(Error::Image(format!("{} chunks remaining", self.chunks_available.len())))
         }
         let chunks_dir = format!("{}/{}", CHUNK_DIR, self.meta.image_name);
-        let mut indices = fs::read_dir(&chunks_dir)?.map(|entry| {
-            entry.map_err(|err| Error::Image(format!("bad entry: {}", err))).and_then(|entry| {
-                entry.file_name().to_str().ok_or_else(|| Error::Image(format!("invalid filename: {:?}", entry)))
-                    .and_then(|name| u64::from_str(name).map_err(|err| Error::Image(format!("bad index: {}", err))))
+        let mut indices = fs::read_dir(&chunks_dir)?
+            .map(|entry| {
+                entry.map_err(|err| Error::Image(format!("bad entry: {}", err)))
+                    .and_then(|entry| {
+                        entry.file_name().to_str()
+                            .ok_or_else(|| Error::Image(format!("invalid filename: {:?}", entry)))
+                            .and_then(|name| u64::from_str(name)
+                                      .map_err(|err| Error::Image(format!("bad index: {}", err))))
+                    })
             })
-        }).collect::<Result<Vec<u64>, _>>()?;
+            .collect::<Result<Vec<u64>, _>>()?;
         indices.sort();
 
         let image_path = format!("{}/{}", self.image_dir, self.meta.image_name);
@@ -264,7 +269,7 @@ impl Transfers {
 #[cfg(test)]
 mod test {
     use super::*;
-    use ring::rand::SystemRandom;
+    use ring::rand::{SecureRandom, SystemRandom};
 
     use datatype::Util;
 

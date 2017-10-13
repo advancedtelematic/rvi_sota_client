@@ -133,14 +133,15 @@ impl Session {
                     MessageItem::from(true), // include packages?
                     MessageItem::from(false) // include firmware?
                 ]);
-                let _ = self.send_sync(msg)
+                self.send_sync(msg)
                     .map(|reply| reply.read2()
-                         .map_err(|err| error!("couldn't SendInstalledSoftware: {}", err))
                          .map(|(pkgs, firms): (Vec<InstalledPackage>, Vec<InstalledFirmware>)| {
                              let inst = InstalledSoftware::new(pkgs, firms);
                              self.send_internal(Command::SendInstalledSoftware(inst));
-                         }))
-                    .map_err(|err| error!("couldn't send InstalledSoftwareNeeded: {}", err));
+                         })
+                         .unwrap_or_else(|err| error!("failed to send SendInstalledSoftware: {}", err))
+                    )
+                    .unwrap_or_else(|err| error!("failed to send InstalledSoftwareNeeded: {}", err));
             }
 
             _ => ()

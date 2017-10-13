@@ -20,38 +20,43 @@ impl Gateway for Websocket {
         let server = TcpListener::bind(&addr.pop().expect("websocket address")).expect("websocket listener");
 
         for stream in server.incoming() {
-            let _ = stream
-                .map_err(|err| error!("Opening websocket: {}", err))
-                .map(|stream| tungstenite::accept(stream).map(|sock| {
-                    let ctx = ctx.clone();
-                    thread::spawn(move || handle_socket(sock, &ctx));
-                }));
+            stream.map(|stream| {
+                let ctx = ctx.clone();
+                tungstenite::accept(stream)
+                    .map(|sock| thread::spawn(move || handle_socket(sock, ctx)))
+                    .map(|_handle| ())
+                    .unwrap_or_else(|err| error!("Accept websocket connection: {}", err))
+            }).unwrap_or_else(|err| error!("New websocket connection: {}", err))
         }
     }
 }
 
 
-fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: &Sender<CommandExec>) {
-    let _ = socket.read_message()
-        .map_err(|err| error!("Websocket message: {}", err))
+fn handle_socket(mut socket: WebSocket<TcpStream>, ctx: Sender<CommandExec>) {
+    socket.read_message()
         .map(|msg| {
             let text = match msg {
                 Message::Text(text) => text,
                 Message::Binary(bytes) => match String::from_utf8(bytes) {
                     Ok(text) => text,
                     Err(err) => { error!("Websocket data: {}", err); return; }
-                }
+                },
+                Message::Ping(data) => { trace!("websocket ping: {:?}", data); return; }
+                Message::Pong(data) => { trace!("websocket pong: {:?}", data); return; }
             };
 
-            let _ = json::from_str::<Command>(&text)
-                .map_err(|err| error!("Websocket request not a command: {}", err))
+            json::from_str::<Command>(&text)
                 .map(|cmd| {
                     let (etx, erx) = chan::sync::<Event>(0);
                     ctx.send(CommandExec { cmd: cmd, etx: Some(etx) });
-                    let reply = json::to_string(&erx.recv().expect("websocket response")).expect("json reply");
-                    socket.write_message(Message::Text(reply)).map_err(|err| error!("Writing to websocket: {}", err))
-                });
-        });
+                    let resp = erx.recv().expect("websocket response");
+                    let msg = Message::Text(json::to_string(&resp).expect("json reply"));
+                    socket.write_message(msg).unwrap_or_else(|err| error!("Writing to websocket: {}", err))
+                })
+                .unwrap_or_else(|err| error!("Websocket request not a command: {}", err))
+        })
+        .unwrap_or_else(|err| error!("Websocket message: {}", err));
+
     socket.close(None).unwrap_or_else(|err| error!("Closing websocket: {}", err))
 }
 
