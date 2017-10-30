@@ -40,7 +40,7 @@ pub struct EventInterpreter {
 impl Interpreter<Event, CommandExec> for EventInterpreter {
     fn interpret(&mut self, event: Event, ctx: &Sender<CommandExec>) {
         info!("EventInterpreter received: {}", event);
-        let queue = |cmd: Command| ctx.send(CommandExec { cmd: cmd, etx: None });
+        let queue = |cmd| ctx.send(CommandExec { cmd: cmd, etx: None });
 
         match event {
             Event::Authenticated if self.initial => {
@@ -309,13 +309,17 @@ impl CommandInterpreter {
     /// Retrieve the current access token and device certificates for TLS.
     fn credentials(&self) -> Credentials {
         let client = Box::new(AuthClient::from(self.auth.clone(), self.version.clone()));
-        let token = if let Auth::Token(ref t) = self.auth { Some(t.access_token.clone()) } else { None };
-        let (ca, cert, pkey) = if let Some(ref tls) = self.config.tls {
+        let token = if let Auth::Token(ref t) = self.auth {
+            Some(t.access_token.clone())
+        } else {
+            None
+        };
+        let (ca_file, cert_file, pkey_file) = if let Some(ref tls) = self.config.tls {
             (Some(tls.ca_file.clone()), Some(tls.cert_file.clone()), Some(tls.pkey_file.clone()))
         } else {
             (None, None, None)
         };
-        Credentials { client: client, token: token, ca_file: ca, cert_file: cert, pkey_file: pkey }
+        Credentials { client, token, ca_file, cert_file, pkey_file }
     }
 
     /// Return the treehub URL.

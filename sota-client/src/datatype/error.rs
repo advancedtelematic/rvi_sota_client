@@ -7,8 +7,8 @@ use json::Error as SerdeJsonError;
 use openssl::error::ErrorStack as OpensslErrors;
 use pem::Error as PemError;
 use ring::error::Unspecified as RingError;
-use std;
 use std::convert::From;
+use std::error::Error as StdError;
 use std::fmt::{self, Display, Formatter};
 use std::io::Error as IoError;
 use std::net::AddrParseError;
@@ -87,10 +87,6 @@ pub enum Error {
     Websocket(WebsocketError),
 }
 
-impl std::error::Error for Error {
-    fn description(&self) -> &str { "SOTA error" }
-}
-
 impl Display for Error {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         let inner: String = match *self {
@@ -150,6 +146,12 @@ impl Display for Error {
             Error::Websocket(ref err)   => format!("Websocket Error: {:?}", err),
         };
         write!(f, "{}", inner)
+    }
+}
+
+impl StdError for Error {
+    fn description(&self) -> &str {
+        "SOTA error"
     }
 }
 

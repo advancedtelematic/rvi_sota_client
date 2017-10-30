@@ -397,9 +397,18 @@ impl Verifier {
         };
 
         match verify() {
-            Ok(true)  => { trace!("successful verification: {}", sig.keyid); true }
-            Ok(false) => { trace!("failed verification: {}", sig.keyid); false }
-            Err(err)  => { trace!("failed verification for {}: {}", sig.keyid, err); false }
+            Ok(true) => {
+                trace!("successful verification: {}", sig.keyid);
+                true
+            }
+            Ok(false) => {
+                trace!("failed verification: {}", sig.keyid);
+                false
+            }
+            Err(err) => {
+                trace!("failed verification for {}: {}", sig.keyid, err);
+                false
+            }
         }
     }
 }

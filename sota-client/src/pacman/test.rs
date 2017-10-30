@@ -41,15 +41,18 @@ impl Drop for TestDir {
 /// Returns a list of installed packages from a format of `<name> <version>`.
 pub fn installed_packages(path: &str) -> Result<Vec<Package>, Error> {
     let reader = BufReader::new(File::open(path)?);
-    Ok(reader.lines().filter_map(|line| {
-        let line = line.expect("bad line");
-        let mut parts = line.split(' ');
-        if let (Some(name), Some(version), None) = (parts.next(), parts.next(), parts.next()) {
-            Some(Package { name: name.into(), version: version.into() })
-        } else {
-            None
-        }
-    }).collect::<Vec<Package>>())
+    let packages = reader.lines()
+        .filter_map(|line| {
+            let line = line.expect("bad line");
+            let mut parts = line.split(' ');
+            if let (Some(name), Some(version), None) = (parts.next(), parts.next(), parts.next()) {
+                Some(Package { name: name.into(), version: version.into() })
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<Package>>();
+    Ok(packages)
 }
 
 /// Installs a package to the specified path when succeeds is true, or fails otherwise.
@@ -57,9 +60,9 @@ pub fn install_package(path: &str, package: &str, succeeds: bool) -> Result<Inst
     if succeeds {
         let mut file = OpenOptions::new().create(true).append(true).open(path).unwrap();
         writeln!(&mut file, "{}", package)?;
-        Ok(InstallOutcome::new(InstallCode::OK, "".into(), "".into()))
+        Ok(InstallOutcome::empty(InstallCode::OK))
     } else {
-        Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, "".into(), "".into()))
+        Ok(InstallOutcome::empty(InstallCode::INSTALL_FAILED))
     }
 }
 

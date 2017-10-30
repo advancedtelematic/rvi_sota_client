@@ -93,7 +93,7 @@ impl OstreePackage {
         debug!("installing ostree commit {}", self.commit);
         let from = Self::get_latest(&self.ecu_serial)?;
         if from.commit == self.commit {
-            return Ok(InstallOutcome::new(InstallCode::ALREADY_PROCESSED, "".into(), "".into()));
+            return Ok(InstallOutcome::empty(InstallCode::ALREADY_PROCESSED));
         }
         self.get_delta(&*creds.client, &self.pullUri, &from.commit)
             .and_then(|dir| Ostree::run(&["static-delta", "apply-offline", &dir]))
@@ -104,7 +104,8 @@ impl OstreePackage {
         let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
         let stderr = String::from_utf8_lossy(&output.stderr).into_owned();
         if output.status.success() {
-            Util::write_file(NEW_PACKAGE, &json::to_vec(self)?).unwrap_or_else(|err| error!("couldn't save package info: {}", err));
+            Util::write_file(NEW_PACKAGE, &json::to_vec(self)?)
+                .unwrap_or_else(|err| error!("couldn't save package info: {}", err));
             Ok(InstallOutcome::new(InstallCode::OK, stdout, stderr))
         } else {
             Ok(InstallOutcome::new(InstallCode::INSTALL_FAILED, stdout, stderr))

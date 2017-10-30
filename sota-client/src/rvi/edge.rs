@@ -28,7 +28,7 @@ impl Edge {
             rpc_ok.result.expect("expected rpc_ok result").service
         });
 
-        Edge { rvi_edge: rvi_edge, services: services }
+        Edge { rvi_edge, services }
     }
 
     /// Start the HTTP server listening for incoming RVI client connections.
@@ -59,7 +59,7 @@ struct EdgeHandler {
 
 impl EdgeHandler {
     fn new(services: Services) -> EdgeHandler {
-        EdgeHandler { services: services }
+        EdgeHandler { services }
     }
 }
 

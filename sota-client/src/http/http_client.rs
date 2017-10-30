@@ -19,15 +19,18 @@ pub trait Client: Send {
     }
 
     fn get(&self, url: Url, body: Option<Vec<u8>>) -> Receiver<Response> {
-        self.send_request(Request { method: Method::Get, url: url, body: body })
+        let method = Method::Get;
+        self.send_request(Request { method, url, body })
     }
 
     fn post(&self, url: Url, body: Option<Vec<u8>>) -> Receiver<Response> {
-        self.send_request(Request { method: Method::Post, url: url, body: body })
+        let method = Method::Post;
+        self.send_request(Request { method, url, body })
     }
 
     fn put(&self, url: Url, body: Option<Vec<u8>>) -> Receiver<Response> {
-        self.send_request(Request { method: Method::Put, url: url, body: body })
+        let method = Method::Put;
+        self.send_request(Request { method, url, body })
     }
 
     fn is_testing(&self) -> bool { false }

@@ -47,7 +47,7 @@ impl AuthClient {
         }).unwrap_or_else(|_| HyperClient::with_connector(HttpsConnector::new(TlsClient::default())));
 
         client.set_redirect_policy(RedirectPolicy::FollowNone);
-        AuthClient { auth: auth, client: client, version: version }
+        AuthClient { auth, client, version }
     }
 
     fn send(&self, req: AuthRequest) -> Response {
